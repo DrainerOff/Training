@@ -1,0 +1,45 @@
+import { chromium, devices } from '@playwright/test';
+import { startStatic } from './servers.js';
+const out = process.argv[2];
+const web = await startStatic({ port: 0 });
+const base = `http://127.0.0.1:${web.address().port}/`;
+const browser = await chromium.launch();
+const scheme = process.argv[3] || 'dark';
+const c = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 }, colorScheme: scheme, locale: 'ru-RU', timezoneId: 'Europe/Moscow' });
+await c.addInitScript(() => document.addEventListener('DOMContentLoaded', () => { document.documentElement.style.setProperty('--safe-top', '47px'); document.documentElement.style.setProperty('--safe-bottom', '34px'); }));
+const p = await c.newPage();
+await p.goto(base);
+await p.waitForFunction(() => window.__trainer?.store.state.loaded);
+await p.getByRole('button', { name: 'Понятно' }).click();
+// History: Hammer over a few weeks + a manual record from before the app.
+await p.evaluate(async () => {
+  const { store } = window.__trainer;
+  const mk = async (date, week, sets) => {
+    const s = await store.startSession({ cycle: 1, week, day: 1, date, status: 'done' });
+    const slot = s.items.find((i) => i.seriesKey === 'naklonnyy-zhim-hammer-naklon').slotId;
+    for (const [w, r, rir] of sets) await store.logSet(s.id, slot, { weight: w, reps: r, rir });
+  };
+  await mk('2026-09-18', 2, [[85, 9, 2], [85, 9, 1], [85, 8, 1]]);
+  await mk('2026-09-25', 3, [[90, 7, 1], [90, 6, 0], [87.5, 6, 0]]);
+  await mk('2026-10-02', 1, [[75, 12, 4], [75, 12, 4]]);
+  await mk('2026-10-09', 2, [[87.5, 10, 1], [87.5, 9, 1]]);
+  await store.saveRecord({ seriesKey: 'naklonnyy-zhim-hammer-naklon', exercise: 'Наклонный жим: Hammer - наклон', category: 'hammer', date: '2025-04-12', weight: 95, reps: 5, rir: null, note: 'до перерыва' });
+  await store.saveRecord({ seriesKey: 'podtyagivaniya-pryamym-hvatom', exercise: 'Подтягивания прямым хватом', category: 'pullup', date: '2026-08-30', weight: 20, reps: 8, rir: 1, bodyweight: 81 });
+});
+await p.locator('.tabbar').getByRole('button', { name: 'Прогресс' }).click();
+await p.getByRole('group', { name: 'Раздел' }).getByRole('button', { name: 'Рекорды' }).click();
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/rec-list-${scheme}.png` });
+await p.getByRole('button', { name: /Наклонный жим: Hammer - наклон/ }).first().click();
+await p.waitForTimeout(300);
+await p.screenshot({ path: `${out}/rec-detail-${scheme}.png`, fullPage: false });
+await p.locator('.screen').evaluate((el) => el.scrollTo(0, 560));
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/rec-detail2-${scheme}.png` });
+await p.locator('.screen').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+await p.waitForTimeout(200);
+await p.screenshot({ path: `${out}/rec-detail3-${scheme}.png` });
+await p.getByRole('button', { name: 'Добавить рекорд вручную' }).click();
+await p.waitForTimeout(400);
+await p.screenshot({ path: `${out}/rec-sheet-${scheme}.png` });
+await browser.close(); await web.close();

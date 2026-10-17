@@ -7,7 +7,7 @@ import { uid, isoDate } from '../lib/util.js';
 import { normalizeProgram, starterProgram, makeOption, CATEGORY } from '../lib/program.js';
 import { itemsForDay } from '../lib/planner.js';
 
-export const ENTITIES = ['sessions', 'sets', 'metrics'];
+export const ENTITIES = ['sessions', 'sets', 'metrics', 'records'];
 const DOUBLE_TAP_MS = 1500;
 
 export function createStore(adapter, { now = () => Date.now() } = {}) {
@@ -17,6 +17,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     sessions: new Map(),
     sets: new Map(),
     metrics: new Map(),
+    records: new Map(), // manual personal records; automatic ones are derived from sets
     outbox: new Map(),
     kv: {},
     version: 0,
@@ -83,12 +84,13 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   }
 
   async function load() {
-    const [sessions, sets, metrics, outbox, kv] = await Promise.all(
-      ['sessions', 'sets', 'metrics', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
+    const [sessions, sets, metrics, records, outbox, kv] = await Promise.all(
+      ['sessions', 'sets', 'metrics', 'records', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
     for (const r of sets) putRecord('sets', r);
     for (const r of metrics) state.metrics.set(r.id, r);
+    for (const r of records) state.records.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
     // The starter program has updatedAt 0 and is never pushed: a fresh device must not
@@ -300,6 +302,43 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     await save('metrics', [{ ...prev, deleted: true, updatedAt: stamp(prev) }]);
   }
 
+  // --- manual personal records ---------------------------------------------------------------
+  // Stable id per entry; edits keep the id, deletion is a flag (it syncs and can be undone).
+
+  async function saveRecord(fields) {
+    const prev = fields.id ? state.records.get(fields.id) : null;
+    const t = now();
+    const rec = {
+      id: prev?.id || uid('pr'),
+      seriesKey: fields.seriesKey,
+      exercise: fields.exercise,
+      category: fields.category || null,
+      date: fields.date,
+      weight: fields.weight,
+      reps: fields.reps,
+      rir: fields.rir ?? null,
+      bodyweight: fields.bodyweight ?? null,
+      note: fields.note || '',
+      createdAt: prev?.createdAt || t,
+      updatedAt: stamp(prev),
+      deleted: false,
+    };
+    await save('records', [rec]);
+    return rec;
+  }
+
+  async function deleteRecord(id) {
+    const prev = state.records.get(id);
+    if (!prev || prev.deleted) return;
+    await save('records', [{ ...prev, deleted: true, updatedAt: stamp(prev) }]);
+  }
+
+  async function restoreRecord(id) {
+    const prev = state.records.get(id);
+    if (!prev || !prev.deleted) return;
+    await save('records', [{ ...prev, deleted: false, updatedAt: stamp(prev) }]);
+  }
+
   // --- program -------------------------------------------------------------------------
 
   async function saveProgram(program) {
@@ -393,6 +432,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       sessions: [...state.sessions.values()],
       sets: [...state.sets.values()],
       metrics: [...state.metrics.values()],
+      records: [...state.records.values()],
     };
   }
 
@@ -488,6 +528,9 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     restoreSet,
     saveMetric,
     deleteMetric,
+    saveRecord,
+    deleteRecord,
+    restoreRecord,
     saveProgram,
     importParsedSessions,
     exportAll,

@@ -1624,3 +1624,212 @@ textarea.input {
   margin: 8px 16px 0;
   border-left-color: var(--bad);
 }
+
+/* ---------------------------------------------------------------- personal records */
+
+.status--accent {
+  color: var(--plate-2);
+}
+.status--accent .status__glyph,
+.status--neutral .status__glyph {
+  color: inherit;
+}
+.status--neutral {
+  color: var(--iron);
+}
+.callout--good {
+  box-shadow: inset 4px 0 0 var(--good);
+}
+.callout--accent {
+  box-shadow: inset 4px 0 0 var(--plate-2);
+}
+.icon-btn--accent {
+  background: var(--iron);
+  color: var(--chalk);
+}
+.icon-btn--accent:active {
+  background: var(--steel);
+}
+.seg--chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+.seg--chips::-webkit-scrollbar {
+  display: none;
+}
+.seg--chips button {
+  flex: none;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.row__date {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.num-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+.num-list b {
+  font-family: var(--font-num);
+  font-size: 19px;
+  color: var(--iron);
+}
+.src {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--steel);
+  white-space: nowrap;
+}
+.src--manual {
+  border-style: dashed;
+  color: var(--plate-2);
+  border-color: currentColor;
+}
+button.src {
+  min-height: 32px;
+}
+
+/* Current records: one row per rep count. */
+.rec-table {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.rec {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  grid-template-areas: 'reps load' 'reps meta' 'reps covered';
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+.rec:last-child {
+  border-bottom: 0;
+}
+.rec__reps {
+  grid-area: reps;
+  align-self: center;
+  color: var(--steel);
+  font-size: 13px;
+}
+.rec__reps b {
+  display: block;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--iron);
+}
+.rec__load {
+  grid-area: load;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.rec__meta {
+  grid-area: meta;
+  font-size: 13px;
+  color: var(--steel);
+}
+.rec__covered {
+  grid-area: covered;
+  font-size: 13px;
+  color: var(--steel);
+  margin-top: 2px;
+}
+.rec--covered .rec__load,
+.rec--covered .rec__reps b {
+  color: var(--ghost);
+}
+.rec-facts {
+  margin: 10px 2px 0;
+  font-size: 14px;
+  display: grid;
+  gap: 4px;
+}
+
+/* History: every achievement stays, newest first. */
+.rec-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--hairline);
+  margin-left: 6px;
+}
+.rec-event {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 8px 0 12px 16px;
+}
+.rec-event::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 16px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chalk);
+  border: 2px solid var(--ghost);
+}
+.rec-event--record::before {
+  background: var(--good);
+  border-color: var(--good);
+}
+.rec-event {
+  padding: 6px 0 10px 16px;
+}
+.rec-event__date {
+  font-size: 13px;
+  color: var(--steel);
+}
+.rec-event__src {
+  font-weight: 600;
+  color: var(--steel);
+  min-height: 32px;
+  padding: 0 4px;
+}
+.rec-event__src--manual {
+  color: var(--plate-2);
+}
+.rec-event__text {
+  color: var(--steel);
+  line-height: 1.3;
+}
+.rec-event--record .rec-event__text {
+  color: var(--iron);
+  font-weight: 600;
+}
+.rec-more {
+  display: block;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 44px;
+}
+.sync-notice {
+  margin-top: 10px;
+}
+.rec-form {
+  display: grid;
+  gap: 12px;
+}
+.rec-form .kv > span {
+  font-size: 13px;
+  color: var(--steel);
+}

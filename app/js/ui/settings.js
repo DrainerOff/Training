@@ -139,6 +139,7 @@ export function Settings({ syncStatus }) {
           ? ` Изменений для отправки: ${syncStatus.pending} — уйдут в таблицу после подключения.`
           : ` Ждут отправки: ${syncStatus.pending}.`
         : ''}</p>
+      ${syncStatus.notice ? html`<p class="notice notice--caution sync-notice">${syncStatus.notice}</p>` : null}
       <div class="kv" style="margin-top:12px">
         <label for="sync-url">Адрес веб-приложения Apps Script (…/exec)</label>
         <input id="sync-url" class="input" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"

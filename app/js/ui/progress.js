@@ -1,6 +1,7 @@
 // Progress: what needs attention, then per-exercise history with every working set.
 
-import { html, useState, app, Icon, Plate, Seg, fmtWeight, SetText } from './core.js';
+import { html, useState, app, Icon, Plate, Seg, fmtWeight, SetText, local } from './core.js';
+import { RecordsOverview, openRecordSheet } from './records.js';
 import { derived, latestBodyweight } from './derive.js';
 import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
 import { CATEGORY } from '../lib/program.js';
@@ -12,7 +13,29 @@ export function StatusLabel({ status }) {
   return html`<span class=${'status status--' + s.tone}><span class="status__glyph" aria-hidden="true">${s.glyph}</span>${s.label}</span>`;
 }
 
+// «Прогресс» and «Рекорды» share one tab: a fifth tab would be too tight on a 320-pt iPhone.
 export function ProgressList() {
+  const [mode, setModeRaw] = useState(() => (local.get('progress.mode') === 'records' ? 'records' : 'progress'));
+  const setMode = (m) => {
+    local.set('progress.mode', m);
+    setModeRaw(m);
+    document.querySelector('.screen')?.scrollTo?.(0, 0);
+  };
+  const switcher = html`<${Seg} fill label="Раздел" value=${mode} onChange=${setMode}
+    options=${[{ value: 'progress', label: 'Прогресс' }, { value: 'records', label: 'Рекорды' }]} />`;
+  if (mode === 'records') {
+    return html`<main class="screen">
+      <header class="topbar"><h1>Рекорды</h1>
+        <button type="button" class="icon-btn icon-btn--accent" aria-label="Добавить рекорд" onClick=${() => openRecordSheet({})}><${Icon} name="plus" /></button>
+      </header>
+      ${switcher}
+      <div style="margin-top:12px"><${RecordsOverview} /></div>
+    </main>`;
+  }
+  return html`<${ProgressPane} switcher=${switcher} />`;
+}
+
+function ProgressPane({ switcher }) {
   const { series, categories } = derived();
   const rows = overview(series, { categoryOf: (k) => categories.get(k), bodyweight: latestBodyweight() });
   const attention = rows.filter((r) => STATUS[r.status].rank <= STATUS.dip.rank);
@@ -33,6 +56,8 @@ export function ProgressList() {
 
   return html`<main class="screen">
     <header class="topbar"><h1>Прогресс</h1></header>
+    ${switcher}
+    <div style="margin-top:12px"></div>
     ${rows.length === 0
       ? html`<div class="empty">
           <h2>Пока нечего сравнивать</h2>

@@ -4,7 +4,7 @@ import {
   html, useState, useEffect, app, Icon, Plate, Sheet, openSheet, NumberPad, Stepper, RirPicker, Toggle, Seg,
   fmtWeight, SyncBadge, useNow, local, confirmSheet,
 } from './core.js';
-import { derived, latestBodyweight } from './derive.js';
+import { derived, latestBodyweight, recordsDerived } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures } from '../lib/plateau.js';
@@ -76,6 +76,9 @@ export function Workout({ session, mode = 'live', syncStatus }) {
         text = `Готово: ${row.item.name}`;
       } else text = 'Все упражнения выполнены';
     }
+    // A personal record is said right away (it also appears in Прогресс → Рекорды).
+    const pr = recordsDerived().books.get(set.seriesKey)?.events.find((e) => e.perf.setId === set.id && e.kind === 'record');
+    if (pr) text = `Новый рекорд: ${fmtWeight(set.weight, row.item.category)}×${set.reps}`;
     setJustLogged({ id: set.id, text, undo });
   };
 

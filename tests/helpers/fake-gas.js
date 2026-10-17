@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CODE = fs.readFileSync(path.join(ROOT, 'apps-script/Code.gs'), 'utf8');
 
-export function createGas({ legacy = {}, timeZone = 'Europe/Moscow' } = {}) {
+// `code`: another Code.gs, e.g. tests/fixtures/apps-script/Code.api1.gs (the deployed version
+// before manual records) to test that a newer app never loses data against an older server.
+export function createGas({ legacy = {}, timeZone = 'Europe/Moscow', code = CODE } = {}) {
   const ctx = vm.createContext({ console });
   const CtxDate = vm.runInContext('Date', ctx);
 
@@ -166,7 +168,7 @@ export function createGas({ legacy = {}, timeZone = 'Europe/Moscow' } = {}) {
     Logger: { log: (m) => logs.push(String(m)) },
   };
   Object.assign(ctx, globals);
-  vm.runInContext(CODE, ctx, { filename: 'Code.gs' });
+  vm.runInContext(code, ctx, { filename: 'Code.gs' });
 
   return {
     ctx,
@@ -186,6 +188,10 @@ export function createGas({ legacy = {}, timeZone = 'Europe/Moscow' } = {}) {
     },
     call(fn, ...args) {
       return ctx[fn](...args);
+    },
+    // The owner pastes a new Code.gs and deploys a new version: same sheet, same key, same URL.
+    redeploy(newCode = CODE) {
+      vm.runInContext(newCode, ctx, { filename: 'Code.gs' });
     },
     edit(sheetName, row, col, value) {
       const sh = spreadsheet.getSheetByName(sheetName);

@@ -10,7 +10,9 @@
  * более старая версия (updated_at) не перезаписывает более новую.
  */
 
-var API_VERSION = 1;
+// 2: manual personal records (App_Records); the response's `ack` lists every entity handled,
+// so a client never treats records as saved by a server that doesn't know them.
+var API_VERSION = 2;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -62,6 +64,25 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  records: {
+    sheet: 'App_Records',
+    cols: [
+      ['date', 'date', 'date'],
+      ['exercise', 'exercise', 'text'],
+      ['weight_kg', 'weight', 'num'],
+      ['reps', 'reps', 'int'],
+      ['rir', 'rir', 'num'],
+      ['bodyweight_kg', 'bodyweight', 'num'],
+      ['note', 'note', 'text'],
+      ['category', 'category', 'text'],
+      ['series_key', 'seriesKey', 'key'],
+      ['id', 'id', 'key'],
+      ['created_at', 'createdAt', 'ms'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
   metrics: {
     sheet: 'App_Metrics',
     cols: [
@@ -77,7 +98,7 @@ var SCHEMA = {
     ],
   },
 };
-var ENTITIES = ['sessions', 'sets', 'metrics'];
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -224,7 +245,7 @@ function sync_(req) {
 
     if (touched) rebuildSummary_(tables.sets, tables.sessions);
     SpreadsheetApp.flush();
-    return { ok: true, api: API_VERSION, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, serverTime: Date.now() };
+    return { ok: true, api: API_VERSION, entities: ENTITIES, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, serverTime: Date.now() };
   } finally {
     lock.releaseLock();
   }
@@ -438,6 +459,8 @@ function sanitize_(entity, rec) {
     }
   });
   out.updatedAt = updatedAt;
+  // A record without what makes it a record is refused (and stays queued on the phone).
+  if (entity === 'records' && (!out.date || !out.seriesKey || !(out.reps >= 1) || out.weight == null)) ok = false;
   return ok ? out : null;
 }
 
@@ -652,7 +675,7 @@ function rebuildSummary() {
 
 // ---------------------------------------------------------------------------- manual edits
 
-// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics is edited by hand,
+// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records is edited by hand,
 // bump its version so the app pulls the correction on the next sync.
 function onEdit(e) {
   if (!e || !e.range) return;

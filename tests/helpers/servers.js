@@ -43,8 +43,8 @@ export function startStatic({ port = 5173, root = path.join(ROOT, 'app') } = {})
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
 }
 
-export function startFakeGas({ port = 5174, legacy } = {}) {
-  const gas = createGas({ legacy });
+export function startFakeGas({ port = 5174, legacy, code } = {}) {
+  const gas = createGas({ legacy, ...(code ? { code } : {}) });
   const token = gas.call('setup');
   const control = { dropResponses: 0, down: false, requests: 0 };
   const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };

@@ -7,9 +7,13 @@ export const STORES = {
   sessions: 'id',
   sets: 'id',
   metrics: 'id',
+  records: 'id', // manual personal records (since version 2)
   outbox: 'key',
   kv: 'k',
 };
+// Bumped when a store is added. The upgrade only creates missing stores — existing data is
+// never touched. A database from a newer release is opened as it is (see openOnce).
+export const DB_VERSION = 2;
 
 // Every IndexedDB request below has a deadline. WebKit has had bugs where `open()` or a
 // transaction never fires success *or* error in a regular (disk-backed) Safari tab while a
@@ -92,31 +96,43 @@ function openOnce(name, ms) {
       finish(reject, err);
     }, ms);
     let req;
+    let downgrade = false;
+    const start = (version) => {
+      req = version ? indexedDB.open(name, version) : indexedDB.open(name);
+      req.onupgradeneeded = upgrade;
+      // A connection that arrives after the deadline is closed, so it can't block a retry.
+      req.onsuccess = () => {
+        if (!finish(resolve, req.result)) req.result.close();
+      };
+      req.onerror = (event) => {
+        // Opened by a newer release (higher version): use the database as it is.
+        if (!downgrade && req.error?.name === 'VersionError') {
+          event?.preventDefault?.();
+          downgrade = true;
+          start(null);
+          return;
+        }
+        event?.preventDefault?.();
+        finish(reject, wrapError('open', req.error));
+      };
+      // Only an upgrade can be blocked; it proceeds once the other tab lets go, so keep waiting.
+      req.onblocked = () => {
+        blocked = true;
+      };
+    };
     try {
-      req = indexedDB.open(name, 1);
+      start(DB_VERSION);
     } catch (err) {
       finish(reject, wrapError('open', err));
-      return;
     }
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      for (const [store, keyPath] of Object.entries(STORES)) {
-        if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
-      }
-    };
-    // A connection that arrives after the deadline is closed, so it can't block a retry.
-    req.onsuccess = () => {
-      if (!finish(resolve, req.result)) req.result.close();
-    };
-    req.onerror = (event) => {
-      event?.preventDefault?.();
-      finish(reject, wrapError('open', req.error));
-    };
-    // Only an upgrade can be blocked; it proceeds once the other tab lets go, so keep waiting.
-    req.onblocked = () => {
-      blocked = true;
-    };
   });
+}
+
+function upgrade(event) {
+  const db = event.target.result;
+  for (const [store, keyPath] of Object.entries(STORES)) {
+    if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
+  }
 }
 
 async function openDb(name) {

@@ -49,6 +49,22 @@ export async function walkScreens(page, url, visit) {
   await page.getByRole('group', { name: 'Разделы' }).getByRole('button', { name: 'Прогресс' }).click();
   await page.waitForTimeout(200);
   await visit('tab Прогресс');
+  await page.getByRole('group', { name: 'Раздел' }).getByRole('button', { name: 'Рекорды' }).click();
+  await page.waitForTimeout(200);
+  await visit('records');
+  await page.locator('.rows .row').last().click();
+  await page.waitForTimeout(200);
+  await visit('records: one exercise');
+  await page.getByRole('button', { name: 'Добавить рекорд вручную' }).click();
+  await page.getByRole('dialog').waitFor();
+  await visit('records: entry sheet');
+  await page.getByRole('button', { name: /^Упражнение:/ }).click();
+  await page.waitForTimeout(200);
+  await visit('records: exercise picker');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Назад' }).click();
+  await page.getByRole('group', { name: 'Раздел' }).getByRole('button', { name: 'Прогресс' }).click();
   for (const tab of ['История', 'Тело']) {
     await page.locator('.tabbar').getByRole('button', { name: tab }).click();
     await page.waitForTimeout(200);

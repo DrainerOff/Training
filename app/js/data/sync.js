@@ -2,8 +2,10 @@
 // round-trip. Safe to retry at any point — the server upserts by record id, so a lost
 // response followed by a resend never creates a duplicate set.
 
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 const BATCH = 200;
+// What an Apps Script that predates the `ack` map per entity understood.
+const LEGACY_ENTITIES = ['sessions', 'sets', 'metrics'];
 
 export class SyncError extends Error {
   constructor(code, detail = '') {
@@ -73,7 +75,7 @@ export function describeError(err) {
 }
 
 export function createSync(store, { transport = fetchTransport, now = () => Date.now() } = {}) {
-  const status = { state: 'off', lastSyncAt: null, error: null, pending: 0 };
+  const status = { state: 'off', lastSyncAt: null, error: null, notice: null, pending: 0 };
   const listeners = new Set();
   let running = null;
   let again = false;
@@ -91,20 +93,20 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
 
   async function round(cfg) {
     const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
-    const push = { sessions: [], sets: [], metrics: [] };
+    const push = { sessions: [], sets: [], metrics: [], records: [] };
     const sent = [];
     for (const e of entries) {
       if (e.entity === 'program') {
         if (store.state.program?.updatedAt) {
           push.program = store.state.program;
-          sent.push({ key: e.key, updatedAt: store.state.program.updatedAt });
+          sent.push({ key: e.key, entity: 'program', updatedAt: store.state.program.updatedAt });
         }
         continue;
       }
       const rec = store.state[e.entity]?.get(e.id);
-      if (!rec) continue;
+      if (!rec || !push[e.entity]) continue;
       push[e.entity].push(rec);
-      sent.push({ key: e.key, updatedAt: rec.updatedAt });
+      sent.push({ key: e.key, entity: e.entity, updatedAt: rec.updatedAt });
     }
     const res = await transport(cfg.url, {
       action: 'sync',
@@ -117,13 +119,18 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     if (!res || res.ok !== true) throw new SyncError(res?.error || 'bad_response', res?.message || '');
     // Records the sheet refused stay queued (and visible as an error) — never silently dropped.
     const refused = new Set((res.rejected || []).map((r) => `${r.entity}:${r.id}`));
-    await store.ack(sent.filter((s) => !refused.has(s.key)));
+    // Only what the server says it handled is acknowledged: an Apps Script from before manual
+    // records ignores them, so they stay queued on the phone until Code.gs is updated.
+    const known = new Set(res.ack && typeof res.ack === 'object' ? Object.keys(res.ack) : LEGACY_ENTITIES);
+    const accepted = sent.filter((s) => !refused.has(s.key) && (s.entity === 'program' || known.has(s.entity)));
+    const waiting = sent.filter((s) => s.entity !== 'program' && !known.has(s.entity)).length;
+    await store.ack(accepted);
     await store.applyRemote(res.pull || {});
     await store.setKV({
       cursor: Math.max(store.state.kv.cursor || 0, Number(res.cursor) || 0),
       programSince: Math.max(store.state.kv.programSince || 0, Number(res.programUpdatedAt) || 0),
     });
-    return { more: entries.length === BATCH && refused.size < entries.length, refused: refused.size };
+    return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size, waiting };
   }
 
   async function run() {
@@ -136,15 +143,20 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     try {
       let more = true;
       let refused = 0;
+      let waiting = 0;
       for (let i = 0; more && i < 20; i++) {
         const r = await round(cfg);
         more = r.more;
         refused = r.refused;
+        waiting = r.waiting;
       }
+      const notice = waiting
+        ? `Рекорды, добавленные вручную (${waiting}), сохранены на телефоне. В таблицу они попадут после обновления Apps Script (Code.gs) — инструкция в docs/SETUP.md.`
+        : null;
       if (refused) {
-        update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Обновите Code.gs до версии из репозитория.` });
+        update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', notice, error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Обновите Code.gs до версии из репозитория.` });
       } else {
-        update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null });
+        update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null, notice });
       }
     } catch (err) {
       const code = err?.code || 'network';
