@@ -43,7 +43,13 @@ export async function walkScreens(page, url, visit) {
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 5);
 
-  for (const tab of ['Прогресс', 'История', 'Тело', 'Тренировка']) {
+  // During a workout the tab bar is hidden; the workout menu leads to the other sections.
+  await page.getByRole('button', { name: 'Меню тренировки' }).click();
+  await visit('workout menu');
+  await page.getByRole('group', { name: 'Разделы' }).getByRole('button', { name: 'Прогресс' }).click();
+  await page.waitForTimeout(200);
+  await visit('tab Прогресс');
+  for (const tab of ['История', 'Тело']) {
     await page.locator('.tabbar').getByRole('button', { name: tab }).click();
     await page.waitForTimeout(200);
     await visit(`tab ${tab}`);
@@ -52,6 +58,7 @@ export async function walkScreens(page, url, visit) {
   await page.locator('.rows .row').last().click();
   await page.waitForTimeout(200);
   await visit('history: a past workout');
+  await page.getByRole('button', { name: 'Назад' }).click();
   await page.locator('.tabbar').getByRole('button', { name: 'Прогресс' }).click();
   await page.locator('.rows .row').first().click();
   await page.waitForTimeout(200);

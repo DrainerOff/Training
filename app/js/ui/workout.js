@@ -8,7 +8,7 @@ import { derived, latestBodyweight } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures } from '../lib/plateau.js';
-import { fmtNum, fmtDay, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
+import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
 
 const STALE_MS = 12 * 3600 * 1000;
@@ -235,8 +235,13 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const dropDue = target.drop > 0 && working >= target.sets && drops < target.drop;
   const [dropMode, setDropMode] = useState(dropDue);
   const prevRef = prevs.samePhase || prevs.latest;
+  const otherPhase = !prevs.samePhase && !!prevs.latest;
   const sug = suggestNext({ todaySets: sets, prev: prevRef, target, step: item.step, drop: dropMode });
   if (sug.weight == null && category === 'pullup') sug.weight = 0;
+  // Another week's result is a weight reference only; reps follow today's target.
+  if (sug.source === 'prev' && otherPhase && target.reps && sug.reps != null) {
+    sug.reps = Math.min(Math.max(sug.reps, target.reps[0]), target.reps[1]);
+  }
   const draftKey = `draft:${session.id}:${item.slotId}:${sets.length}:${dropMode ? 1 : 0}`;
   const fresh = () => ({ weight: sug.weight, reps: sug.reps, rir: null, touchedW: false, touchedR: false });
   const [v, setV] = useState(() => local.get(draftKey) || fresh());
@@ -258,7 +263,11 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const n = sets.length + 1;
   // Set number first: on a narrow screen the exercise name is what gets truncated.
   const setLabel = dropMode ? 'Дроп-сет' : working >= target.sets ? `Подход ${working + 1}, сверх плана` : `Подход ${working + 1} из ${target.sets}`;
-  const weightHint = v.touchedW ? '' : sug.source === 'prev' ? 'как в прошлый раз' : sug.source === 'today' ? `как подход ${n - 1}` : sug.source === 'drop' ? '≈70% веса' : '';
+  const weightHint = v.touchedW
+    ? ''
+    : sug.source === 'prev'
+      ? otherPhase ? 'из другой фазы' : 'как в прошлый раз'
+      : sug.source === 'today' ? `как подход ${n - 1}` : sug.source === 'drop' ? '≈70% веса' : '';
   const canLog = v.weight != null && v.reps != null && v.reps > 0 && !busy;
 
   const log = async () => {
@@ -295,6 +304,7 @@ function Dock({ row, session, live, onLogged, justLogged }) {
         : null}
       ${rest ? html`<span class="dock__rest" aria-label=${'Отдых ' + rest}>отдых ${rest}</span>` : null}
     </div>
+    <${LastTime} prevs=${prevs} category=${category} index=${working} drop=${dropMode} />
     <div class="dock__grid">
       <div>
         <div class="field__label"><span>${category === 'pullup' ? 'Доп. вес, кг' : 'Вес, кг'}</span><span class="field__hint">${weightHint}</span></div>
@@ -315,6 +325,28 @@ function Dock({ row, session, live, onLogged, justLogged }) {
       </button>
     </div>
   </section>`;
+}
+
+// Last time for this exact variant (strength series), right above the inputs, so it is in view
+// without scrolling the list. Same week of the cycle first; otherwise the latest result from
+// another week, marked as another phase — a reference for the weight, not a comparison.
+// Nothing is invented when there is no history.
+function LastTime({ prevs, category, index, drop }) {
+  const p = prevs.samePhase || prevs.latest;
+  if (!p) {
+    return html`<div class="dock__prev" role="note" data-kind="first"><span class="dock__prev-label">Первое выполнение</span></div>`;
+  }
+  const other = !prevs.samePhase;
+  const list = drop && p.drops.length ? p.drops : p.sets;
+  const now = drop ? (p.drops.length ? 0 : -1) : index;
+  const sets = list.map((s) => `${fmtWeight(s.weight, category)}×${s.reps}`);
+  const label = other ? `Другая фаза, неделя ${p.week}` : 'Прошлый раз';
+  return html`<div class=${'dock__prev' + (other ? ' dock__prev--other' : '')} role="note" data-kind=${other ? 'other' : 'same'}
+    aria-label=${`${label}, ${fmtDay(p.date)}: ${sets.join(', ')}`}>
+    <span class="dock__prev-label">${other ? `Другая фаза · нед. ${p.week}` : 'Прошлый раз'}</span>
+    <span class="dock__prev-sets num">${sets.map((t, i) => html`<span class=${i === now ? 'is-now' : null}>${t}</span>`)}</span>
+    <span class="dock__prev-date">${fmtDayShort(p.date)}</span>
+  </div>`;
 }
 
 // ---------------------------------------------------------------- sheets
@@ -461,7 +493,20 @@ function AddItemSheet({ session, onClose, onAdded }) {
 }
 
 function openSessionMenu(session, mode) {
+  // The tab bar is hidden during a workout; the other sections are reachable from here (the
+  // workout stays open — the «Тренировка» tab brings it back).
+  const go = (tab, close) => () => {
+    close();
+    app.ui.go({ tab });
+  };
   openSheet((close) => html`<${Sheet} title="Тренировка" onClose=${close}>
+    ${mode === 'live'
+      ? html`<div class="btn-row menu-tabs" role="group" aria-label="Разделы">
+          <button type="button" class="btn" onClick=${go('progress', close)}><${Icon} name="progress" />Прогресс</button>
+          <button type="button" class="btn" onClick=${go('history', close)}><${Icon} name="history" />История</button>
+          <button type="button" class="btn" onClick=${go('body', close)}><${Icon} name="body" />Тело</button>
+        </div>`
+      : null}
     <button type="button" class="choice" onClick=${() => { close(); openSessionEdit(session); }}>
       <span class="choice__main">Изменить день, неделю, цикл или дату</span></button>
     <button type="button" class="choice" onClick=${() => { close(); openCheckin(session.date); }}>

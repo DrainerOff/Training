@@ -107,10 +107,14 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   height: 100%;
+  overflow: hidden;
 }
+/* The document never scrolls — only .screen does. On iOS a scrollable document plus
+   position:fixed parts drift apart (after the keyboard closes, during momentum scrolling). */
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
   background: var(--chalk);
   color: var(--iron);
   font: 400 16px/1.45 var(--font-ui);
@@ -181,20 +185,29 @@ p {
 
 /* ---------------------------------------------------------------- shell */
 
+/* One box pinned to the viewport (no 100vh/100dvh: in an iOS home-screen app those can stay
+   short after the keyboard closes). Top to bottom: status-bar area, the scrolling screen, then
+   the bottom parts in normal flow — the set composer (dock) and/or the tab bar — so they can
+   never overlap each other or the content. */
 .shell {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  height: 100dvh;
+  padding-top: var(--safe-top);
+  background: var(--chalk);
 }
 .screen {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  padding: calc(var(--safe-top) + 12px) 16px 24px;
+  padding: 12px 16px 24px;
 }
 .screen--with-dock {
-  padding-bottom: 300px;
+  padding-bottom: 16px;
 }
 .topbar {
   display: flex;
@@ -798,17 +811,16 @@ p {
 
 /* ---------------------------------------------------------------- composer (thumb zone) */
 
+/* In flow under the screen; during a workout the tab bar is hidden and the dock is the bottom. */
 .dock {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(var(--tabbar-h) + var(--safe-bottom));
+  position: relative;
+  flex: none;
   z-index: 15;
   background: var(--paper);
   border-top: 4px solid var(--phase, var(--iron));
   box-shadow: 0 -12px 30px -18px rgba(0, 0, 0, 0.45);
   border-radius: 18px 18px 0 0;
-  padding: 10px 16px 12px;
+  padding: 10px 16px calc(12px + var(--safe-bottom));
 }
 .dock__head {
   display: flex;
@@ -844,6 +856,61 @@ p {
 .dock__rest {
   color: var(--steel);
   font-variant-numeric: tabular-nums;
+}
+/* Last time for this variant — compact, always in view above the inputs. */
+.dock__prev {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--chalk);
+  font-size: 13px;
+  color: var(--steel);
+}
+.dock__prev--other {
+  box-shadow: inset 4px 0 0 var(--caution);
+}
+.dock__prev-label {
+  font-weight: 600;
+}
+.dock__prev-sets {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--iron);
+}
+.dock__prev-sets span:not(:last-child)::after {
+  content: ',';
+  display: inline-block; /* keeps the comma out of the current set's underline */
+}
+.dock__prev-sets .is-now {
+  text-decoration: underline;
+  text-decoration-color: var(--phase, var(--iron));
+  text-decoration-thickness: 3px;
+  text-underline-offset: 3px;
+}
+.dock__prev--other .dock__prev-sets {
+  color: var(--steel);
+}
+.dock__prev-date {
+  margin-left: auto;
+  color: var(--ghost);
+}
+.menu-tabs {
+  margin-bottom: 12px;
+}
+.menu-tabs .btn {
+  flex-direction: column;
+  gap: 2px;
+  min-height: 60px;
+  padding: 6px 4px;
+  font-size: 13px;
 }
 .dock__grid {
   display: grid;
@@ -968,8 +1035,9 @@ p {
   background: var(--paper);
   border-radius: 22px 22px 0 0;
   padding: 8px 16px calc(16px + var(--safe-bottom));
-  max-height: 92dvh;
+  max-height: calc(100% - var(--safe-top) - 16px);
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .sheet__grip {
@@ -1129,7 +1197,8 @@ textarea.input {
   left: 12px;
   right: 12px;
   z-index: 50;
-  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 12px);
+  /* Just above whatever is at the bottom (dock or tab bar); --chrome-h is measured in app.js. */
+  bottom: calc(var(--chrome-h, 0px) + 12px);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1140,9 +1209,6 @@ textarea.input {
   font-size: 15px;
   box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
   animation: rise 0.2s ease-out;
-}
-.toast--over-dock {
-  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 262px);
 }
 .toast span {
   flex: 1;
@@ -1501,9 +1567,11 @@ textarea.input {
 /* ---------------------------------------------------------------- boot diagnostics (boot.js) */
 
 .diag {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: calc(var(--safe-top) + 32px) 16px calc(var(--safe-bottom) + 32px);
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: calc(var(--safe-top) + 32px) max(16px, calc((100% - 560px) / 2)) calc(var(--safe-bottom) + 32px);
   color: var(--iron);
   font: 15px/1.45 var(--font-ui);
 }
@@ -1553,6 +1621,6 @@ textarea.input {
 }
 
 .temp-mode {
-  margin: calc(var(--safe-top) + 8px) 16px 0;
+  margin: 8px 16px 0;
   border-left-color: var(--bad);
 }

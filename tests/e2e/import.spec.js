@@ -54,7 +54,9 @@ test('fresh install shows the real program and the 16.10 workout once; sync keep
     await page.getByRole('dialog').getByRole('button', { name: /Штанга - горизонт/ }).click();
     await expect(page.locator('.prev__label')).toHaveText('Последний раз — неделя 2 (другая фаза), 16 октября');
     await expect(page.locator('.ghost')).toHaveText(['80×7', '75×9', '75×9', '75×10']);
-    await expect(dock(page)).toContainText('как в прошлый раз');
+    // In the dock: marked as another phase; the weight is a reference, reps follow this week.
+    await expect(page.locator('.dock__prev')).toHaveAttribute('aria-label', 'Другая фаза, неделя 2, 16 октября: 80×7, 75×9, 75×9, 75×10');
+    await expect(dock(page)).toContainText('из другой фазы');
     st = await state(page);
     expect(st.activeSets).toEqual([]);
 

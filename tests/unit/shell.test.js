@@ -43,3 +43,17 @@ test('every release stamp placeholder is in a file CI stamps', () => {
   const withPlaceholder = walk(APP).filter((f) => /\.(js|html)$/.test(f) && fs.readFileSync(path.join(APP, f), 'utf8').includes('__BUILD__'));
   assert.deepEqual(withPlaceholder.sort(), stamped.sort());
 });
+
+// iOS home-screen apps: 100vh/100dvh can stay short after the keyboard closes, and a scrolling
+// document drifts away from position:fixed parts. The layout must not depend on either.
+test('layout: pinned shell, no viewport-height units, bottom parts in normal flow', () => {
+  const css = fs.readFileSync(path.join(APP, 'css/app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = (sel) => css.match(new RegExp(`\\n${sel.replace('.', '\\.')} \\{([^}]*)\\}`))?.[1] || '';
+  assert.doesNotMatch(css, /\d(?:d|s|l)?vh\b/, 'no vh/dvh/svh/lvh units');
+  assert.match(rule('.shell'), /position: fixed;[\s\S]*inset: 0;/);
+  assert.match(rule('html'), /overflow: hidden;/);
+  assert.match(rule('body'), /overflow: hidden;/);
+  assert.doesNotMatch(rule('.dock'), /position: fixed/);
+  assert.doesNotMatch(rule('.tabbar'), /position: fixed/);
+  assert.match(rule('.screen'), /overflow-y: auto;/);
+});
