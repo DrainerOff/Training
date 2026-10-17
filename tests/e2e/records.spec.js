@@ -142,7 +142,7 @@ test('16.10.2026: no invented 1-rep record, the 1RM estimate is labelled as a re
   await expect(page.locator('.rec__reps b')).toHaveText(['7', '9', '10']);
   await expect(page.locator('.rec--covered')).toContainText('перекрыт: 75×10');
   await expect(page.locator('.rec-facts')).toContainText('Максимальный вес: 80 кг на 7 повторений');
-  await expect(page.locator('.rec-facts')).toContainText('ориентир по формуле, а не рекорд: подхода на 1 повторение не было');
+  await expect(page.locator('.rec-facts')).toContainText('Расчётный 1ПМ ≈ 100 кг — ориентир по формуле, а не рекорд: подхода на 1 повторение не было');
   await expect(page.locator('.callout')).toContainText('Мало данных');
   await expect(page.locator('.callout')).toContainText('Недостаточно данных для оценки');
   await page.getByRole('button', { name: '1ПМ (расчёт)' }).click();
@@ -170,7 +170,8 @@ test('sync: a manual record reaches App_Records; with the old Apps Script it wai
       } else {
         expect(sheet.App_Records).toBeUndefined();
         const st = await page.evaluate(() => ({ ...window.__trainer.sync.status }));
-        expect(st.pending).toBeGreaterThan(0);
+        expect(st.waiting).toBeGreaterThan(0);
+        expect(st.pending).toBe(0); // waiting for the script is not «в очереди»
         await page.getByRole('button', { name: /Синхронизация:/ }).first().click();
         await expect(page.locator('.sync-notice')).toContainText('Рекорды, добавленные вручную');
         await expect(page.locator('.sync-notice')).toContainText('после обновления Apps Script');
@@ -238,4 +239,25 @@ test('smallest iPhone: records card and the entry sheet fit, nothing hidden behi
   const save = await sheet.getByRole('button', { name: /Укажите вес|Сохранить/ }).boundingBox();
   expect(save.y + save.height).toBeLessThanOrEqual(568.5);
   await context.close();
+});
+
+test('pull-ups: added weight, optional bodyweight — an impossible bodyweight is not accepted', async ({ page }) => {
+  await open(page);
+  await toRecords(page);
+  await page.getByRole('button', { name: 'Добавить рекорд' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Новый рекорд' });
+  await sheet.getByRole('button', { name: /^Упражнение:/ }).click();
+  await page.getByRole('searchbox', { name: 'Поиск упражнения' }).fill('нейтральным');
+  await page.getByRole('dialog', { name: 'Упражнение' }).getByRole('button', { name: /Подтягивания нейтральным хватом/ }).click();
+  await expect(sheet).toContainText('Доп. вес, кг');
+  await expect(sheet).toContainText('0 — свой вес');
+  await sheet.getByRole('button', { name: 'Увеличить: Дополнительный вес' }).click();
+  await sheet.getByRole('button', { name: 'Увеличить: Повторения' }).click();
+  await sheet.getByLabel(/Масса тела/).fill('-80');
+  await expect(sheet.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+  await expect(sheet).toContainText('Масса тела — от 1 до 400 кг или пусто');
+  await sheet.getByLabel(/Масса тела/).fill('82,5');
+  await sheet.getByRole('button', { name: 'Сохранить' }).click();
+  const rec = await page.evaluate(() => [...window.__trainer.store.state.records.values()][0]);
+  expect([rec.category, rec.weight, rec.reps, rec.bodyweight]).toEqual(['pullup', 2.5, 1, 82.5]);
 });

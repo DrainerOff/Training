@@ -2,7 +2,7 @@
 
 import { html, useState, app, Icon, Sheet, openSheet, NumberPad, Stepper, RirPicker, confirmSheet, local } from './core.js';
 import { recordsDerived } from './derive.js';
-import { STATE, assess, describeEvent as describe, fmtLoad, repProgress, chartReps, estimateProgress, estimate1rm, bodyweightNear, recentAchievements, day } from '../lib/records.js';
+import { STATE, assess, describeEvent as describe, fmtLoad, repProgress, chartReps, estimateProgress, bodyweightNear, recentAchievements, day } from '../lib/records.js';
 import { allOptions, CATEGORY } from '../lib/program.js';
 import { fmtDay, fmtDayShort, fmtNum, isoDate, normName, parseNum, plural, daysBetween } from '../lib/util.js';
 
@@ -36,6 +36,10 @@ export function RecordsOverview() {
   const fresh = recentAchievements(books, { today, days: 60, limit: 5 });
   const open = (key) => app.ui.go({ view: { type: 'records', key } });
 
+  const waiting = app.sync?.status?.waiting || 0;
+  const waitingNote = waiting
+    ? html`<p class="notice notice--caution" style="margin-bottom:12px">Рекорды, добавленные вручную (${waiting}), сохранены на телефоне и попадут в Google Таблицу после обновления Apps Script (инструкция в docs/SETUP.md).</p>`
+    : null;
   if (!list.length) {
     return html`<div class="empty">
       <h2>Рекордов пока нет</h2>
@@ -44,6 +48,7 @@ export function RecordsOverview() {
     </div>`;
   }
   return html`
+    ${waitingNote}
     <p class="muted" style="font-size:14px">Рекорд — наибольший вес на конкретное число повторений, отдельно для каждого варианта упражнения. Новый рекорд не стирает прежние: вся история сохраняется.</p>
     ${fresh.length
       ? html`<h2 class="section-title">Новые рекорды</h2>
@@ -76,7 +81,8 @@ export function RecordsDetail({ seriesKey }) {
   const category = book?.category || manual[0]?.category || null;
   const today = isoDate();
   const a = assess(book, { today, metrics, step: steps.get(seriesKey) || 2.5 });
-  const est = book ? estimate1rm({ ...book.heaviest, rir: null }, { bodyweight: bodyweightNear(metrics, book.heaviest.date) }) : null;
+  // The same numbers as the «1ПМ (расчёт)» chart: the best estimate of any day.
+  const est = book ? Math.max(0, ...estimateProgress(book, { metrics }).map((p) => p.value)) || null : null;
   const add = () => openRecordSheet({ preset: { seriesKey, exercise: name, category } });
 
   return html`<main class="screen">
@@ -104,7 +110,7 @@ export function RecordsDetail({ seriesKey }) {
         ${book.table.some((r) => r.coveredBy)
           ? html`<button type="button" class="link rec-more" aria-expanded=${String(showCovered)} onClick=${() => setShowCovered(!showCovered)}>${showCovered
               ? 'Скрыть перекрытые'
-              : `Показать перекрытые (${book.table.filter((r) => r.coveredBy).length}) — позже поднято больше на большее число повторений`}</button>`
+              : `Показать перекрытые (${book.table.filter((r) => r.coveredBy).length}) — на большее число повторений поднято не меньше`}</button>`
           : null}
         <div class="rec-facts">
           <p><b>Максимальный вес:</b> ${fmtLoad(book.heaviest.weight, category)} на ${book.heaviest.reps} ${repsWord(book.heaviest.reps)}, ${when(book.heaviest.date)}.</p>
@@ -313,7 +319,9 @@ function RecordSheet({ record, preset, onClose }) {
         ? 'Укажите повторения (1–30)'
         : !/^\d{4}-\d{2}-\d{2}$/.test(v.date) || v.date > today
           ? 'Дата не может быть в будущем'
-          : null;
+          : pullup && v.bodyweight != null && !(v.bodyweight > 0 && v.bodyweight < 400)
+            ? 'Масса тела — от 1 до 400 кг или пусто'
+            : null;
 
   const save = async () => {
     if (problem || busy) return;

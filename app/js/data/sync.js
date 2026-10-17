@@ -75,14 +75,21 @@ export function describeError(err) {
 }
 
 export function createSync(store, { transport = fetchTransport, now = () => Date.now() } = {}) {
-  const status = { state: 'off', lastSyncAt: null, error: null, notice: null, pending: 0 };
+  const status = { state: 'off', lastSyncAt: null, error: null, notice: null, pending: 0, waiting: 0 };
   const listeners = new Set();
   let running = null;
   let again = false;
   let timer = null;
+  // Entities the connected Apps Script doesn't know yet (records before API 2): they wait on
+  // the phone. They are not "pending" — nothing to retry until Code.gs is updated.
+  const unknown = new Set();
 
   function update(patch) {
-    Object.assign(status, patch, { pending: store.state.outbox.size });
+    const waiting = unknown.size ? [...store.state.outbox.values()].filter((e) => unknown.has(e.entity)).length : 0;
+    const notice = waiting
+      ? `Рекорды, добавленные вручную (${waiting}), сохранены на телефоне. В таблицу они попадут после обновления Apps Script (Code.gs) — инструкция в docs/SETUP.md.`
+      : null;
+    Object.assign(status, patch, { pending: store.state.outbox.size - waiting, waiting, notice });
     for (const fn of listeners) fn({ ...status });
   }
 
@@ -108,11 +115,15 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       push[e.entity].push(rec);
       sent.push({ key: e.key, entity: e.entity, updatedAt: rec.updatedAt });
     }
+    // Releases before records ignored them in pulls but still moved the cursor past them; so
+    // records are pulled once from the very start (the server's merge is idempotent).
+    const catchUp = store.state.kv.recordsPulled ? undefined : { records: 0 };
     const res = await transport(cfg.url, {
       action: 'sync',
       token: cfg.token,
       api: API_VERSION,
       since: store.state.kv.cursor || 0,
+      entitySince: catchUp,
       programSince: store.state.kv.programSince || 0,
       push,
     });
@@ -123,14 +134,19 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     // records ignores them, so they stay queued on the phone until Code.gs is updated.
     const known = new Set(res.ack && typeof res.ack === 'object' ? Object.keys(res.ack) : LEGACY_ENTITIES);
     const accepted = sent.filter((s) => !refused.has(s.key) && (s.entity === 'program' || known.has(s.entity)));
-    const waiting = sent.filter((s) => s.entity !== 'program' && !known.has(s.entity)).length;
+    for (const entity of Object.keys(push)) {
+      if (entity === 'program') continue;
+      if (known.has(entity)) unknown.delete(entity);
+      else unknown.add(entity);
+    }
     await store.ack(accepted);
     await store.applyRemote(res.pull || {});
     await store.setKV({
       cursor: Math.max(store.state.kv.cursor || 0, Number(res.cursor) || 0),
       programSince: Math.max(store.state.kv.programSince || 0, Number(res.programUpdatedAt) || 0),
+      ...(catchUp && known.has('records') ? { recordsPulled: true } : {}),
     });
-    return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size, waiting };
+    return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size };
   }
 
   async function run() {
@@ -143,20 +159,15 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     try {
       let more = true;
       let refused = 0;
-      let waiting = 0;
       for (let i = 0; more && i < 20; i++) {
         const r = await round(cfg);
         more = r.more;
         refused = r.refused;
-        waiting = r.waiting;
       }
-      const notice = waiting
-        ? `Рекорды, добавленные вручную (${waiting}), сохранены на телефоне. В таблицу они попадут после обновления Apps Script (Code.gs) — инструкция в docs/SETUP.md.`
-        : null;
       if (refused) {
-        update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', notice, error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Обновите Code.gs до версии из репозитория.` });
+        update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Проверьте значения в них или обновите Code.gs до версии из репозитория.` });
       } else {
-        update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null, notice });
+        update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null });
       }
     } catch (err) {
       const code = err?.code || 'network';

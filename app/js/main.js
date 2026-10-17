@@ -76,7 +76,8 @@ async function start() {
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
     const stale = Date.now() - (sync.status.lastSyncAt || 0) > 5 * 60 * 1000;
-    if (store.state.outbox.size > 0 || stale) sync.syncNow();
+    // Records waiting for an Apps Script update are not retried every minute.
+    if (store.state.outbox.size - (sync.status.waiting || 0) > 0 || stale) sync.syncNow();
   }, 60 * 1000);
   sync.syncNow();
 

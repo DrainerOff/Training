@@ -173,6 +173,8 @@ function sync_(req) {
     var props = PropertiesService.getScriptProperties();
     var srv = Math.max(Date.now(), Number(props.getProperty('LAST_SRV') || 0) + 1);
     var since = Number(req.since) || 0;
+    // Per-entity starting points below `since` (a client catching up on an entity it used to ignore).
+    var entitySince = req.entitySince && typeof req.entitySince === 'object' ? req.entitySince : {};
     var push = req.push || {};
     var ack = {};
     var rejected = [];
@@ -217,10 +219,11 @@ function sync_(req) {
     ENTITIES.forEach(function (entity) {
       var table = tables[entity];
       var out = [];
+      var from = isFinite(Number(entitySince[entity])) && entitySince[entity] !== null && entitySince[entity] !== '' ? Math.min(since, Number(entitySince[entity])) : since;
       table.rows.forEach(function (row) {
         var s = Number(row[table.map._srv]) || 0;
         if (s > cursor) cursor = s;
-        if (s <= since) return;
+        if (s <= from) return;
         var rec = fromRow_(entity, row, table);
         if (!rec) return;
         if (pushedNow[entity + ':' + rec.id] === rec.updatedAt) return; // the client already has it

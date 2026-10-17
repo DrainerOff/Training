@@ -206,3 +206,46 @@ test('latest achievements across exercises, newest first', () => {
   ]);
   assert.deepEqual(recentAchievements(books, { today: TODAY }).map((x) => `${x.book.key}:${x.event.perf.weight}`), ['c:32.5', 'a:55']);
 });
+
+// --- regressions found in review -------------------------------------------------------------
+
+test('pull-ups: a heavier body alone is not "можно обновить" — the same bodyweight is used throughout', () => {
+  const metrics = [
+    { date: ago(150), bodyweight: 80 },
+    { date: ago(30), bodyweight: 90 },
+    { date: ago(23), bodyweight: 90 },
+    { date: ago(16), bodyweight: 90 },
+  ];
+  const { books } = book([
+    workout(ago(150), 2, 'pu', [[20, 6]], { category: 'pullup' }),
+    workout(ago(30), 2, 'pu', [[20, 6]], { category: 'pullup' }),
+    workout(ago(23), 2, 'pu', [[20, 6]], { category: 'pullup' }),
+    workout(ago(16), 2, 'pu', [[20, 6]], { category: 'pullup' }),
+  ]);
+  const a = assess(books.get('pu'), { today: TODAY, metrics });
+  assert.equal(a.state, 'steady');
+});
+
+test('two workouts on one day are one day: no "можно обновить" from a single day', () => {
+  // 100×5 with 3 in reserve, twice — but on the same day — against a 105×5 record.
+  const manual = [{ id: 'm', seriesKey: 'b', exercise: 'b', category: 'base', date: ago(120), weight: 105, reps: 5, createdAt: 1, updatedAt: 1, deleted: false }];
+  const { books } = book([workout(ago(10), 2, 'b', [[100, 5, 3]]), workout(ago(10), 2, 'b', [[100, 5, 3]])], manual);
+  const a = assess(books.get('b'), { today: TODAY });
+  assert.equal(a.state, 'unknown');
+  assert.match(a.reasons[0], /одна тренировка/);
+});
+
+test('identical sets with the same timestamp make one achievement, not two', () => {
+  const w = workout('2026-10-01', 2, 'd', [[100, 5], [100, 5]]);
+  for (const st of w.sets) st.createdAt = 0;
+  const { books } = book([w]);
+  assert.equal(books.get('d').events.length, 1);
+});
+
+test('a covered row with the same weight is described as "the same weight", not "more weight"', () => {
+  const manual = [{ id: 'm', seriesKey: 'e', exercise: 'e', category: 'base', date: ago(100), weight: 100, reps: 5, createdAt: 1, updatedAt: 1, deleted: false }];
+  const { books } = book([workout(ago(30), 2, 'e', [[100, 6]]), workout(ago(25), 3, 'e', [[90, 5]])], manual);
+  const a = assess(books.get('e'), { today: TODAY });
+  assert.equal(a.state, 'improvable');
+  assert.match(a.reasons[0], /было 100×6: тот же вес на большее число повторений/);
+});

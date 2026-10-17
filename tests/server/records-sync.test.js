@@ -110,7 +110,8 @@ test('old Apps Script (API 1): records are never treated as saved; they reach th
   await a.store.saveRecord(record());
   const st = await a.sync.syncNow();
   assert.equal(st.state, 'idle', 'not an error: everything else synced');
-  assert.equal(st.pending, 1, 'the record is still queued');
+  assert.equal(a.store.state.outbox.size, 1, 'the record is still queued');
+  assert.deepEqual([st.pending, st.waiting], [0, 1], 'waiting for the script, not pending: no retries every minute');
   assert.match(st.notice, /Рекорды, добавленные вручную \(1\), сохранены на телефоне/);
   assert.equal(gas.sheet('App_Records'), null, 'the old script does not know records');
   assert.equal(gas.sheet('App_Sessions').getLastRow(), 2, 'the workout itself synced');
@@ -123,7 +124,7 @@ test('old Apps Script (API 1): records are never treated as saved; they reach th
   // The owner pastes the new Code.gs and deploys a new version (same URL and key).
   gas.redeploy();
   const st2 = await a.sync.syncNow();
-  assert.equal(st2.pending, 0);
+  assert.deepEqual([st2.pending, st2.waiting, a.store.state.outbox.size], [0, 0, 0]);
   assert.equal(st2.notice, null);
   assert.equal(gas.sheet('App_Records').getLastRow(), 2);
 });
@@ -139,5 +140,35 @@ test('backup includes manual records and restores them without duplicates', asyn
   const b = await device(token, net);
   await b.store.importBackup(backup);
   await b.store.importBackup(backup);
+  assert.equal(b.store.state.records.size, 1);
+});
+
+test('a device that synced on a release without records still gets every record after updating', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const net = network(gas);
+  const a = await device(token, net);
+  await a.store.saveRecord(record());
+  await a.sync.syncNow();
+
+  // Phone B still runs build 7705635 (no records): it pulls, ignores the record, moves its cursor.
+  const Old = {
+    ...(await import('../fixtures/releases/7705635/js/data/store.js')),
+    ...(await import('../fixtures/releases/7705635/js/data/sync.js')),
+  };
+  const adapter = memoryAdapter(); // the IndexedDB of the update keeps the data and gains the store
+  const oldStore = Old.createStore(adapter, { now });
+  await oldStore.load();
+  await oldStore.setKV({ sync: { url: 'https://example/exec', token } });
+  await Old.createSync(oldStore, { transport: net.transport, now }).syncNow();
+  assert.ok(oldStore.state.kv.cursor > 0, 'the old client moved past the record');
+
+  // B updates: same storage, new code — the record arrives anyway, exactly once.
+  const b = await device(token, net, adapter);
+  assert.equal(b.store.state.records.size, 0);
+  await b.sync.syncNow();
+  assert.equal(b.store.state.records.size, 1);
+  assert.equal(b.store.state.kv.recordsPulled, true);
+  await b.sync.syncNow();
   assert.equal(b.store.state.records.size, 1);
 });

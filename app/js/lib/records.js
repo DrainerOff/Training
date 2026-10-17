@@ -145,10 +145,13 @@ function achievements(perfs) {
       found.push({ date, reps: p.reps, perf: p, kind: same || beat ? 'record' : 'first', prev: same, beat: same ? null : beat });
     }
     // Within a day keep only the best: 90×9 makes 90×8 of the same day no achievement.
-    for (const e of found) {
-      const better = found.some((o) => o !== e && dominates(o.perf, e.perf) && (o.perf.weight > e.perf.weight + EPS || o.perf.reps > e.perf.reps || o.perf.at < e.perf.at));
+    // Identical sets: the first one (by time, then by order) stands.
+    found.forEach((e, i) => {
+      const better = found.some(
+        (o, j) => o !== e && dominates(o.perf, e.perf) && (o.perf.weight > e.perf.weight + EPS || o.perf.reps > e.perf.reps || o.perf.at < e.perf.at || (o.perf.at === e.perf.at && j < i)),
+      );
       if (!better) events.push(e);
-    }
+    });
     for (const p of todays) {
       prior.push(p);
       const b = bestByReps.get(p.reps);
@@ -256,23 +259,24 @@ export function describeEvent(e, { thisYear = null } = {}) {
   return `${setText(p)} — ${how}, чем ${setText(e.beat)} (${day(e.beat.date, thisYear)})`;
 }
 
-// One recent workout of this series: its best usable capacity estimate.
-function sessionLevels(book, { today, metrics }) {
-  const bySession = new Map();
+// Recent training days of this series (two workouts on one day are still one day), each with
+// its best usable capacity estimate. `bw` — the bodyweight every pull-up estimate uses.
+function dayLevels(book, { today, bw }) {
+  const byDay = new Map();
   for (const p of book.perfs) {
     if (p.source !== 'workout' || daysBetween(p.date, today) > RECENT_DAYS || daysBetween(p.date, today) < 0) continue;
-    if (!bySession.has(p.sessionId)) bySession.set(p.sessionId, { date: p.date, sets: [], level: null, from: null });
-    const s = bySession.get(p.sessionId);
+    if (!byDay.has(p.date)) byDay.set(p.date, { date: p.date, sets: [], level: null, from: null });
+    const s = byDay.get(p.date);
     s.sets.push(p);
     // A light-week set without reported RIR is submaximal by design: it says nothing about the limit.
     if (p.week === 1 && p.rir == null) continue;
-    const e = estimate1rm(p, { bodyweight: bodyweightNear(metrics, p.date) });
+    const e = estimate1rm({ ...p, bodyweight: null }, { bodyweight: bw });
     if (e != null && (s.level == null || e > s.level)) {
       s.level = e;
       s.from = p;
     }
   }
-  return [...bySession.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+  return [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 // { state, reasons[] } — see STATE. Conservative: never a forecast from a single workout;
@@ -293,7 +297,11 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
     };
   }
 
-  const sessions = sessionLevels(book, { today, metrics });
+  // Pull-ups: records and recent sets are estimated with ONE bodyweight (the latest recorded),
+  // so a change of bodyweight alone never looks like more (or less) strength.
+  const recent = book.perfs.filter((p) => p.source === 'workout' && daysBetween(p.date, today) <= RECENT_DAYS && daysBetween(p.date, today) >= 0);
+  const bw = isPullup(book.category) ? (recent.length ? bodyweightNear(metrics, recent[recent.length - 1].date) : null) : null;
+  const sessions = dayLevels(book, { today, bw });
   if (sessions.length < 2) {
     return {
       state: 'unknown',
@@ -308,7 +316,8 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
   for (const row of book.table) {
     const c = row.coveredBy;
     if (c && c.source === 'workout' && c.date > row.best.date && daysBetween(c.date, today) <= RECENT_DAYS) {
-      reasons.push(`Рекорд на ${repsText(row.reps)} — ${fmtLoad(row.best.weight, book.category)} (${at(row.best.date)}), а ${at(c.date)} было ${setText(c)}: больше веса на большее число повторений.`);
+      const how = c.weight > row.best.weight + EPS ? 'больше веса на большее число повторений' : 'тот же вес на большее число повторений';
+      reasons.push(`Рекорд на ${repsText(row.reps)} — ${fmtLoad(row.best.weight, book.category)} (${at(row.best.date)}), а ${at(c.date)} было ${setText(c)}: ${how}.`);
     }
   }
   // 2. Capacity: at least two recent workouts above the level of the current records.
@@ -317,7 +326,7 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
   // spare capacity recent workouts may show).
   const recordLevels = book.table
     .filter((r) => !r.coveredBy)
-    .map((r) => ({ row: r, e: estimate1rm({ ...r.best, rir: null }, { bodyweight: bodyweightNear(metrics, r.best.date) }) }))
+    .map((r) => ({ row: r, e: estimate1rm({ ...r.best, rir: null, bodyweight: null }, { bodyweight: isPullup(book.category) ? bw : null }) }))
     .filter((x) => x.e != null);
   const top = recordLevels.sort((a, b) => b.e - a.e)[0] || null;
   let level = null;
@@ -326,16 +335,15 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
     level = lastThree[1]; // the second best: one strong day is not enough
   }
   if (top && level != null && level >= top.e * 1.03) {
-    const latestSet = usable[usable.length - 1].from;
-    reasons.push(
-      `По последним тренировкам расчётный 1ПМ ≈ ${fmt(level)} кг — выше, чем дают текущие рекорды (≈ ${fmt(top.e)} кг). Это ориентир, а не рекорд.`,
-    );
-    const r = latestSet.reps;
-    const bw = isPullup(book.category) ? bodyweightNear(metrics, latestSet.date) : 0;
+    // Only with a concrete weight above the current record — less than one step is no news.
+    const r = usable[usable.length - 1].from.reps;
     const target = Math.floor((level / (1 + r / 30) - (bw || 0)) / step + EPS) * step;
     const row = book.table.find((x) => x.reps === r);
     if (target > (row ? row.best.weight : 0) + EPS) {
-      reasons.push(`Можно попробовать ${fmtLoad(roundToStep(target, step), book.category)} на ${repsText(r)} в тяжёлую неделю${row ? ` (рекорд — ${fmtLoad(row.best.weight, book.category)})` : ''}.`);
+      reasons.push(
+        `По последним тренировкам расчётный 1ПМ ≈ ${fmt(level)} кг — выше, чем дают текущие рекорды (≈ ${fmt(top.e)} кг). Это ориентир, а не рекорд.`,
+        `Можно попробовать ${fmtLoad(roundToStep(target, step), book.category)} на ${repsText(r)} в тяжёлую неделю${row ? ` (рекорд — ${fmtLoad(row.best.weight, book.category)})` : ''}.`,
+      );
     }
   }
   if (reasons.length) return { state: 'improvable', reasons, level, recordLevel: top?.e ?? null };
