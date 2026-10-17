@@ -24,6 +24,17 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   };
   const listeners = new Set();
   let onLocalChange = null;
+  // sessionId -> Map(setId -> set); keeps per-workout lookups independent of total history size.
+  const bySession = new Map();
+  function putRecord(entity, r) {
+    const prev = state[entity].get(r.id);
+    state[entity].set(r.id, r);
+    if (entity === 'sets') {
+      if (prev && prev.sessionId !== r.sessionId) bySession.get(prev.sessionId)?.delete(r.id);
+      if (!bySession.has(r.sessionId)) bySession.set(r.sessionId, new Map());
+      bySession.get(r.sessionId).set(r.id, r);
+    }
+  }
 
   function emit() {
     state.version++;
@@ -56,7 +67,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   // Memory first (instant UI), then disk + outbox in one transaction.
   async function save(entity, records) {
     if (!records.length) return;
-    for (const r of records) state[entity].set(r.id, r);
+    for (const r of records) putRecord(entity, r);
     emit();
     await persist(
       records.map((r) => ({ store: entity, value: r })),
@@ -76,7 +87,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       ['sessions', 'sets', 'metrics', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
-    for (const r of sets) state.sets.set(r.id, r);
+    for (const r of sets) putRecord('sets', r);
     for (const r of metrics) state.metrics.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
@@ -95,8 +106,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
 
   function setsOf(sessionId, slotId = null) {
     const out = [];
-    for (const s of state.sets.values()) {
-      if (s.deleted || s.sessionId !== sessionId) continue;
+    for (const s of bySession.get(sessionId)?.values() || []) {
+      if (s.deleted) continue;
       if (slotId && s.slotId !== slotId) continue;
       out.push(s);
     }
@@ -201,15 +212,9 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     const existing = setsOf(sessionId, slotId);
     const last = existing[existing.length - 1];
     const t = now();
-    // Store-level double-tap guard: an identical set within 1.5 s is the same tap.
-    if (
-      last &&
-      t - last.createdAt < DOUBLE_TAP_MS &&
-      last.weight === v.weight &&
-      last.reps === v.reps &&
-      (last.rir ?? null) === (v.rir ?? null) &&
-      !!last.drop === !!v.drop
-    ) {
+    // Store-level double-tap guard: the same weight × reps within 1.5 s is the same tap
+    // (RIR is ignored: the composer resets it after each set, so a second tap would differ only there).
+    if (last && t - last.createdAt < DOUBLE_TAP_MS && last.weight === v.weight && last.reps === v.reps && !!last.drop === !!v.drop) {
       return { set: last, duplicate: true };
     }
     const rec = {
@@ -280,7 +285,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       sleep: null,
       recovery: null,
       note: '',
-      ...(prev || {}),
+      ...(prev && !prev.deleted ? prev : {}), // a deleted entry is not resurrected field by field
       ...patch,
       deleted: false,
       updatedAt: stamp(prev),
@@ -411,7 +416,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
         if (!r || !r.id) continue;
         const local = state[entity].get(r.id);
         if (local && (local.updatedAt || 0) >= (r.updatedAt || 0)) continue;
-        state[entity].set(r.id, r);
+        putRecord(entity, r);
         ops.push({ store: entity, value: r });
         const key = `${entity}:${r.id}`;
         if (queue) outboxEntries.push({ entity, id: r.id, updatedAt: r.updatedAt });

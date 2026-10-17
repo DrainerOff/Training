@@ -103,7 +103,8 @@ export function Settings({ syncStatus }) {
   };
 
   const importBackup = async (e) => {
-    const f = e.currentTarget.files?.[0];
+    const input = e.currentTarget; // currentTarget is null after the first await
+    const f = input.files?.[0];
     if (!f) return;
     try {
       const obj = JSON.parse(await f.text());
@@ -112,7 +113,7 @@ export function Settings({ syncStatus }) {
     } catch (err) {
       app.ui.toast(`Файл не подошёл: ${err.message}`);
     }
-    e.currentTarget.value = '';
+    input.value = '';
   };
 
   return html`<main class="screen">

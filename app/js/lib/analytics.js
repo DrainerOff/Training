@@ -156,7 +156,7 @@ export function seriesComparisons(exposures, opts = {}) {
     segOf.set(e, segment);
   }
   exposures.forEach((e, idx) => {
-    const entry = { exposure: e, cmp: null, counted: false, effective: null, notes: [] };
+    const entry = { exposure: e, segment: segOf.get(e), cmp: null, counted: false, effective: null, notes: [] };
     if (!e.sets.length) {
       entry.notes.push('нет рабочих подходов');
       out.push(entry);
@@ -192,14 +192,15 @@ export function seriesComparisons(exposures, opts = {}) {
   return out;
 }
 
-function bestBefore(comparisons, entry) {
-  // Best score of the same week inside the segment before `entry`, to tell recovery from progress.
+function bestBefore(comparisons, entry, opts) {
+  // Best result of the same week inside the same baseline segment before `entry`,
+  // to tell "back to the previous level" from real progress.
   let best = null;
   for (const c of comparisons) {
     if (c === entry) break;
     const e = c.exposure;
-    if (e.week !== entry.exposure.week || !e.sets.length || e.flags.pain) continue;
-    if (!best || compareExposures(e, best, {}).median > 0) best = e;
+    if (c.segment !== entry.segment || e.week !== entry.exposure.week || !e.sets.length || e.flags.pain) continue;
+    if (!best || compareExposures(e, best, opts).median > 0) best = e;
   }
   return best;
 }
@@ -224,7 +225,7 @@ export function seriesStatus(exposures, opts = {}) {
   const runCycles = new Set(counted.slice(counted.length - k).map((c) => c.exposure.cycle));
 
   if (v[0] === 'up') {
-    const best = bestBefore(comps, last);
+    const best = bestBefore(comps, last, opts);
     if (best && best !== last.cmp.prev && compareExposures(last.exposure, best, opts).median < -EPS) {
       result.status = 'recovering';
       result.reasons.push('Лучше прошлого раза, но ещё ниже лучшего результата на этой неделе цикла.');

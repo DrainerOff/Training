@@ -12,7 +12,7 @@ export function Home({ syncStatus }) {
   const st = app.store.state;
   const { series, sessions } = derived();
   const days = st.program.days.map((d) => d.day);
-  const auto = nextWorkout(sessions, days.length || 4);
+  const auto = nextWorkout(sessions, days);
   const [pick, setPick] = useState(null);
   const plan = pick || { ...auto, date: isoDate() };
   const items = itemsForDay(st.program, plan.day);
@@ -77,10 +77,12 @@ export function Home({ syncStatus }) {
       </div>
     </div>
 
-    <button type="button" class="btn btn--primary btn--block btn--big" onClick=${() => start()}>Начать тренировку</button>
     <div class="home-actions">
       <button type="button" class="link" onClick=${() => openStart(plan, days, setPick, false)}>Другой день или неделя</button>
       <button type="button" class="link" onClick=${() => openStart(plan, days, null, true, start)}>Записать прошедшую тренировку</button>
+    </div>
+    <div class="start-bar">
+      <button type="button" class="btn btn--primary btn--block btn--big" onClick=${() => start()}>Начать тренировку</button>
     </div>
   </main>`;
 }

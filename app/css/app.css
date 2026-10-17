@@ -439,6 +439,14 @@ p {
   font-size: 14px;
   color: var(--ghost);
 }
+/* The main action stays in the thumb zone however long the plan list is. */
+.start-bar {
+  position: sticky;
+  bottom: -24px;
+  margin: 8px -16px -24px;
+  padding: 18px 16px 24px;
+  background: linear-gradient(to bottom, transparent, var(--chalk) 22px);
+}
 .home-actions {
   display: grid;
   gap: 4px;
@@ -816,6 +824,22 @@ p {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.dock__what {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.dock__set {
+  flex: none;
+  font-weight: 700;
+}
+.dock__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--steel);
+  font-weight: 500;
 }
 .dock__rest {
   color: var(--steel);

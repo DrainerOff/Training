@@ -114,6 +114,48 @@ test('double tap within 1.5 s records one set', async () => {
   assert.equal(a.store.setsOf(s.id).length, 2);
 });
 
+test('double tap after choosing RIR still records one set', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const a = await device(gas, token, network(gas));
+  await a.store.saveProgram(PROGRAM);
+  const s = await a.store.startSession({ cycle: 1, week: 2, day: 1 });
+  await a.store.logSet(s.id, s.items[1].slotId, { weight: 80, reps: 10, rir: 2 });
+  const second = await a.store.logSet(s.id, s.items[1].slotId, { weight: 80, reps: 10, rir: null });
+  assert.equal(second.duplicate, true);
+  assert.equal(a.store.setsOf(s.id).length, 1);
+});
+
+test('a record the sheet refuses stays queued and the status says so', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const a = await device(gas, token, network(gas));
+  await a.store.saveProgram(PROGRAM);
+  const s = await a.store.startSession({ cycle: 1, week: 2, day: 1 });
+  clock += 5000;
+  const { set } = await a.store.logSet(s.id, s.items[1].slotId, { weight: 80, reps: 10 });
+  clock += 5000;
+  const { set: bad } = await a.store.logSet(s.id, s.items[1].slotId, { weight: 200000, reps: 10 });
+  const st = await a.sync.syncNow();
+  assert.equal(st.state, 'error');
+  assert.match(st.error, /не приняла записей: 1/);
+  assert.equal(a.store.state.outbox.has(`sets:${bad.id}`), true, 'refused record is kept');
+  assert.equal(a.store.state.outbox.has(`sets:${set.id}`), false, 'accepted record is acknowledged');
+  await a.store.updateSet(bad.id, { weight: 85 });
+  assert.equal((await a.sync.syncNow()).state, 'idle', 'once fixed it goes through');
+  assert.equal(a.store.state.outbox.size, 0);
+});
+
+test('a deleted body-metric entry is not resurrected by a later quick save', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const a = await device(gas, token, network(gas));
+  const m = await a.store.saveMetric('2026-10-17', { bodyweight: 81.2, sleep: 7 });
+  await a.store.deleteMetric(m.id);
+  const again = await a.store.saveMetric('2026-10-17', { recovery: 4 });
+  assert.deepEqual([again.bodyweight, again.sleep, again.recovery], [null, null, 4]);
+});
+
 test('an edit made while a sync request is in flight is not lost', async () => {
   const gas = createGas();
   const token = gas.call('setup');

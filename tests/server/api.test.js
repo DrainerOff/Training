@@ -143,6 +143,17 @@ test('manual edit in App_Sets bumps the version so the app pulls the fix', () =>
   assert.ok(r2.pull.sets[0].updatedAt > 1000);
 });
 
+test('manual edit never lowers the version (phone clock ahead of Google)', () => {
+  const { gas, token } = boot();
+  const future = Date.now() + 10 * 60 * 1000;
+  gas.post({ action: 'sync', token, push: { sets: [set('a', { updatedAt: future })] } });
+  const header = gas.sheet('App_Sets').rows()[0];
+  gas.edit('App_Sets', 2, header.indexOf('reps') + 1, 11);
+  const [x] = gas.post({ action: 'sync', token, since: 0 }).pull.sets;
+  assert.equal(x.reps, 11);
+  assert.ok(x.updatedAt > future, 'hand edit is newer than the phone version');
+});
+
 test('program: pushed program is written as readable rows and keeps series keys', () => {
   const { gas, token } = boot();
   const program = {

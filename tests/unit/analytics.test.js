@@ -166,6 +166,15 @@ test('back to previous level after a dip is "recovering", not progress', () => {
   assert.equal(r.status, 'recovering');
 });
 
+test('after a new baseline, beating the new segment is progress (old heavier results ignored)', () => {
+  const r = status([
+    { cycle: 1, week: 2, date: '2026-10-23', sets: [[100, 10], [100, 10], [100, 9], [100, 9]] },
+    { cycle: 2, week: 2, date: '2026-11-13', sets: [[70, 10], [70, 10], [70, 9], [70, 9]], flags: { baseline: true } },
+    { cycle: 3, week: 2, date: '2026-12-04', sets: [[75, 10], [75, 10], [75, 9], [75, 9]] },
+  ]);
+  assert.equal(r.status, 'progress');
+});
+
 test('drop sets are excluded from working-set comparisons', () => {
   const { sessions, sets } = fixture([
     { cycle: 1, week: 3, date: '2026-10-30', category: 'calves', key: 'calves', sets: [[100, 12], [100, 12], [100, 11], [70, 10, null, { drop: true }]] },

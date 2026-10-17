@@ -25,6 +25,13 @@ test('active and deleted sessions do not move the sequence', () => {
   assert.deepEqual(nextWorkout(s), { cycle: 1, week: 1, day: 2 });
 });
 
+test('program days need not be numbered 1..N (a middle day was deleted)', () => {
+  const days = [1, 3, 4];
+  assert.deepEqual(nextWorkout([], days), { cycle: 1, week: 1, day: 1 });
+  assert.deepEqual(nextWorkout([done(1, 1, 1)], days), { cycle: 1, week: 1, day: 3 });
+  assert.deepEqual(nextWorkout([done(1, 1, 4)], days), { cycle: 1, week: 2, day: 1 });
+});
+
 test('duplicate slot detection', () => {
   const s = [done(1, 1, 1)];
   assert.ok(findSameSlotSession(s, { cycle: 1, week: 1, day: 1 }));

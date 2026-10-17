@@ -4,22 +4,26 @@ import { targetFor } from './program.js';
 import { roundToStep } from './util.js';
 
 export function positionValue(s) {
-  return (s.cycle || 0) * 100 + (s.week || 0) * 10 + (s.day || 0);
+  return (s.cycle || 0) * 10000 + (s.week || 0) * 100 + (s.day || 0);
 }
 
 // Next workout is the successor of the furthest completed position (cycle, week, day),
 // so a back-dated entry of a missed day does not reset the sequence.
-export function nextWorkout(sessions, daysCount = 4) {
+// `days` is the list of program day numbers (they need not be 1..N after edits).
+export function nextWorkout(sessions, days = [1, 2, 3, 4]) {
+  const list = [...new Set(days)].sort((a, b) => a - b);
+  if (!list.length) list.push(1);
   let last = null;
   for (const s of sessions) {
     if (s.deleted || s.status !== 'done') continue;
     if (!last || positionValue(s) > positionValue(last)) last = s;
   }
-  if (!last) return { cycle: 1, week: 1, day: 1 };
+  if (!last) return { cycle: 1, week: 1, day: list[0] };
   const { cycle, week, day } = last;
-  if (day < daysCount) return { cycle, week, day: day + 1 };
-  if (week < 3) return { cycle, week: week + 1, day: 1 };
-  return { cycle: cycle + 1, week: 1, day: 1 };
+  const nextDay = list.find((d) => d > day);
+  if (nextDay != null) return { cycle, week, day: nextDay };
+  if (week < 3) return { cycle, week: week + 1, day: list[0] };
+  return { cycle: cycle + 1, week: 1, day: list[0] };
 }
 
 export function findSameSlotSession(sessions, { cycle, week, day }, exceptId = null) {

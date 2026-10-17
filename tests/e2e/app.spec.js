@@ -25,7 +25,7 @@ test('gym flow: carry-over weight, per-set weights, edit, undo, swap, resume aft
   await page.getByRole('button', { name: 'Начать тренировку' }).click();
 
   // Pull-ups: 3×6 strict at bodyweight, pre-filled — one tap per set.
-  await expect(dock(page)).toContainText('Подтягивания прямым хватом: подход 1 из 3');
+  await expect(dock(page)).toContainText('Подход 1 из 3 Подтягивания прямым хватом');
   await expect(logButton(page)).toContainText('СВ × 6');
   await logSet(page);
   await page.getByRole('button', { name: 'Уменьшить: Повторения' }).click();
@@ -36,7 +36,7 @@ test('gym flow: carry-over weight, per-set weights, edit, undo, swap, resume aft
   // Auto-advance to the next exercise; light week = 3 sets; no history → weight must be entered.
   await expect(page.locator('.panel__title')).toHaveText('Жим штанги под наклоном');
   await expect(dock(page)).toContainText('Готово: Подтягивания прямым хватом');
-  await expect(dock(page)).toContainText('Жим штанги под наклоном: подход 1 из 3', { timeout: 8000 });
+  await expect(dock(page)).toContainText('Подход 1 из 3 Жим штанги под наклоном', { timeout: 8000 });
   await expect(logButton(page)).toHaveText('Введите вес');
   await page.locator('.dock .stepper__value').nth(0).click();
   await pad(page, ['6', '0']);
@@ -68,7 +68,7 @@ test('gym flow: carry-over weight, per-set weights, edit, undo, swap, resume aft
   await page.getByRole('button', { name: /Наклонный Hammer: 0 из 3/ }).click();
   await page.getByRole('button', { name: 'Заменить' }).click();
   await page.getByRole('dialog').getByRole('button', { name: /Наклонный жим гантелей/ }).click();
-  await expect(dock(page)).toContainText('Наклонный жим гантелей: подход 1 из 3');
+  await expect(dock(page)).toContainText('Подход 1 из 3 Наклонный жим гантелей');
   await page.locator('.dock .stepper__value').nth(0).click();
   await pad(page, ['2', '6']);
   await page.locator('.dock .stepper__value').nth(1).click();
@@ -91,7 +91,7 @@ test('gym flow: carry-over weight, per-set weights, edit, undo, swap, resume aft
   const after = await state(page);
   expect(after.active.id).toBe(before.active.id);
   expect(after.activeSets).toEqual(before.activeSets);
-  await expect(dock(page)).toContainText('Наклонный жим гантелей: подход 2 из 3');
+  await expect(dock(page)).toContainText('Подход 2 из 3 Наклонный жим гантелей');
   await expect(page.locator('.dock .stepper__value').nth(0)).toHaveText('31');
 
   // Finish → next workout is day 2.
@@ -124,10 +124,15 @@ test('previous results are hints only; double tap records one set', async ({ pag
   await expect(dock(page)).toContainText('как в прошлый раз');
   await expect(logButton(page)).toContainText('85 × 8');
 
+  await page.getByRole('button', { name: '2', exact: true }).click(); // choose RIR, then double tap
   await logButton(page).dblclick();
   await page.waitForTimeout(300);
   st = await state(page);
-  expect(st.activeSets.map((s) => [s.w, s.r])).toEqual([[85, 8]]);
+  expect(st.activeSets.map((s) => [s.w, s.r, s.rir])).toEqual([[85, 8, 2]]);
+  await expect(logButton(page)).toBeEnabled(); // the button is usable for the next real set
+  await page.waitForTimeout(1600);
+  await logSet(page);
+  expect((await state(page)).activeSets.length).toBe(2);
 });
 
 test('progress compares the same week of the cycle and keeps alternatives apart', async ({ page }) => {

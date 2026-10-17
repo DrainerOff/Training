@@ -2,7 +2,6 @@
 
 import { html, useState, app, openSheet, Sheet } from './core.js';
 import { MetricFields } from './workout.js';
-import { latestBodyweight } from './derive.js';
 import { weightTrend, rollingAverage } from '../lib/analytics.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, sum } from '../lib/util.js';
 
@@ -67,31 +66,39 @@ function openEntry(date) {
 }
 
 function EntrySheet({ date, onClose }) {
-  const prev = app.store.state.metrics.get(`m${date}`);
   const [d, setD] = useState(date);
-  const [v, setV] = useState({
-    recovery: prev?.recovery ?? null,
-    sleep: prev?.sleep ?? null,
-    bodyweight: prev?.bodyweight ?? latestBodyweight(),
-    note: prev?.note || '',
-  });
   return html`<${Sheet} title="Самочувствие и вес" onClose=${onClose}>
     <div class="sheet__section">
       <div class="sheet__label">Дата</div>
       <input class="input" type="date" value=${d} max=${isoDate()} onInput=${(e) => setD(e.currentTarget.value)} />
     </div>
+    ${d ? html`<${EntryForm} key=${d} date=${d} onClose=${onClose} />` : null}
+  <//>`;
+}
+
+// Re-mounted per date: the form always shows (and saves/deletes) the record of the chosen date.
+function EntryForm({ date, onClose }) {
+  const prev = app.store.state.metrics.get(`m${date}`);
+  const live = prev && !prev.deleted ? prev : null;
+  const [v, setV] = useState({
+    recovery: live?.recovery ?? null,
+    sleep: live?.sleep ?? null,
+    bodyweight: live?.bodyweight ?? null,
+    note: live?.note || '',
+  });
+  const empty = v.recovery == null && v.sleep == null && v.bodyweight == null && !v.note;
+  return html`
     <${MetricFields} v=${v} setV=${setV} />
     <div class="sheet__section">
       <input class="input" placeholder="Заметка" value=${v.note} onInput=${(e) => setV({ ...v, note: e.currentTarget.value })} />
     </div>
     <div class="btn-row">
-      ${prev ? html`<button type="button" class="btn btn--danger" onClick=${async () => { await app.store.deleteMetric(prev.id); onClose(); }}>Удалить</button>` : null}
-      <button type="button" class="btn btn--primary" disabled=${!d} onClick=${async () => {
-        await app.store.saveMetric(d, v);
+      ${live ? html`<button type="button" class="btn btn--danger" onClick=${async () => { await app.store.deleteMetric(live.id); onClose(); }}>Удалить</button>` : null}
+      <button type="button" class="btn btn--primary" disabled=${empty} onClick=${async () => {
+        await app.store.saveMetric(date, v);
         onClose();
       }}>Сохранить</button>
-    </div>
-  <//>`;
+    </div>`;
 }
 
 const W = 340;

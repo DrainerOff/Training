@@ -650,21 +650,36 @@ function onEdit(e) {
   var hm = headerMap_(sh, entity);
   var col = e.range.getColumn() - 1;
   if (col === hm.map.updatedAt || col === hm.map._srv) return;
-  var props = null;
-  var srv = Date.now();
+  // Wait for a sync in progress, so the edit gets a cursor value the app has not passed yet.
+  var lock = null;
   try {
-    props = PropertiesService.getScriptProperties();
-    srv = Math.max(srv, Number(props.getProperty('LAST_SRV') || 0) + 1);
+    lock = LockService.getScriptLock();
+    if (!lock.tryLock(15000)) lock = null;
   } catch (err) {
-    props = null;
+    lock = null;
   }
-  var n = e.range.getNumRows();
-  for (var i = 0; i < n; i++) {
-    var row = e.range.getRow() + i;
-    sh.getRange(row, hm.map.updatedAt + 1).setValue(Date.now());
-    sh.getRange(row, hm.map._srv + 1).setValue(srv++);
+  try {
+    var props = null;
+    var srv = Date.now();
+    try {
+      props = PropertiesService.getScriptProperties();
+      srv = Math.max(srv, Number(props.getProperty('LAST_SRV') || 0) + 1);
+    } catch (err) {
+      props = null;
+    }
+    var first = e.range.getRow();
+    var n = e.range.getNumRows();
+    var versions = sh.getRange(first, hm.map.updatedAt + 1, n, 1).getValues();
+    for (var i = 0; i < n; i++) {
+      // Never lower the version: the phone's clock may run ahead of Google's.
+      var next = Math.max(Date.now(), (Number(versions[i][0]) || 0) + 1);
+      sh.getRange(first + i, hm.map.updatedAt + 1).setValue(next);
+      sh.getRange(first + i, hm.map._srv + 1).setValue(srv++);
+    }
+    if (props) props.setProperty('LAST_SRV', String(srv));
+  } finally {
+    if (lock) lock.releaseLock();
   }
-  if (props) props.setProperty('LAST_SRV', String(srv));
 }
 
 // ---------------------------------------------------------------------------- setup & menu

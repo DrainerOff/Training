@@ -256,11 +256,8 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const rest = live && lastAt && now - lastAt < 30 * 60 * 1000 ? fmtDuration((now - lastAt) / 1000) : null;
 
   const n = sets.length + 1;
-  const what = dropMode
-    ? `${item.name}: дроп-сет`
-    : working >= target.sets
-      ? `${item.name}: подход ${working + 1}, сверх плана`
-      : `${item.name}: подход ${working + 1} из ${target.sets}`;
+  // Set number first: on a narrow screen the exercise name is what gets truncated.
+  const setLabel = dropMode ? 'Дроп-сет' : working >= target.sets ? `Подход ${working + 1}, сверх плана` : `Подход ${working + 1} из ${target.sets}`;
   const weightHint = v.touchedW ? '' : sug.source === 'prev' ? 'как в прошлый раз' : sug.source === 'today' ? `как подход ${n - 1}` : sug.source === 'drop' ? '≈70% веса' : '';
   const canLog = v.weight != null && v.reps != null && v.reps > 0 && !busy;
 
@@ -269,8 +266,12 @@ function Dock({ row, session, live, onLogged, justLogged }) {
     setBusy(true);
     try {
       const { set, duplicate } = await app.store.logSet(session.id, item.slotId, { weight: v.weight, reps: v.reps, rir: v.rir, drop: dropMode });
+      if (duplicate) {
+        setBusy(false); // second tap of a double tap: nothing new recorded, keep the button usable
+        return;
+      }
       local.set(draftKey, null);
-      if (!duplicate) onLogged(set, row);
+      onLogged(set, row);
     } catch (err) {
       app.ui.toast(`Не удалось записать: ${err.message}`);
       setBusy(false);
@@ -288,7 +289,7 @@ function Dock({ row, session, live, onLogged, justLogged }) {
       ${justLogged
         ? html`<span class="dock__done" role="status"><${Icon} name="check" /><span class="dock__done-text">${justLogged.text}</span></span>
             <button type="button" class="dock__undo" onClick=${justLogged.undo}>Отменить</button>`
-        : html`<span class="dock__what">${what}</span>`}
+        : html`<span class="dock__what"><b class="dock__set">${setLabel}</b> <span class="dock__name">${item.name}</span></span>`}
       ${target.drop > 0
         ? html`<${Toggle} on=${dropMode} onChange=${setDropMode}>дроп</${Toggle}>`
         : null}
@@ -528,10 +529,12 @@ export function openCheckin(date) {
 
 function CheckinSheet({ date, onClose }) {
   const prev = app.store.state.metrics.get(`m${date}`);
+  // Bodyweight is NOT pre-filled from an older weigh-in: saving recovery alone must not
+  // invent a measurement. The last value is shown as a hint and as the ± starting point.
   const [v, setV] = useState({
     recovery: prev?.recovery ?? null,
     sleep: prev?.sleep ?? null,
-    bodyweight: prev?.bodyweight ?? latestBodyweight(),
+    bodyweight: prev?.bodyweight ?? null,
   });
   return html`<${Sheet} title=${`Самочувствие, ${fmtDay(date)}`} onClose=${onClose}>
     <${MetricFields} v=${v} setV=${setV} />
@@ -544,6 +547,7 @@ function CheckinSheet({ date, onClose }) {
 }
 
 export function MetricFields({ v, setV }) {
+  const lastWeight = latestBodyweight();
   return html`
     <div class="sheet__section">
       <div class="sheet__label">Восстановление: 1 — разбит, 5 — отлично</div>
@@ -553,13 +557,13 @@ export function MetricFields({ v, setV }) {
     </div>
     <div class="form-grid">
       <div>
-        <div class="field__label">Вес тела, кг</div>
-        <${Stepper} label="Вес тела" value=${v.bodyweight} step=${0.1} onChange=${(bodyweight) => setV({ ...v, bodyweight })}
+        <div class="field__label"><span>Вес тела, кг</span>${v.bodyweight == null && lastWeight ? html`<span class="field__hint">был ${fmtNum(lastWeight, 1)}</span>` : null}</div>
+        <${Stepper} label="Вес тела" value=${v.bodyweight} step=${0.1} start=${lastWeight} onChange=${(bodyweight) => setV({ ...v, bodyweight })}
           onTap=${() => openSheet((c) => html`<${NumberPad} title="Вес тела, кг" value=${v.bodyweight} step=${0.1} unit="кг" onDone=${(bodyweight) => setV({ ...v, bodyweight })} onClose=${c} />`)} />
       </div>
       <div>
         <div class="field__label">Сон, ч</div>
-        <${Stepper} label="Сон" value=${v.sleep} step=${0.5} onChange=${(sleep) => setV({ ...v, sleep })}
+        <${Stepper} label="Сон" value=${v.sleep} step=${0.5} start=${7} onChange=${(sleep) => setV({ ...v, sleep })}
           onTap=${() => openSheet((c) => html`<${NumberPad} title="Сон, часов" value=${v.sleep} step=${0.5} unit="ч" onDone=${(sleep) => setV({ ...v, sleep })} onClose=${c} />`)} />
       </div>
     </div>`;

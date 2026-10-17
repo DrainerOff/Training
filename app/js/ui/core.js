@@ -188,14 +188,16 @@ export function NumberPad({ title, value, decimals = true, step = 2.5, unit = ''
   <//>`;
 }
 
-export function Stepper({ value, step, min = 0, onChange, onTap, label, suggested = false, display = null }) {
+export function Stepper({ value, step, min = 0, start = null, onChange, onTap, label, suggested = false, display = null }) {
   const set = (v) => onChange(Math.max(min, Math.round(v * 100) / 100));
   const shown = display ?? (value == null ? '—' : fmtNum(value));
+  // From an empty value, ± starts at `start` (e.g. the last known bodyweight) instead of 0.
+  const base = (d) => (value == null && start != null ? start : (value ?? 0) + d);
   return html`<div class="stepper">
-    <button type="button" aria-label=${'Уменьшить: ' + label} onClick=${() => set((value ?? 0) - step)}>−</button>
+    <button type="button" aria-label=${'Уменьшить: ' + label} onClick=${() => set(base(-step))}>−</button>
     <button type="button" class=${'stepper__value' + (value == null ? ' stepper__value--empty' : suggested ? ' stepper__value--suggested' : '')}
       aria-label=${label + ': ' + shown + '. Нажмите, чтобы ввести'} onClick=${onTap}>${shown}</button>
-    <button type="button" aria-label=${'Увеличить: ' + label} onClick=${() => set((value ?? 0) + step)}>+</button>
+    <button type="button" aria-label=${'Увеличить: ' + label} onClick=${() => set(base(step))}>+</button>
   </div>`;
 }
 

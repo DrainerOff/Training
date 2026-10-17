@@ -98,13 +98,15 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       push,
     });
     if (!res || res.ok !== true) throw new SyncError(res?.error || 'bad_response', res?.message || '');
-    await store.ack(sent);
+    // Records the sheet refused stay queued (and visible as an error) — never silently dropped.
+    const refused = new Set((res.rejected || []).map((r) => `${r.entity}:${r.id}`));
+    await store.ack(sent.filter((s) => !refused.has(s.key)));
     await store.applyRemote(res.pull || {});
     await store.setKV({
       cursor: Math.max(store.state.kv.cursor || 0, Number(res.cursor) || 0),
       programSince: Math.max(store.state.kv.programSince || 0, Number(res.programUpdatedAt) || 0),
     });
-    return entries.length === BATCH;
+    return { more: entries.length === BATCH && refused.size < entries.length, refused: refused.size };
   }
 
   async function run() {
@@ -116,8 +118,17 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     update({ state: 'syncing', error: null });
     try {
       let more = true;
-      for (let i = 0; more && i < 20; i++) more = await round(cfg);
-      update({ state: 'idle', lastSyncAt: now(), error: null });
+      let refused = 0;
+      for (let i = 0; more && i < 20; i++) {
+        const r = await round(cfg);
+        more = r.more;
+        refused = r.refused;
+      }
+      if (refused) {
+        update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Обновите Code.gs до версии из репозитория.` });
+      } else {
+        update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null });
+      }
     } catch (err) {
       const code = err?.code || 'network';
       update({ state: code === 'network' ? 'offline' : 'error', error: describeError(err), errorCode: code });
