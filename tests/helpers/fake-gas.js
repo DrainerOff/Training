@@ -130,10 +130,15 @@ export function createGas({ legacy = {}, timeZone = 'Europe/Moscow' } = {}) {
 
   const props = new Map();
   const logs = [];
+  // A web-app execution may have no "active" spreadsheet; tests can switch that off.
+  let activeAvailable = true;
   const globals = {
     SpreadsheetApp: {
-      getActive: () => spreadsheet,
-      openById: () => spreadsheet,
+      getActive: () => (activeAvailable ? spreadsheet : null),
+      openById: (id) => {
+        if (id !== spreadsheet.getId()) throw new Error(`No access to spreadsheet ${id}`);
+        return spreadsheet;
+      },
       flush() {},
       getUi() { throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); },
     },
@@ -169,6 +174,9 @@ export function createGas({ legacy = {}, timeZone = 'Europe/Moscow' } = {}) {
     props,
     logs,
     sheet: (name) => spreadsheet.getSheetByName(name),
+    setActiveAvailable(v) {
+      activeAvailable = v;
+    },
     post(req) {
       const out = ctx.doPost({ postData: { contents: typeof req === 'string' ? req : JSON.stringify(req) } });
       return JSON.parse(out.getContent());

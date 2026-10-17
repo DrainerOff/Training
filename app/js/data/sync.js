@@ -49,6 +49,23 @@ const MESSAGES = {
   busy: 'Таблица занята другой синхронизацией. Повторим автоматически.',
 };
 
+// The owner pastes these on the phone; catch the usual mix-ups before saving.
+export function checkApiUrl(url) {
+  const u = String(url || '').trim();
+  if (/^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+|macros)\/s\/[\w-]+\/exec$/.test(u)) return null;
+  if (/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/\S*$/.test(u)) return null; // local test backend
+  if (/\/dev$/.test(u)) return 'Это адрес тестового развертывания (/dev) — он работает только при входе в Google. Нужен URL веб-приложения, который оканчивается на /exec.';
+  if (/docs\.google\.com\/spreadsheets/.test(u)) return 'Это адрес самой таблицы. Нужен URL веб-приложения Apps Script: «Начать развертывание → Управление развертываниями», оканчивается на /exec.';
+  if (/script\.google\.com\/(?:home|d\/)/.test(u)) return 'Это адрес редактора скрипта. Нужен URL веб-приложения: «Начать развертывание → Управление развертываниями», оканчивается на /exec.';
+  return 'Адрес должен выглядеть так: https://script.google.com/macros/s/…/exec';
+}
+
+export function checkToken(token) {
+  return /^[0-9a-f]{64}$/i.test(String(token || '').trim())
+    ? null
+    : 'Ключ — это 64 символа (цифры и буквы a–f). Скопируйте его целиком: таблица → меню «Тренировки» → «Показать ключ доступа».';
+}
+
 export function describeError(err) {
   const code = err?.code || 'network';
   const base = MESSAGES[code] || MESSAGES.server_error;

@@ -58,6 +58,49 @@ test('requests without the right token are refused', () => {
   assert.equal(gas.get().ok, true);
 });
 
+test('access key: wrong type, wrong length and an old rotated key are all refused', () => {
+  const { gas, token } = boot();
+  assert.equal(gas.post({ action: 'ping', token }).ok, true);
+  assert.equal(gas.post({ action: 'ping', token: { toString: () => token } }).error, 'unauthorized');
+  assert.equal(gas.post({ action: 'ping', token: token.slice(0, -1) }).error, 'unauthorized');
+  assert.equal(gas.post({ action: 'ping' }).error, 'unauthorized');
+  const fresh = gas.call('rotateToken');
+  assert.notEqual(fresh, token);
+  assert.equal(gas.post({ action: 'ping', token }).error, 'unauthorized', 'old key stops working at once');
+  assert.equal(gas.post({ action: 'ping', token: fresh }).ok, true);
+});
+
+test('unauthorized requests write nothing', () => {
+  const { gas } = boot();
+  const r = gas.post({ action: 'sync', token: 'x'.repeat(64), push: { sets: [set('a')] } });
+  assert.equal(r.error, 'unauthorized');
+  assert.equal(r.pull, undefined, 'and read nothing');
+  assert.equal(gas.sheet('App_Sets').getLastRow(), 1);
+});
+
+test('oversized requests are refused before parsing', () => {
+  const { gas, token } = boot();
+  const r = gas.post(JSON.stringify({ action: 'ping', token, pad: 'x'.repeat(5 * 1024 * 1024) }));
+  assert.equal(r.error, 'bad_request');
+});
+
+test('web app without an "active" spreadsheet works through the id saved by setup', () => {
+  const { gas, token } = boot();
+  gas.setActiveAvailable(false);
+  const r = gas.post({ action: 'sync', token, push: { sets: [set('a')] } });
+  assert.equal(r.ok, true);
+  assert.equal(gas.sheet('App_Sets').getLastRow(), 2);
+});
+
+test('without setup the API explains what to do instead of failing obscurely', () => {
+  const gas = createGas();
+  gas.props.set('API_TOKEN', 't'.repeat(64));
+  gas.setActiveAvailable(false);
+  const r = gas.post({ action: 'ping', token: 't'.repeat(64) });
+  assert.equal(r.error, 'server_error');
+  assert.match(r.message, /Подготовить листы и ключ/);
+});
+
 test('push is idempotent: resending the same sets never duplicates rows', () => {
   const { gas, token } = boot();
   const req = { action: 'sync', token, since: 0, push: { sets: [set('a'), set('b', { setNo: 2 })] } };

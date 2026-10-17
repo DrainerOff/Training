@@ -9,6 +9,8 @@ import { applyTheme } from './ui/settings.js';
 import { applyLegacyImport } from './data/legacy-import.js';
 
 export const VERSION = '1.0.0';
+// Replaced with the commit hash on deploy (same as in sw.js) — shown in Settings.
+export const BUILD = '__BUILD__';
 
 async function boot() {
   let adapter;
@@ -41,6 +43,7 @@ async function boot() {
   const sync = createSync(store);
   store.onLocalChange = () => sync.schedule(2500);
 
+  app.build = BUILD;
   mount(document.getElementById('app'), { store, sync, version: VERSION, storageKind });
   document.getElementById('boot')?.remove();
 
@@ -63,6 +66,13 @@ async function boot() {
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    // A new release takes over in the background; offer a restart (all data is already saved).
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController) {
+        app.ui?.toast('Загружена новая версия приложения', { action: { label: 'Перезапустить', fn: () => location.reload() }, ms: 20000 });
+      }
+    });
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 

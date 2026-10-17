@@ -7,7 +7,7 @@ import {
 } from '../lib/program.js';
 import { parseResultsText } from '../lib/textimport.js';
 import { fmtDay, fmtTime, normName, uid } from '../lib/util.js';
-import { describeError } from '../data/sync.js';
+import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { findSameSlotSession } from '../lib/planner.js';
 
 const ORIGINAL_PROGRAM_URL = 'https://docs.google.com/spreadsheets/d/1uiEDiFZYKHKUqVUqPT4HrZlBR8fqNGYr/edit';
@@ -58,7 +58,14 @@ export function Settings({ syncStatus }) {
   const theme = st.kv.theme || 'auto';
 
   const saveAndTest = async () => {
-    const next = { url: url.trim(), token: token.trim() };
+    const next = { url: url.trim(), token: token.replace(/\s+/g, '') };
+    if (next.url || next.token) {
+      const problem = checkApiUrl(next.url) || checkToken(next.token);
+      if (problem) {
+        setCheck({ ok: false, text: problem });
+        return;
+      }
+    }
     await app.store.setKV({ sync: next });
     if (!next.url || !next.token) {
       setCheck({ ok: false, text: 'Синхронизация выключена: данные хранятся только на этом устройстве.' });
@@ -71,7 +78,13 @@ export function Settings({ syncStatus }) {
       setCheck({ ok: true, text: `Подключено к таблице «${res.name}».` });
       app.sync.syncNow();
     } catch (err) {
-      setCheck({ ok: false, text: describeError(err) });
+      const unreachable = err?.code === 'network' && navigator.onLine;
+      setCheck({
+        ok: false,
+        text: unreachable
+          ? 'Веб-приложение не ответило. Проверьте: 1) в развертывании выбран доступ «Все», а не «Все, у кого есть аккаунт Google»; 2) адрес взят из «Управление развертываниями» и оканчивается на /exec; 3) на телефоне есть интернет.'
+          : describeError(err),
+      });
     }
   };
 
@@ -178,7 +191,7 @@ export function Settings({ syncStatus }) {
       </div>
     </div>
 
-    <p class="muted" style="font-size:12px;margin-top:20px">Версия ${app.version}. Хранилище: ${app.storageKind}${app.persisted ? ', постоянное' : ''}.</p>
+    <p class="muted" style="font-size:12px;margin-top:20px">Версия ${app.version}${app.build && !app.build.startsWith('__') ? `, сборка ${app.build}` : ''}. Хранилище: ${app.storageKind}${app.persisted ? ', постоянное' : ''}.</p>
   </main>`;
 }
 

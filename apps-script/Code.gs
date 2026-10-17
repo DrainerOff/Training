@@ -13,6 +13,7 @@
 var API_VERSION = 1;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
+var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
 
 // [column header, client field, type]. Readable columns first — так листы удобно читать
 // человеку и ChatGPT; технические поля в конце.
@@ -85,11 +86,14 @@ var INSPECT_SHEET = 'App_Inspect';
 var CATEGORIES = ['base', 'hammer', 'pullup', 'iso', 'calves'];
 var TZ_ = null;
 
-// The web app runs in the context of the bound spreadsheet; the stored id is a fallback.
+// The bound spreadsheet. A web-app execution may have no "active" spreadsheet, so setup()
+// stores the id and the API opens it by id. The id never comes from a request.
 function ss_() {
   var active = SpreadsheetApp.getActive();
   if (active) return active;
-  return SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'));
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!id) throw new Error('Не найден ID таблицы: откройте таблицу и выполните «Тренировки → Подготовить листы и ключ».');
+  return SpreadsheetApp.openById(id);
 }
 
 function tz_() {
@@ -104,14 +108,17 @@ function doGet() {
 }
 
 function doPost(e) {
+  var body = e && e.postData ? String(e.postData.contents || '') : '';
+  if (body.length > MAX_BODY) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
   var req;
   try {
-    req = JSON.parse(e && e.postData ? e.postData.contents : '');
+    req = JSON.parse(body);
   } catch (err) {
     return json_({ ok: false, error: 'bad_request', message: 'Тело запроса не JSON' });
   }
+  // Every action needs the access key; without it nothing is read or written.
   var token = PropertiesService.getScriptProperties().getProperty('API_TOKEN');
-  if (!token || !req || req.token !== token) return json_({ ok: false, error: 'unauthorized' });
+  if (!token || !req || typeof req.token !== 'string' || !sameSecret_(req.token, token)) return json_({ ok: false, error: 'unauthorized' });
   try {
     if (req.action === 'ping') {
       return json_({ ok: true, api: API_VERSION, name: ss_().getName(), now: Date.now() });
@@ -121,6 +128,14 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: 'server_error', message: String(err && err.message ? err.message : err) });
   }
+}
+
+// Comparison time does not depend on where the strings differ.
+function sameSecret_(a, b) {
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 function json_(obj) {
@@ -689,18 +704,32 @@ function onOpen() {
     .createMenu('Тренировки')
     .addItem('Подготовить листы и ключ', 'setup')
     .addItem('Показать ключ доступа', 'showToken')
+    .addItem('Сменить ключ доступа (если телефон потерян)', 'rotateToken')
     .addItem('Обновить сводку', 'rebuildSummary')
     .addItem('Описать старые листы (для переноса)', 'describeLegacySheets')
     .addToUi();
+}
+
+// 64 hex characters from two random UUIDs (~244 random bits).
+function newToken_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
 }
 
 function getOrCreateToken_() {
   var props = PropertiesService.getScriptProperties();
   var token = props.getProperty('API_TOKEN');
   if (!token) {
-    token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    token = newToken_();
     props.setProperty('API_TOKEN', token);
   }
+  return token;
+}
+
+// Invalidates the old key at once (no redeploy needed); every device must enter the new one.
+function rotateToken() {
+  var token = newToken_();
+  PropertiesService.getScriptProperties().setProperty('API_TOKEN', token);
+  notify_('Новый ключ доступа (старый больше не работает):\n' + token + '\n\nВставьте его в настройки приложения на своих устройствах.');
   return token;
 }
 
