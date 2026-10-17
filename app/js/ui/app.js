@@ -1,0 +1,112 @@
+// Root component: tabs, routing, sheet stack, toast.
+
+import { html, render, useState, useEffect, useRef, app, Icon } from './core.js';
+import { activeSession } from '../lib/planner.js';
+import { Home } from './home.js';
+import { Workout } from './workout.js';
+import { ProgressList, ExerciseDetail } from './progress.js';
+import { History } from './history.js';
+import { Body } from './body.js';
+import { Settings, ProgramEditor, ProgramImport, ResultsImport } from './settings.js';
+
+const TABS = [
+  { id: 'today', label: 'Тренировка', icon: 'today' },
+  { id: 'progress', label: 'Прогресс', icon: 'progress' },
+  { id: 'history', label: 'История', icon: 'history' },
+  { id: 'body', label: 'Тело', icon: 'body' },
+];
+
+function App() {
+  const [, setVersion] = useState(0);
+  const [syncStatus, setSyncStatus] = useState({ ...app.sync.status });
+  const [route, setRoute] = useState({ tab: 'today', stack: [] });
+  const [sheets, setSheets] = useState([]);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const screenRef = useRef(null);
+
+  useEffect(() => app.store.subscribe(() => setVersion((v) => v + 1)), []);
+  useEffect(() => app.sync.subscribe((s) => setSyncStatus(s)), []);
+
+  app.ui = {
+    open(renderFn) {
+      const id = Math.random().toString(36).slice(2);
+      setSheets((s) => [...s, { id, renderFn }]);
+      return id;
+    },
+    close(id) {
+      setSheets((s) => (id ? s.filter((x) => x.id !== id) : s.slice(0, -1)));
+    },
+    toast(text, { action = null, overDock = false, ms = 5000 } = {}) {
+      clearTimeout(toastTimer.current);
+      setToast({ text, action, overDock, id: Date.now() });
+      toastTimer.current = setTimeout(() => setToast(null), ms);
+    },
+    go({ tab, view }) {
+      setSheets([]);
+      setRoute((r) => {
+        if (view) return { tab: tab || r.tab, stack: [...r.stack, view] };
+        return { tab: tab || r.tab, stack: [] };
+      });
+    },
+    back() {
+      setRoute((r) => ({ ...r, stack: r.stack.slice(0, -1) }));
+    },
+  };
+
+  const view = route.stack[route.stack.length - 1] || null;
+  const st = app.store.state;
+  const running = activeSession(st.sessions.values());
+  let screen;
+  if (view?.type === 'settings') screen = html`<${Settings} syncStatus=${syncStatus} />`;
+  else if (view?.type === 'program') screen = html`<${ProgramEditor} />`;
+  else if (view?.type === 'program-import') screen = html`<${ProgramImport} />`;
+  else if (view?.type === 'results-import') screen = html`<${ResultsImport} />`;
+  else if (view?.type === 'exercise') screen = html`<${ExerciseDetail} key=${view.key} seriesKey=${view.key} />`;
+  else if (view?.type === 'session') {
+    const s = st.sessions.get(view.id);
+    screen = s && !s.deleted
+      ? html`<${Workout} key=${s.id} session=${s} mode=${s.status === 'active' && running?.id === s.id ? 'live' : 'edit'} syncStatus=${syncStatus} />`
+      : html`<main class="screen"><div class="empty"><h2>Тренировка удалена</h2></div></main>`;
+  } else if (route.tab === 'today') {
+    screen = running
+      ? html`<${Workout} key=${running.id} session=${running} mode="live" syncStatus=${syncStatus} />`
+      : html`<${Home} syncStatus=${syncStatus} />`;
+  } else if (route.tab === 'progress') screen = html`<${ProgressList} />`;
+  else if (route.tab === 'history') screen = html`<${History} syncStatus=${syncStatus} />`;
+  else screen = html`<${Body} />`;
+
+  useEffect(() => {
+    document.querySelector('.screen')?.scrollTo?.(0, 0);
+  }, [route.tab, view?.type, view?.key, view?.id]);
+
+  return html`<div class="shell" ref=${screenRef}>
+    ${st.storageError ? html`<div class="notice notice--caution" style="margin:calc(var(--safe-top) + 8px) 16px 0"><h3>Ошибка сохранения</h3><p>${st.storageError}</p></div>` : null}
+    ${screen}
+    <nav class="tabbar" aria-label="Разделы">
+      ${TABS.map(
+        (t) => html`<button type="button" aria-current=${route.tab === t.id && !view ? 'page' : null}
+          onClick=${() => app.ui.go({ tab: t.id })}>
+          <${Icon} name=${t.icon} />${t.id === 'today' && running ? html`<span class="tabbar__dot" aria-hidden="true"></span>` : null}${t.label}
+        </button>`,
+      )}
+    </nav>
+    ${sheets.map((s) => html`<div key=${s.id}>${s.renderFn(() => app.ui.close(s.id))}</div>`)}
+    ${toast
+      ? html`<div class=${'toast' + (toast.overDock ? ' toast--over-dock' : '')} role="status" key=${toast.id}>
+          <span>${toast.text}</span>
+          ${toast.action
+            ? html`<button type="button" onClick=${() => { toast.action.fn(); setToast(null); }}>${toast.action.label}</button>`
+            : null}
+        </div>`
+      : null}
+  </div>`;
+}
+
+export function mount(el, { store, sync, version, storageKind }) {
+  app.store = store;
+  app.sync = sync;
+  app.version = version;
+  app.storageKind = storageKind;
+  render(html`<${App} />`, el);
+}
