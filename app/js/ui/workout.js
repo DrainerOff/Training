@@ -7,7 +7,7 @@ import {
 import { derived, latestBodyweight } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
-import { previousExposures, compareExposures } from '../lib/analytics.js';
+import { previousExposures, compareExposures } from '../lib/plateau.js';
 import { fmtNum, fmtDay, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
 

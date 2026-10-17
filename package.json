@@ -9,7 +9,8 @@
     "test": "node --test \"tests/unit/*.test.js\" \"tests/server/*.test.js\"",
     "test:e2e": "playwright test",
     "test:all": "npm test && npm run test:e2e",
-    "icons": "python3 tools/make_icons.py"
+    "icons": "python3 tools/make_icons.py",
+    "check:blockers": "node tools/blockers/check.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1"

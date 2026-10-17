@@ -32,6 +32,23 @@ jobs:
       - name: End-to-end tests (iPhone emulation, offline relaunch)
         run: npm run test:e2e
 
+  blocklists:
+    # Today's filter lists (EasyList, EasyPrivacy, AdGuard): flags a list update that starts
+    # blocking one of our files or hiding an element. Informational — never blocks publishing;
+    # the tests above check the same against the snapshot in tests/fixtures/blocklists.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Check app files and screens against live filter lists
+        run: npm run check:blockers
+
   publish:
     needs: test
     if: github.event_name != 'pull_request'

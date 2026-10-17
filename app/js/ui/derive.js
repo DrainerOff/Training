@@ -1,7 +1,7 @@
 // Derived data shared across screens, memoised on the store version.
 
 import { app } from './core.js';
-import { buildExposures } from '../lib/analytics.js';
+import { buildExposures } from '../lib/plateau.js';
 import { allOptions } from '../lib/program.js';
 
 let cache = { v: -1 };

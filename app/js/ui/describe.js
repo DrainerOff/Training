@@ -1,4 +1,4 @@
-// Human wording for analytics results.
+// Human wording for progress and plateau results (lib/plateau.js).
 
 import { fmtNum, plural } from '../lib/util.js';
 

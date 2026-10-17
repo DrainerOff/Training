@@ -2,7 +2,7 @@
 
 import { html, useState, app, openSheet, Sheet } from './core.js';
 import { MetricFields } from './workout.js';
-import { weightTrend, rollingAverage } from '../lib/analytics.js';
+import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, sum } from '../lib/util.js';
 
 export function Body() {

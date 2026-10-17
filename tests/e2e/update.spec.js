@@ -223,6 +223,7 @@ test('code that never arrives: the watchdog shows the stage instead of an endles
   const diag = page.locator('.diag');
   await expect(diag).toContainText('Этап: Загрузка файлов приложения', { timeout: 20_000 });
   await expect(diag).toContainText('нет ответа 2 с');
+  await expect(diag).not.toContainText('блокировщик'); // a hang is not a refusal
   await page.waitForTimeout(2500);
   expect(pages.navigations()).toBe(2); // the first visit + one repair attempt
 });
@@ -247,12 +248,12 @@ test('IndexedDB that never answers: diagnostic screen, temporary mode only by ex
   await expect(diag).toContainText('Внимание: это временный режим');
   await diag.getByRole('button', { name: 'Продолжить без сохранения' }).click();
   await page.waitForFunction(() => window.__trainer?.store.state.loaded);
-  await expect(page.locator('.temp-banner')).toContainText('Временный режим: данные не сохраняются на устройстве');
+  await expect(page.locator('.temp-mode')).toContainText('Временный режим: данные не сохраняются на устройстве');
   await page.getByRole('button', { name: 'Настройки' }).click();
   await expect(page.getByText(/Хранилище: временное, только в памяти/)).toBeVisible();
 
   // Leaving it tries the real database again (still broken here → the diagnostic screen).
-  await page.locator('.temp-banner').getByRole('button', { name: 'Открыть с сохранением' }).click();
+  await page.locator('.temp-mode').getByRole('button', { name: 'Открыть с сохранением' }).click();
   await expect(diag).toContainText('Этап: Открытие базы данных на устройстве (IndexedDB)', { timeout: 20_000 });
 });
 

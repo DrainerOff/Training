@@ -2,7 +2,7 @@
 //
 // A program is a list of days; each day has slots; each slot has one or more options
 // (primary exercise + alternatives). Every option has a stable `key` — that key is the
-// "strength series" used by analytics. Alternatives therefore never get mixed up.
+// "strength series" used by the progress analysis. Alternatives therefore never get mixed up.
 
 import { normName, slugify, uid, plural } from './util.js';
 

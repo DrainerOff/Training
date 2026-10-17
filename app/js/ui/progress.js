@@ -2,7 +2,7 @@
 
 import { html, useState, app, Icon, Plate, Seg, fmtWeight, SetText } from './core.js';
 import { derived, latestBodyweight } from './derive.js';
-import { overview, seriesStatus, STATUS } from '../lib/analytics.js';
+import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
 import { CATEGORY } from '../lib/program.js';
 import { fmtDay, fmtDayShort, fmtNum, median } from '../lib/util.js';
 import { describeComparison } from './describe.js';

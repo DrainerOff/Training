@@ -82,7 +82,7 @@ function App() {
 
   return html`<div class="shell" ref=${screenRef}>
     ${app.temporary
-      ? html`<div class="notice notice--caution temp-banner" role="alert">
+      ? html`<div class="notice notice--caution temp-mode" role="alert">
           <h3>Временный режим: данные не сохраняются на устройстве</h3>
           <p>База на телефоне не открылась. Новые записи живут только до закрытия вкладки, если не успеют уйти в Google Таблицу. Сохранённые раньше тренировки здесь не видны, но не удалены.</p>
           <div class="btn-row"><button type="button" class="btn" onClick=${() => app.leaveTemporary?.()}>Открыть с сохранением</button></div>

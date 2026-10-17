@@ -4,7 +4,7 @@ import { html, useState, app, Icon, Plate, Sheet, openSheet, SyncBadge, fmtWeigh
 import { derived } from './derive.js';
 import { nextWorkout, findSameSlotSession, itemsForDay, itemTarget } from '../lib/planner.js';
 import { PHASE, phaseSummary, fmtTarget } from '../lib/program.js';
-import { previousExposures } from '../lib/analytics.js';
+import { previousExposures } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayWeekday } from '../lib/util.js';
 import { CycleWeekDay } from './workout.js';
 

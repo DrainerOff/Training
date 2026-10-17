@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildExposures, compareExposures, seriesStatus, overview, previousExposures, weightTrend } from '../../app/js/lib/analytics.js';
+import { buildExposures, compareExposures, seriesStatus, overview, previousExposures, weightTrend } from '../../app/js/lib/plateau.js';
 
 // Fixture builder. `spec` = { cycle, week, day, date, sets: [[w, r, rir?], ...], key?, flags?, drop? }
 function fixture(specs) {

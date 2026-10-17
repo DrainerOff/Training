@@ -1552,7 +1552,7 @@ textarea.input {
   resize: vertical;
 }
 
-.temp-banner {
+.temp-mode {
   margin: calc(var(--safe-top) + 8px) 16px 0;
   border-left-color: var(--bad);
 }

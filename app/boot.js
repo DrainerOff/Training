@@ -120,9 +120,31 @@
     console.error('[boot] ' + at + ':', err);
     // A newer release that is already downloaded may have the fix: let it take over.
     activateWaitingWorker();
-    if (at === 'modules' && !healedRecently()) {
-      render({ healing: true });
-      heal().then(showHealResult);
+    if (at === 'modules') {
+      healing = true;
+      render({ checking: true });
+      Promise.all([online(), checkModules()]).then(function (r) {
+        failed.files = r[1];
+        // Refused while the network works: a content blocker. Re-downloading can't help.
+        var blocked = r[0]
+          ? r[1].problems.filter(function (p) {
+              return p.reason === 'blocked';
+            })
+          : [];
+        if (blocked.length) {
+          healing = false;
+          failed.blocked = blocked.map(function (p) {
+            return shortUrl(p.url);
+          });
+          render({});
+        } else if (!healedRecently()) {
+          render({ healing: true });
+          heal().then(showHealResult);
+        } else {
+          healing = false;
+          render({});
+        }
+      });
     } else {
       render({});
     }
@@ -179,7 +201,9 @@
   function within(promise, ms) {
     return new Promise(function (resolve, reject) {
       var t = setTimeout(function () {
-        reject(new Error('нет ответа ' + Math.round(ms / 1000) + ' с'));
+        var err = new Error('нет ответа ' + Math.round(ms / 1000) + ' с');
+        err.timeout = true;
+        reject(err);
       }, ms);
       Promise.resolve(promise).then(
         function (v) {
@@ -228,6 +252,60 @@
         clearTimeout(t);
         resolve(null);
       }
+    });
+  }
+
+  // --- which file failed ------------------------------------------------------------------
+  // Safari reports a failed dependency on the page's own module script (js/main.js), not on
+  // the file that failed. Walk the import graph with fetch() to name it. A request that a
+  // content blocker refuses fails like a network error while the rest of the network works.
+  var IMPORT_RE = /^\s*(?:import|export)\s[^'"]*?['"](\.{1,2}\/[^'"]+)['"]/gm;
+
+  function checkModules() {
+    var entry = new URL('./js/main.js', location.href).href;
+    var seen = {};
+    seen[entry] = true;
+    var result = { checked: 0, problems: [] };
+    function level(urls) {
+      if (!urls.length) return Promise.resolve(result);
+      return Promise.all(
+        urls.map(function (url) {
+          return within(fetch(url, { cache: 'no-store' }), Math.min(5000, limitFor('modules'))).then(
+            function (res) {
+              result.checked++;
+              if (!res.ok) {
+                result.problems.push({ url: url, reason: 'HTTP ' + res.status });
+                return [];
+              }
+              return res.text().then(function (src) {
+                var next = [];
+                var m;
+                IMPORT_RE.lastIndex = 0;
+                while ((m = IMPORT_RE.exec(src))) {
+                  var dep = new URL(m[1], url).href;
+                  if (!seen[dep]) {
+                    seen[dep] = true;
+                    next.push(dep);
+                  }
+                }
+                return next;
+              });
+            },
+            function (err) {
+              result.checked++;
+              // A refusal fails at once; a request that hangs is a network problem, not a blocker.
+              result.problems.push({ url: url, reason: err && err.timeout ? 'нет ответа' : 'blocked', error: describe(err) });
+              return [];
+            },
+          );
+        }),
+      ).then(function (lists) {
+        return level([].concat.apply([], lists));
+      });
+    }
+    return level([entry]).catch(function (err) {
+      result.error = describe(err);
+      return result;
     });
   }
 
@@ -320,6 +398,19 @@
     lines.push('Этап: ' + (STAGES[failed.stage] || failed.stage) + ' [' + failed.stage + ']');
     lines.push('Ошибка: ' + failed.message);
     if (failed.heal) lines.push('Восстановление файлов: ' + failed.heal);
+    if (failed.files) {
+      lines.push(
+        'Проверка модулей: ' + failed.files.checked + ' файлов, ' +
+          (failed.files.problems.length
+            ? 'не загружаются: ' +
+              failed.files.problems
+                .map(function (p) {
+                  return shortUrl(p.url) + ' (' + (p.reason === 'blocked' ? 'запрос отклонён: ' + p.error : p.reason) + ')';
+                })
+                .join(', ')
+            : 'все загружаются'),
+      );
+    }
     lines.push(
       'Ход запуска: ' +
         log
@@ -415,6 +506,11 @@
     host.removeAttribute('style');
     host.className = 'diag';
     host.textContent = '';
+    if (opts.checking) {
+      host.appendChild(node('h1', { text: 'Проверяю файлы приложения…' }));
+      host.appendChild(node('p', { text: 'Приложение не загрузилось. Ищу файл, который не удаётся получить.' }));
+      return;
+    }
     if (opts.healing) {
       host.appendChild(node('h1', { text: 'Обновляю файлы приложения…' }));
       host.appendChild(node('p', { text: 'Файлы приложения в памяти телефона не загрузились. Скачиваю их заново, страница перезапустится сама. Тренировки на устройстве не затрагиваются.' }));
@@ -476,6 +572,16 @@
         document.createTextNode(failed.message),
       ]),
     );
+    if (failed.blocked) {
+      host.appendChild(
+        node('p', { class: 'diag__stage' }, [
+          node('b', { text: 'Не загружается: ' + failed.blocked.join(', ') + '. ' }),
+          document.createTextNode(
+            'Интернет при этом работает. Так бывает, когда файл отклоняет блокировщик контента Safari: его правила против рекламы и трекеров срабатывают на имя файла. Это ошибка приложения, а не ваших настроек — скопируйте отчёт и пришлите разработчику.',
+          ),
+        ]),
+      );
+    }
     if (failed.heal) host.appendChild(node('p', { text: 'Восстановление файлов: ' + failed.heal + '.' }));
     if (newVersionReady) host.appendChild(node('p', { text: 'Загружена новая версия приложения: нажмите «Запустить новую версию».' }));
     host.appendChild(node('p', { text: 'Сохранённые тренировки не удалялись: ни этот экран, ни кнопки ниже не трогают данные на устройстве.' }));

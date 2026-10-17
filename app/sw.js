@@ -16,7 +16,7 @@ const SHELL = [
   './js/lib/util.js',
   './js/lib/program.js',
   './js/lib/planner.js',
-  './js/lib/analytics.js',
+  './js/lib/plateau.js',
   './js/lib/textimport.js',
   './js/data/db.js',
   './js/data/store.js',
@@ -73,18 +73,20 @@ self.addEventListener('install', (event) => {
     (async () => {
       await downloadShell(await caches.open(CACHE));
       // A page of this generation hands over (the 'skip-waiting' message) once all of its
-      // code has loaded, so no page mixes files of two releases. Pages of releases from
-      // before boot.js don't send it — and may be stuck on «Загрузка…» — so replace those now.
-      if (await previousReleaseIsLegacy()) await self.skipWaiting();
+      // code has loaded, so no page mixes files of two releases. Releases whose pages may
+      // never finish loading can't send it, so they are replaced right away.
+      if (await previousReleaseCantHandOver()) await self.skipWaiting();
     })(),
   );
 });
 
-async function previousReleaseIsLegacy() {
+// ea0febc: no boot.js, hangs on «Загрузка…» when IndexedDB stalls.
+// 7705635: js/lib/analytics.js, which Safari content blockers refuse (EasyPrivacy).
+async function previousReleaseCantHandOver() {
   for (const key of await caches.keys()) {
     if (key === CACHE || !key.startsWith('trainer-')) continue;
     const old = await caches.open(key);
-    if (!(await old.match('./boot.js'))) return true;
+    if (!(await old.match('./boot.js')) || (await old.match('./js/lib/analytics.js'))) return true;
   }
   return false;
 }
