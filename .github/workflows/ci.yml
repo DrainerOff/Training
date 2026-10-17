@@ -1,10 +1,11 @@
 name: Tests and publish
 
-# Every push to main or the working branch: run all tests, then publish app/ to the
-# gh-pages branch (GitHub Pages → "Deploy from a branch" → gh-pages / root).
+# Every pull request and every push to main runs all tests. Only main is published: app/ goes
+# to the gh-pages branch (GitHub Pages → "Deploy from a branch" → gh-pages / root), stamped
+# with the commit. Work happens in branches and reaches the phone through a merge into main.
 on:
   push:
-    branches: [main, claude/strength-tracker-pwa]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -51,10 +52,14 @@ jobs:
 
   publish:
     needs: test
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One gh-pages, one writer at a time.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - name: Build the site (stamp the release into the service worker and Settings)

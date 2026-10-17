@@ -1,0 +1,71 @@
+name: Release
+
+# The GitHub Release (and its tag) for a version that is already live: the tagged commit must be
+# on main and be exactly what GitHub Pages serves, i.e. "Tests and publish" passed for it.
+# Start it with Actions → Release → Run workflow (branch main, version) once that run is green,
+# or by pushing a tag vX.Y.Z on that commit. Notes come from the version's CHANGELOG.md section.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without "v", e.g. 1.0.1 (tags the latest commit of main)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the version, the changelog and the published build
+        id: check
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          fail() { echo "::error::$1"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || fail "Run the release from main"
+            version="$INPUT_VERSION"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "Version must look like 1.0.1, got '$version'"
+          commit="$(git rev-parse HEAD)"
+          short="$(git rev-parse --short=7 HEAD)"
+          grep -q "export const VERSION = '$version';" app/js/main.js || fail "app/js/main.js VERSION is not $version"
+          grep -q "\"version\": \"$version\"" package.json || fail "package.json version is not $version"
+          awk -v h="## v$version" '/^## / { on = ($0 == h || index($0, h " ") == 1); next } on' CHANGELOG.md > notes.md
+          grep -q '[^[:space:]]' notes.md || fail "CHANGELOG.md has no section '## v$version'"
+          git fetch -q origin main gh-pages
+          git merge-base --is-ancestor "$commit" origin/main || fail "$short is not on main"
+          published="$(git log -1 --format=%s origin/gh-pages)"
+          [ "$published" = "Publish $short from main" ] || fail "GitHub Pages serves '$published', not $short from main. Wait for 'Tests and publish' on main, then release the published commit"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            [ "$(git rev-parse "v$version^{commit}")" = "$commit" ] || fail "Tag v$version already points to another commit"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Create the tag and the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+          COMMIT: ${{ steps.check.outputs.commit }}
+        run: |
+          set -eu
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists"
+            exit 0
+          fi
+          gh release create "v$VERSION" --target "$COMMIT" --title "v$VERSION" --notes-file notes.md --latest
+          echo "Released v$VERSION at $COMMIT" >> "$GITHUB_STEP_SUMMARY"

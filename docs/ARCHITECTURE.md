@@ -21,13 +21,13 @@
 ## Решение
 
 ```
-app/ (статика на GitHub Pages: CI публикует ветку gh-pages после зелёных тестов)
+app/ (статика на GitHub Pages: CI публикует main в ветку gh-pages после зелёных тестов)
   Service Worker ── precache всего приложения (версия = хэш коммита)
-  IndexedDB      ── sessions, sets, metrics, kv, outbox
+  IndexedDB      ── sessions, sets, metrics, records, kv, outbox
   Sync engine    ── POST text/plain JSON {action:'sync', token, since, push} ──► Apps Script /exec
                                                                                      │ LockService
                                                                                      ▼
-                                                     Таблица: App_Sets / App_Sessions / App_Metrics / App_Program / App_Summary
+                                                     Таблица: App_Sets / App_Sessions / App_Metrics / App_Records / App_Program / App_Summary
 ```
 
 ### Модель данных
