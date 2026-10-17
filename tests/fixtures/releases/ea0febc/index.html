@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://script.google.com https://*.googleusercontent.com http://127.0.0.1:* http://localhost:*; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Тренировки</title>
+    <meta name="description" content="Трекер силовых тренировок: запись подходов, история и анализ плато" />
+    <meta name="theme-color" content="#eef0eb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1a1f24" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Тренировки" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="preload" href="./fonts/alumni-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./fonts/golos-text-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="./css/app.css" />
+    <script type="module" src="./js/main.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <p id="boot" style="padding: 48px 16px; color: #5e666e; font: 16px system-ui">Загрузка…</p>
+    <noscript>Для работы приложения нужен JavaScript.</noscript>
+  </body>
+</html>

@@ -1,0 +1,93 @@
+name: Tests and publish
+
+# Every pull request and every push to main runs all tests. Only main is published: app/ goes
+# to the gh-pages branch (GitHub Pages → "Deploy from a branch" → gh-pages / root), stamped
+# with the commit. Work happens in branches and reaches the phone through a merge into main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Unit and Apps Script tests
+        run: npm test
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests (iPhone emulation, offline relaunch)
+        run: npm run test:e2e
+
+  blocklists:
+    # Today's filter lists (EasyList, EasyPrivacy, AdGuard): flags a list update that starts
+    # blocking one of our files or hiding an element. Informational — never blocks publishing;
+    # the tests above check the same against the snapshot in tests/fixtures/blocklists.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Check app files and screens against live filter lists
+        run: npm run check:blockers
+
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One gh-pages, one writer at a time.
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build the site (stamp the release into the service worker and Settings)
+        run: |
+          mkdir _site
+          cp -R app/. _site/
+          sed -i "s/__BUILD__/${GITHUB_SHA::7}/" _site/sw.js _site/boot.js _site/js/main.js
+          for f in sw.js boot.js js/main.js; do grep -q "${GITHUB_SHA::7}" "_site/$f"; done
+          touch _site/.nojekyll
+      - name: Push to gh-pages
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Never replace a newer build of main with an older one (a re-run of an old run): phones
+          # must not go back past a change of the on-device database.
+          if git fetch -q origin gh-pages; then
+            live="$(git log -1 --format=%s FETCH_HEAD | sed -n 's/^Publish \([0-9a-f]\{7\}\) from main$/\1/p')"
+            if [ -n "$live" ] && [ "$live" != "${GITHUB_SHA::7}" ] && full="$(git rev-parse -q --verify "$live^{commit}")" && git merge-base --is-ancestor "$GITHUB_SHA" "$full"; then
+              echo "gh-pages serves $live, which is newer than ${GITHUB_SHA::7}: not publishing" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+          cd _site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish ${GITHUB_SHA::7} from ${GITHUB_REF_NAME}"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
