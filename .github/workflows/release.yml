@@ -42,7 +42,7 @@ jobs:
           fi
           echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "Version must look like 1.0.1, got '$version'"
           commit="$(git rev-parse HEAD)"
-          short="$(git rev-parse --short=7 HEAD)"
+          short="${commit::7}" # CI stamps exactly 7 characters
           grep -q "export const VERSION = '$version';" app/js/main.js || fail "app/js/main.js VERSION is not $version"
           grep -q "\"version\": \"$version\"" package.json || fail "package.json version is not $version"
           awk -v h="## v$version" '/^## / { on = ($0 == h || index($0, h " ") == 1); next } on' CHANGELOG.md > notes.md

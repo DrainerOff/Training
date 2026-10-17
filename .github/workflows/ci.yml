@@ -62,6 +62,8 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Build the site (stamp the release into the service worker and Settings)
         run: |
           mkdir _site
@@ -73,6 +75,15 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Never replace a newer build of main with an older one (a re-run of an old run): phones
+          # must not go back past a change of the on-device database.
+          if git fetch -q origin gh-pages; then
+            live="$(git log -1 --format=%s FETCH_HEAD | sed -n 's/^Publish \([0-9a-f]\{7\}\) from main$/\1/p')"
+            if [ -n "$live" ] && [ "$live" != "${GITHUB_SHA::7}" ] && full="$(git rev-parse -q --verify "$live^{commit}")" && git merge-base --is-ancestor "$GITHUB_SHA" "$full"; then
+              echo "gh-pages serves $live, which is newer than ${GITHUB_SHA::7}: not publishing" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
           cd _site
           git init -q -b gh-pages
           git config user.name "github-actions[bot]"
