@@ -320,6 +320,10 @@ p {
 .btn-row > * {
   flex: 1;
 }
+.btn-stack {
+  display: grid;
+  gap: 8px;
+}
 .link {
   color: var(--plate-2);
   font-weight: 600;
@@ -861,6 +865,19 @@ p {
   place-items: center;
   min-width: 0;
 }
+.stepper .stepper__value {
+  color: var(--iron);
+  font-size: 46px;
+  font-weight: 700;
+}
+.stepper .stepper__value--suggested {
+  color: var(--steel);
+}
+.stepper .stepper__value--empty {
+  color: var(--ghost);
+  font-size: 26px;
+  font-weight: 500;
+}
 .stepper__value--empty {
   color: var(--ghost);
   font-size: 26px;
@@ -1020,6 +1037,9 @@ p {
   border: 1px solid var(--hairline);
   background: var(--chalk);
   font-size: 16px;
+}
+.screen .input {
+  background: var(--paper);
 }
 textarea.input {
   min-height: 140px;

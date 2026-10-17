@@ -120,7 +120,11 @@ export function Settings({ syncStatus }) {
 
     <h2 class="section-title">Google Таблица</h2>
     <div class="settings-group" style="padding:14px">
-      <p style="font-size:14px">${statusText}${syncStatus.pending ? ` Ждут отправки: ${syncStatus.pending}.` : ''}</p>
+      <p style="font-size:14px">${statusText}${syncStatus.pending
+        ? syncStatus.state === 'off'
+          ? ` Изменений для отправки: ${syncStatus.pending} — уйдут в таблицу после подключения.`
+          : ` Ждут отправки: ${syncStatus.pending}.`
+        : ''}</p>
       <div class="kv" style="margin-top:12px">
         <label for="sync-url">Адрес веб-приложения Apps Script (…/exec)</label>
         <input id="sync-url" class="input" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -132,9 +136,9 @@ export function Settings({ syncStatus }) {
           placeholder="из меню «Тренировки» в таблице" value=${token} onInput=${(e) => setToken(e.currentTarget.value)} />
       </div>
       ${check ? html`<p style="font-size:14px;margin-top:10px" class=${check.ok === false ? 'warn-line' : 'muted'}>${check.text}</p>` : null}
-      <div class="btn-row" style="margin-top:12px">
-        <button type="button" class="btn" onClick=${saveAndTest}>Сохранить и проверить</button>
-        <button type="button" class="btn" disabled=${syncStatus.state === 'off'} onClick=${() => app.sync.syncNow()}>Синхронизировать</button>
+      <div class="btn-stack" style="margin-top:12px">
+        <button type="button" class="btn btn--primary" onClick=${saveAndTest}>Сохранить и проверить связь</button>
+        ${syncStatus.state !== 'off' ? html`<button type="button" class="btn" onClick=${() => app.sync.syncNow()}>Синхронизировать сейчас</button>` : null}
       </div>
       <p class="muted" style="font-size:13px;margin-top:10px">Как подключить: таблица → Расширения → Apps Script → вставить код из apps-script/Code.gs → меню «Тренировки» → «Подготовить листы и ключ» → Развернуть как веб-приложение (доступ «Все»). Подробно — в README.</p>
     </div>
@@ -395,7 +399,7 @@ export function ResultsImport() {
           ${parsed.sessions.map((s) => html`<li>
             <strong>${fmtDay(s.date)}</strong> <span class="muted">цикл ${s.cycle ?? '?'}, неделя ${s.week ?? '?'}, день ${s.day ?? '?'}</span>
             ${dupOf(s) ? html`<div class="warn-line">Такая тренировка уже есть${skipDup ? ' — будет пропущена' : ' — появится дубликат'}</div>` : null}
-            ${s.items.map((it) => html`<div>${it.name}${it.known ? '' : html` <span class="tag">нет в программе</span>`}: ${it.sets.map((x) => `${x.drop ? 'дроп ' : ''}${String(x.weight).replace('.', ',')}×${x.reps}${x.rir != null ? '@' + x.rir : ''}`).join(', ')}</div>`)}
+            ${s.items.map((it) => html`<div>${it.name}${it.known ? '' : html` <span class="tag">нет в программе</span>`}: ${it.sets.map((x) => `${x.drop ? 'дроп ' : ''}${x.weight === 0 ? 'св' : String(x.weight).replace('.', ',')}×${x.reps}${x.rir != null ? '@' + x.rir : ''}`).join(', ')}</div>`)}
           </li>`)}
         </ul>
         <div style="margin-top:10px"><${Toggle} on=${skipDup} onChange=${setSkipDup}>Пропускать уже записанные</${Toggle}></div>`
