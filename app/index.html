@@ -22,11 +22,13 @@
     <link rel="preload" href="./fonts/alumni-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="./fonts/golos-text-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="./css/app.css" />
+    <!-- boot.js first: a startup watchdog that still works when a module fails to load -->
+    <script src="./boot.js"></script>
     <script type="module" src="./js/main.js"></script>
   </head>
   <body>
     <div id="app"></div>
-    <p id="boot" style="padding: 48px 16px; color: #5e666e; font: 16px system-ui">Загрузка…</p>
+    <div id="boot" role="status" style="padding: 48px 16px; color: #5e666e; font: 16px system-ui">Загрузка…</div>
     <noscript>Для работы приложения нужен JavaScript.</noscript>
   </body>
 </html>

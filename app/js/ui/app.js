@@ -81,7 +81,14 @@ function App() {
   }, [route.tab, view?.type, view?.key, view?.id]);
 
   return html`<div class="shell" ref=${screenRef}>
-    ${st.storageError ? html`<div class="notice notice--caution" style="margin:calc(var(--safe-top) + 8px) 16px 0"><h3>Ошибка сохранения</h3><p>${st.storageError}</p></div>` : null}
+    ${app.temporary
+      ? html`<div class="notice notice--caution temp-banner" role="alert">
+          <h3>Временный режим: данные не сохраняются на устройстве</h3>
+          <p>База на телефоне не открылась. Новые записи живут только до закрытия вкладки, если не успеют уйти в Google Таблицу. Сохранённые раньше тренировки здесь не видны, но не удалены.</p>
+          <div class="btn-row"><button type="button" class="btn" onClick=${() => app.leaveTemporary?.()}>Открыть с сохранением</button></div>
+        </div>`
+      : null}
+    ${st.storageError ?html`<div class="notice notice--caution" style="margin:calc(var(--safe-top) + 8px) 16px 0"><h3>Ошибка сохранения</h3><p>${st.storageError}</p></div>` : null}
     ${screen}
     <nav class="tabbar" aria-label="Разделы">
       ${TABS.map(

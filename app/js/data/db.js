@@ -11,30 +11,141 @@ export const STORES = {
   kv: 'k',
 };
 
-function openRaw(name) {
+// Every IndexedDB request below has a deadline. WebKit has had bugs where `open()` or a
+// transaction never fires success *or* error in a regular (disk-backed) Safari tab while a
+// private tab (in-memory backend) works — the app then waited forever on «Загрузка…».
+// Now a stalled request becomes a StorageError that names the step, and the boot screen
+// shows it instead of hanging.
+//   https://bugs.webkit.org/show_bug.cgi?id=226547 (open never resolves)
+//   https://bugs.webkit.org/show_bug.cgi?id=197050 (reopen hangs after a process restart)
+const OPEN_ATTEMPTS = 2;
+
+// Deadlines are generous: they exist to end a wait that would otherwise never end, not to
+// rush a slow phone. A write gets extra time per record (a backup or a first full download).
+function limit(kind, records = 0) {
+  const override = globalThis.__TRAINER_IDB_TIMEOUT_MS; // tests shorten the deadlines
+  if (override) return override;
+  if (kind === 'open') return 4000;
+  if (kind === 'read') return 15000;
+  return 8000 + 5 * records;
+}
+
+export class StorageError extends Error {
+  constructor(step, message, cause) {
+    super(message);
+    this.name = 'StorageError';
+    this.step = step; // 'open' | 'read' | 'write'
+    this.cause = cause;
+  }
+}
+
+const STEP_TEXT = { open: 'открытие базы', read: 'чтение', write: 'запись' };
+
+function timeoutError(step, ms) {
+  const sec = ms < 1000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000);
+  return new StorageError(step, `IndexedDB не ответила за ${sec} с (${STEP_TEXT[step]})`);
+}
+
+function wrapError(step, err) {
+  if (err instanceof StorageError) return err;
+  const text = err?.message || err?.name || String(err || 'неизвестная ошибка');
+  return new StorageError(step, `IndexedDB: ${STEP_TEXT[step]} не удалось — ${text}`, err);
+}
+
+// Safari 14 workaround: the first request after launch can sit idle until IndexedDB is
+// poked; polling databases() wakes it up. Harmless elsewhere, bounded so it never blocks.
+function wake(ms) {
+  if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') return Promise.resolve();
+  return new Promise((resolve) => {
+    const poke = () => {
+      try {
+        indexedDB.databases().then(done, done);
+      } catch {
+        done();
+      }
+    };
+    const interval = setInterval(poke, 100);
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearInterval(interval);
+      clearTimeout(timer);
+      resolve();
+    }
+    poke();
+  });
+}
+
+function openOnce(name, ms) {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(name, 1);
+    let settled = false;
+    let blocked = false;
+    const finish = (fn, value) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+      return true;
+    };
+    const timer = setTimeout(() => {
+      const err = timeoutError('open', ms);
+      if (blocked) err.message += ': база занята другой вкладкой этого приложения';
+      finish(reject, err);
+    }, ms);
+    let req;
+    try {
+      req = indexedDB.open(name, 1);
+    } catch (err) {
+      finish(reject, wrapError('open', err));
+      return;
+    }
     req.onupgradeneeded = () => {
       const db = req.result;
       for (const [store, keyPath] of Object.entries(STORES)) {
         if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('База данных занята другой вкладкой'));
+    // A connection that arrives after the deadline is closed, so it can't block a retry.
+    req.onsuccess = () => {
+      if (!finish(resolve, req.result)) req.result.close();
+    };
+    req.onerror = (event) => {
+      event?.preventDefault?.();
+      finish(reject, wrapError('open', req.error));
+    };
+    // Only an upgrade can be blocked; it proceeds once the other tab lets go, so keep waiting.
+    req.onblocked = () => {
+      blocked = true;
+    };
   });
 }
 
+async function openDb(name) {
+  if (typeof indexedDB === 'undefined' || !indexedDB) {
+    throw new StorageError('open', 'IndexedDB недоступна в этом браузере');
+  }
+  let lastErr;
+  for (let attempt = 1; attempt <= OPEN_ATTEMPTS; attempt++) {
+    await wake(Math.min(1500, limit('open')));
+    try {
+      return await openOnce(name, limit('open'));
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  if (OPEN_ATTEMPTS > 1) lastErr.message += ` (попыток: ${OPEN_ATTEMPTS})`;
+  throw lastErr;
+}
+
 export async function idbAdapter(name = 'trainer') {
-  let db = await openRaw(name);
+  let db = await openDb(name);
   const watch = () => {
-    db.onclose = () => {
-      db = null;
+    const current = db;
+    current.onclose = () => {
+      if (db === current) db = null;
     };
-    db.onversionchange = () => {
-      db.close();
-      db = null;
+    current.onversionchange = () => {
+      current.close();
+      if (db === current) db = null;
     };
   };
   watch();
@@ -42,14 +153,14 @@ export async function idbAdapter(name = 'trainer') {
   // iOS may close an idle connection while the app sits in the background; reopen once.
   async function withDb(fn) {
     if (!db) {
-      db = await openRaw(name);
+      db = await openDb(name);
       watch();
     }
     try {
       return await fn(db);
     } catch (err) {
       if (err && (err.name === 'InvalidStateError' || err.name === 'TransactionInactiveError')) {
-        db = await openRaw(name);
+        db = await openDb(name);
         watch();
         return fn(db);
       }
@@ -64,38 +175,62 @@ export async function idbAdapter(name = 'trainer') {
         (d) =>
           new Promise((resolve, reject) => {
             const req = d.transaction(store, 'readonly').objectStore(store).getAll();
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
+            const ms = limit('read');
+            const timer = setTimeout(() => reject(timeoutError('read', ms)), ms);
+            req.onsuccess = () => {
+              clearTimeout(timer);
+              resolve(req.result);
+            };
+            req.onerror = () => {
+              clearTimeout(timer);
+              reject(wrapError('read', req.error));
+            };
           }),
       );
     },
+    // Resolves only after the transaction has committed. A transaction that stalls is
+    // aborted at the deadline, so the outcome is definite: nothing of it was saved.
     write(ops) {
       if (!ops.length) return Promise.resolve();
       const stores = [...new Set(ops.map((o) => o.store))];
       return withDb(
         (d) =>
           new Promise((resolve, reject) => {
-            let tx;
-            try {
-              tx = d.transaction(stores, 'readwrite', { durability: 'strict' });
-            } catch {
-              tx = d.transaction(stores, 'readwrite');
-            }
+            const tx = d.transaction(stores, 'readwrite');
+            const ms = limit('write', ops.length);
+            let settled = false;
+            const finish = (fn, value) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              fn(value);
+            };
+            let timer = setTimeout(() => {
+              try {
+                tx.abort();
+              } catch {
+                // Already committing: give oncomplete one more period, then stop waiting.
+                timer = setTimeout(() => finish(reject, timeoutError('write', 2 * ms)), ms);
+                return;
+              }
+              finish(reject, timeoutError('write', ms));
+            }, ms);
             for (const op of ops) {
               const os = tx.objectStore(op.store);
               if ('delete' in op) os.delete(op.delete);
               else os.put(op.value);
             }
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-            tx.onabort = () => reject(tx.error || new Error('Запись отменена'));
+            tx.oncomplete = () => finish(resolve);
+            tx.onerror = () => finish(reject, wrapError('write', tx.error));
+            tx.onabort = () => finish(reject, wrapError('write', tx.error || new Error('запись отменена')));
           }),
       );
     },
   };
 }
 
-// In-memory adapter for tests (and as a last-resort fallback when IndexedDB is unavailable).
+// In-memory adapter: tests, and the temporary mode the user can choose explicitly on the
+// boot screen when IndexedDB does not work (data is lost when the tab closes).
 export function memoryAdapter(seed = {}) {
   const data = {};
   for (const s of Object.keys(STORES)) data[s] = new Map();

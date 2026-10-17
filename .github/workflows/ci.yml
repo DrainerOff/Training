@@ -44,8 +44,8 @@ jobs:
         run: |
           mkdir _site
           cp -R app/. _site/
-          sed -i "s/__BUILD__/${GITHUB_SHA::7}/" _site/sw.js _site/js/main.js
-          grep -q "${GITHUB_SHA::7}" _site/sw.js
+          sed -i "s/__BUILD__/${GITHUB_SHA::7}/" _site/sw.js _site/boot.js _site/js/main.js
+          for f in sw.js boot.js js/main.js; do grep -q "${GITHUB_SHA::7}" "_site/$f"; done
           touch _site/.nojekyll
       - name: Push to gh-pages
         env:
