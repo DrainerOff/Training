@@ -224,11 +224,15 @@ test('smallest iPhone: records card and the entry sheet fit, nothing hidden behi
   await open(page);
   await toRecords(page);
   await page.getByRole('button', { name: new RegExp(HAMMER) }).first().click();
-  await page.locator('.screen').evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  await page.waitForTimeout(150);
-  const add = await page.getByRole('button', { name: 'Добавить рекорд вручную' }).boundingBox();
-  const tab = await page.locator('.tabbar').boundingBox();
-  expect(add.y + add.height).toBeLessThanOrEqual(tab.y);
+  await expect(page.getByRole('button', { name: 'Добавить рекорд вручную' })).toBeAttached();
+  // Opening a card scrolls it to the top after paint; scroll down once that has happened.
+  await expect(async () => {
+    await page.locator('.screen').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await page.waitForTimeout(100);
+    const add = await page.getByRole('button', { name: 'Добавить рекорд вручную' }).boundingBox();
+    const tab = await page.locator('.tabbar').boundingBox();
+    expect(add.y + add.height).toBeLessThanOrEqual(tab.y);
+  }).toPass({ timeout: 3000 });
   await page.getByRole('button', { name: 'Добавить рекорд вручную' }).click();
   const sheet = page.getByRole('dialog', { name: 'Новый рекорд' });
   await page.waitForTimeout(350);
