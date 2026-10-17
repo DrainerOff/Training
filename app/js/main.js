@@ -6,6 +6,7 @@ import { createSync } from './data/sync.js';
 import { mount } from './ui/app.js';
 import { app } from './ui/core.js';
 import { applyTheme } from './ui/settings.js';
+import { applyLegacyImport } from './data/legacy-import.js';
 
 export const VERSION = '1.0.0';
 
@@ -21,6 +22,21 @@ async function boot() {
   const store = createStore(adapter);
   await store.load();
   applyTheme(store.state.kv.theme);
+  // One-time import of the program and the 16.10.2026 workout from the old Google Sheet.
+  // Idempotent; skipped when `trainer.skipBundledImport` is set (used by tests).
+  let skipImport = false;
+  try {
+    skipImport = localStorage.getItem('trainer.skipBundledImport') === '1';
+  } catch {
+    skipImport = false;
+  }
+  if (!skipImport) {
+    try {
+      await applyLegacyImport(store);
+    } catch (err) {
+      console.error('Bundled import failed', err);
+    }
+  }
 
   const sync = createSync(store);
   store.onLocalChange = () => sync.schedule(2500);

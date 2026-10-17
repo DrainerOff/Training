@@ -33,6 +33,8 @@ export function Home({ syncStatus }) {
       <button type="button" class="icon-btn" aria-label="Настройки" onClick=${() => app.ui.go({ view: { type: 'settings' } })}><${Icon} name="gear" /></button>
     </header>
 
+    <${ImportNotice} />
+
     ${st.program.draft
       ? html`<div class="notice notice--caution">
           <h3>Перенесите программу</h3>
@@ -85,6 +87,36 @@ export function Home({ syncStatus }) {
       <button type="button" class="btn btn--primary btn--block btn--big" onClick=${() => start()}>Начать тренировку</button>
     </div>
   </main>`;
+}
+
+// Shown once after the bundled import from the old Google Sheet: what came in, what was skipped.
+function ImportNotice() {
+  const r = app.store.state.kv.importNotice;
+  if (!r || r.seen) return null;
+  const dismiss = () => app.store.setKV({ importNotice: { ...r, seen: true } });
+  const session = app.store.state.sessions.get('gs-s5');
+  if (r.problems?.length) {
+    return html`<div class="notice notice--caution">
+      <h3>Перенос из Google Таблицы не выполнен</h3>
+      <p>${r.problems.join('; ')}</p>
+      <div class="btn-row"><button type="button" class="btn" onClick=${dismiss}>Понятно</button></div>
+    </div>`;
+  }
+  const lines = [];
+  if (r.program) lines.push('программа: 4 дня, 3-недельный цикл, варианты упражнений');
+  if (r.sessions) lines.push(`тренировка 16 октября: ${r.sets} подходов`);
+  if (r.metrics) lines.push('вес тела и сон за 16 октября');
+  return html`<div class="notice">
+    <h3>Перенесено из Google Таблицы</h3>
+    <p>${lines.length ? lines.join('; ') + '.' : 'Новых данных нет.'} Исходные таблицы не изменялись.</p>
+    ${r.skipped.map((s) => html`<p>${s}</p>`)}
+    <div class="btn-row">
+      ${session && !session.deleted
+        ? html`<button type="button" class="btn" onClick=${() => { dismiss(); app.ui.go({ view: { type: 'session', id: session.id } }); }}>Открыть 16 октября</button>`
+        : null}
+      <button type="button" class="btn" onClick=${dismiss}>Понятно</button>
+    </div>
+  </div>`;
 }
 
 function openStart(plan, days, setPick, past, start) {

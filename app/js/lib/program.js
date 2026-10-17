@@ -9,7 +9,7 @@ import { normName, slugify, uid, plural } from './util.js';
 export const CATEGORY = {
   base: { label: 'Базовое', heavySets: 4 },
   hammer: { label: 'Hammer', heavySets: 3 },
-  pullup: { label: 'Подтягивания', heavySets: 3, reps: [6, 6], noRir: true },
+  pullup: { label: 'Подтягивания', heavySets: 3, reps: [6, 6] },
   iso: { label: 'Изоляция', heavySets: 3 },
   calves: { label: 'Икры', heavySets: 3, dropOnWeek: 3 },
 };
@@ -80,20 +80,21 @@ export function makeSlot({ name, category = 'iso', alts = [], step = 2.5, overri
   };
 }
 
-// Exercises the owner named explicitly in the brief. Used only as quick-add suggestions
-// in the program editor — the day layout itself must come from the original program.
-export const KNOWN_EXERCISES = [
-  { name: 'Жим штанги под наклоном', category: 'base', alts: ['Горизонтальный жим штанги'] },
-  { name: 'Наклонный Hammer', category: 'hammer', alts: ['Наклонный жим гантелей'] },
-  { name: 'Маятниковый присед', category: 'base' },
-  { name: 'Горизонтальная тяга в тренажёре', category: 'base' },
-  { name: 'Сгибание ног лёжа', category: 'iso' },
-  { name: 'Пресс в тренажёре', category: 'iso' },
-  { name: 'Икры в жиме ногами', category: 'calves' },
-  { name: 'Подтягивания прямым хватом', category: 'pullup', step: 2.5 },
-  { name: 'Подтягивания обратным хватом', category: 'pullup', step: 2.5 },
-  { name: 'Подтягивания нейтральным хватом', category: 'pullup', step: 2.5 },
-];
+// Quick-add suggestions: the exercises of the current program, one entry per slot
+// (primary name + alternatives), without duplicates.
+export function exerciseCatalog(program) {
+  const seen = new Set();
+  const out = [];
+  for (const d of program?.days || []) {
+    for (const s of d.slots) {
+      const key = s.options[0].key;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: s.options[0].name, category: s.category, alts: s.options.slice(1).map((o) => o.name) });
+    }
+  }
+  return out;
+}
 
 // Starter program: only what is known for certain (pull-up grips per day).
 // `draft: true` makes the app ask the owner to fill in the rest from the original program.

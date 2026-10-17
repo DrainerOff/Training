@@ -13,6 +13,10 @@ test.beforeAll(async () => {
 });
 test.afterAll(() => web?.close());
 
+// These scenarios use the sample program; the bundled import of the owner's sheet is covered in import.spec.js.
+const skipBundledImport = (target) => target.addInitScript(() => localStorage.setItem('trainer.skipBundledImport', '1'));
+test.beforeEach(async ({ page }) => skipBundledImport(page));
+
 async function pad(page, keys) {
   for (const k of keys) await page.locator('.pad__keys button', { hasText: new RegExp(`^${k === ',' ? ',' : k}$`) }).click();
   await page.getByRole('button', { name: 'Готово' }).click();
@@ -193,7 +197,11 @@ test('airplane mode: cold start after full close, keep training, sync later with
   const appUrl = `http://127.0.0.1:${port}/`;
   const gas = await startFakeGas({ port: 0 });
   const gasUrl = `http://127.0.0.1:${gas.server.address().port}/exec`;
-  const launch = () => chromium.launchPersistentContext(profile, { ...devices['iPhone 13'] });
+  const launch = async () => {
+    const c = await chromium.launchPersistentContext(profile, { ...devices['iPhone 13'] });
+    await skipBundledImport(c);
+    return c;
+  };
   try {
     // 1. First visit online: install the app shell, set things up.
     let ctx = await launch();

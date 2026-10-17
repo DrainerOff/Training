@@ -2,7 +2,7 @@
 
 import { html, useState, app, Icon, Sheet, openSheet, Seg, Toggle, confirmSheet } from './core.js';
 import {
-  CATEGORY, CATEGORY_KEYS, KNOWN_EXERCISES, makeSlot, makeOption, parseProgramText, programToText, parseOverride,
+  CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeSlot, makeOption, parseProgramText, programToText, parseOverride,
   fmtOverride, targetFor, fmtTarget, reuseKeys,
 } from '../lib/program.js';
 import { parseResultsText } from '../lib/textimport.js';
@@ -291,7 +291,7 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   return html`<${Sheet} title=${isNew ? 'Новое упражнение' : 'Упражнение'} onClose=${onClose}>
     ${isNew
       ? html`<div class="sheet__section"><div class="sheet__label">Быстрый выбор</div>
-          <div class="seg">${KNOWN_EXERCISES.map((k) => html`<button type="button" onClick=${() => up({ name: k.name, category: k.category, alts: (k.alts || []).join('\n') })}>${k.name}</button>`)}</div>
+          <div class="seg">${exerciseCatalog(app.store.state.program).map((k) => html`<button type="button" onClick=${() => up({ name: k.name, category: k.category, alts: (k.alts || []).join('\n') })}>${k.name}</button>`)}</div>
         </div>`
       : null}
     <div class="sheet__section">

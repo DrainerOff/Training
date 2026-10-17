@@ -6,7 +6,7 @@ import {
 } from './core.js';
 import { derived, latestBodyweight } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
-import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, KNOWN_EXERCISES, makeOption } from '../lib/program.js';
+import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures } from '../lib/analytics.js';
 import { fmtNum, fmtDay, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
@@ -436,7 +436,7 @@ function AddItemSheet({ session, onClose, onAdded }) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState('iso');
   const present = new Set(session.items.flatMap((i) => i.options.map((o) => normName(o.name))));
-  const picks = KNOWN_EXERCISES.filter((k) => !present.has(normName(k.name)));
+  const picks = exerciseCatalog(app.store.state.program).filter((k) => !present.has(normName(k.name)));
   const add = async (n, c) => {
     const item = await app.store.addItem(session.id, { name: n, category: c });
     onClose();
@@ -452,7 +452,7 @@ function AddItemSheet({ session, onClose, onAdded }) {
       <button type="button" class="btn btn--primary btn--block" style="margin-top:10px" disabled=${!name.trim()} onClick=${() => add(name.trim(), category)}>Добавить</button>
     </div>
     ${picks.length
-      ? html`<div class="sheet__section"><div class="sheet__label">Из вашего списка</div>
+      ? html`<div class="sheet__section"><div class="sheet__label">Из вашей программы</div>
           ${picks.map((k) => html`<button type="button" class="choice" onClick=${() => add(k.name, k.category)}>
             <span class="choice__main">${k.name}<span class="choice__sub">${CATEGORY[k.category].label}</span></span></button>`)}
         </div>`
