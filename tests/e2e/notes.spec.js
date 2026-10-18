@@ -62,12 +62,15 @@ test('settings of a variant: shown when it opens, its own per variant, kept offl
     await expect(panel.locator('.setup')).toHaveText('Настройки: сиденье 5, ручки 3');
 
     // Another variant of the same exercise has its own settings (none yet).
+    const swap = page.getByRole('dialog', { name: 'Заменить упражнение' });
     await panel.getByRole('button', { name: 'Заменить' }).click();
-    await page.getByRole('dialog', { name: 'Заменить упражнение' }).getByRole('button', { name: new RegExp(DUMBBELLS) }).click();
+    await swap.getByRole('button', { name: new RegExp(DUMBBELLS) }).click();
+    await expect(swap).toHaveCount(0); // closes once the swap is saved
     await expect(panel.locator('.panel__title')).toHaveText(DUMBBELLS);
     await expect(panel.locator('.setup')).toHaveText('Настройки тренажёра');
     await panel.getByRole('button', { name: 'Заменить' }).click();
-    await page.getByRole('dialog', { name: 'Заменить упражнение' }).getByRole('button', { name: new RegExp(HAMMER) }).click();
+    await swap.getByRole('button', { name: new RegExp(HAMMER) }).click();
+    await expect(swap).toHaveCount(0);
     await expect(panel.locator('.setup')).toHaveText('Настройки: сиденье 5, ручки 3');
 
     // Airplane mode: change them, close and reopen — still there; online again — in the sheet once.
