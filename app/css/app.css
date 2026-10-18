@@ -731,8 +731,12 @@ p {
 }
 .set__tags {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 6px;
   align-items: center;
+  min-width: 0;
+  padding: 4px 0;
   font-size: 13px;
   color: var(--steel);
 }
@@ -751,6 +755,12 @@ p {
 .tag--bad {
   color: var(--bad);
   border-color: currentColor;
+}
+/* in a set row a long tag (another variant's name) wraps instead of covering the numbers */
+.set__tags .tag {
+  white-space: normal;
+  text-align: right;
+  max-width: 100%;
 }
 .tag--caution {
   background: var(--caution);
@@ -802,6 +812,82 @@ p {
 .item-note {
   margin-top: 8px;
   font-size: 14px;
+  color: var(--steel);
+}
+
+/* settings of the exercise variant: one quiet line under the title, the whole line is the button */
+.setup {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: left;
+  color: var(--iron);
+}
+.setup svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: var(--steel);
+}
+.setup__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.setup__label {
+  color: var(--steel);
+}
+.setup--empty {
+  width: auto;
+  border-style: dashed;
+  color: var(--steel);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 10px;
+}
+/* a note on a set: a small icon at the end of the row, filled when there is one */
+.set__note {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-right: -6px;
+  border-radius: 8px;
+  color: var(--ghost);
+}
+.set__note svg {
+  width: 18px;
+  height: 18px;
+}
+.set__note--on {
+  color: var(--iron);
+  background: var(--hairline);
+}
+/* one-time correction card */
+.fix__list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 6px;
+}
+.fix__list li {
+  display: grid;
+  gap: 1px;
+  font-size: 14px;
+}
+.fix__from {
+  color: var(--steel);
+}
+.fix__sets {
+  font-family: var(--font-num);
   color: var(--steel);
 }
 

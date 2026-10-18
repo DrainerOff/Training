@@ -258,6 +258,30 @@ export function fmtOverride(o) {
   return s;
 }
 
+// Options of one slot edited by name (main first). A name that matches an existing option keeps
+// its key, so history stays linked; a renamed main exercise keeps the old main key only if that
+// exercise is not still listed under its own name. Keys never repeat within a slot: two variants
+// with one key would merge their series.
+export function optionsFromNames(names, old = []) {
+  const known = new Map(old.map((o) => [normName(o.name), o.key]));
+  const keys = names.map((n) => known.get(normName(n)) || null);
+  if (!keys[0] && old[0] && !keys.includes(old[0].key)) keys[0] = old[0].key;
+  const used = new Set();
+  const out = names.map((n, i) => {
+    const k = keys[i] && !used.has(keys[i]) ? keys[i] : null;
+    if (k) used.add(k);
+    return { key: k, name: String(n).trim() };
+  });
+  for (const o of out) {
+    if (o.key) continue;
+    let key = slugify(o.name);
+    for (let n = 2; used.has(key); n++) key = `${slugify(o.name)}-${n}`;
+    used.add(key);
+    o.key = key;
+  }
+  return out;
+}
+
 // Keeps series keys stable when a program is re-imported or edited: an option whose name
 // matches an existing option reuses that key, so history stays linked.
 export function reuseKeys(program, previous) {

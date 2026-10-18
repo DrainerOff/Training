@@ -8,12 +8,13 @@ export const STORES = {
   sets: 'id',
   metrics: 'id',
   records: 'id', // manual personal records (since version 2)
+  exercises: 'id', // per-variant settings: seat, handles, stops… (since version 3)
   outbox: 'key',
   kv: 'k',
 };
 // Bumped when a store is added. The upgrade only creates missing stores — existing data is
 // never touched. A database from a newer release is opened as it is (see openOnce).
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 // Every IndexedDB request below has a deadline. WebKit has had bugs where `open()` or a
 // transaction never fires success *or* error in a regular (disk-backed) Safari tab while a

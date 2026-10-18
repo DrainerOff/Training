@@ -2,10 +2,19 @@
 // round-trip. Safe to retry at any point — the server upserts by record id, so a lost
 // response followed by a resend never creates a duplicate set.
 
-export const API_VERSION = 2;
+export const API_VERSION = 3;
 const BATCH = 200;
 // What an Apps Script that predates the `ack` map per entity understood.
 const LEGACY_ENTITIES = ['sessions', 'sets', 'metrics'];
+// Entities added after the first release. A device that synced with an older release moved its
+// cursor past their rows without keeping them, so each is pulled once from the very start (the
+// merge is idempotent); `<entity>Pulled` in kv marks it done.
+const CATCH_UP = ['records', 'exercises'];
+// What waits on the phone while the Apps Script doesn't know the entity yet.
+const WAITING_LABEL = {
+  records: 'рекорды, добавленные вручную',
+  exercises: 'настройки упражнений',
+};
 
 export class SyncError extends Error {
   constructor(code, detail = '') {
@@ -75,21 +84,28 @@ export function describeError(err) {
 }
 
 export function createSync(store, { transport = fetchTransport, now = () => Date.now() } = {}) {
-  const status = { state: 'off', lastSyncAt: null, error: null, notice: null, pending: 0, waiting: 0 };
+  const status = { state: 'off', lastSyncAt: null, error: null, notice: null, pending: 0, waiting: 0, waitingBy: {} };
   const listeners = new Set();
   let running = null;
   let again = false;
   let timer = null;
-  // Entities the connected Apps Script doesn't know yet (records before API 2): they wait on
-  // the phone. They are not "pending" — nothing to retry until Code.gs is updated.
+  // Entities the connected Apps Script doesn't know yet (records before API 2, exercise settings
+  // before API 3): they wait on the phone. They are not "pending" — nothing to retry until
+  // Code.gs is updated.
   const unknown = new Set();
 
   function update(patch) {
-    const waiting = unknown.size ? [...store.state.outbox.values()].filter((e) => unknown.has(e.entity)).length : 0;
+    const counts = new Map();
+    if (unknown.size) {
+      for (const e of store.state.outbox.values()) if (unknown.has(e.entity)) counts.set(e.entity, (counts.get(e.entity) || 0) + 1);
+    }
+    const waiting = [...counts.values()].reduce((a, n) => a + n, 0);
+    const what = [...counts].map(([entity, n]) => `${WAITING_LABEL[entity] || entity} — ${n}`).join('; ');
     const notice = waiting
-      ? `Рекорды, добавленные вручную (${waiting}), сохранены на телефоне. В таблицу они попадут после обновления Apps Script (Code.gs) — инструкция в docs/SETUP.md.`
+      ? `Сохранены на телефоне и попадут в таблицу после обновления Apps Script (Code.gs): ${what}. Инструкция — в docs/SETUP.md.`
       : null;
-    Object.assign(status, patch, { pending: store.state.outbox.size - waiting, waiting, notice });
+    const waitingBy = Object.fromEntries(counts);
+    Object.assign(status, patch, { pending: store.state.outbox.size - waiting, waiting, waitingBy, notice });
     for (const fn of listeners) fn({ ...status });
   }
 
@@ -100,7 +116,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
 
   async function round(cfg) {
     const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
-    const push = { sessions: [], sets: [], metrics: [], records: [] };
+    const push = { sessions: [], sets: [], metrics: [], records: [], exercises: [] };
     const sent = [];
     for (const e of entries) {
       if (e.entity === 'program') {
@@ -115,9 +131,8 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       push[e.entity].push(rec);
       sent.push({ key: e.key, entity: e.entity, updatedAt: rec.updatedAt });
     }
-    // Releases before records ignored them in pulls but still moved the cursor past them; so
-    // records are pulled once from the very start (the server's merge is idempotent).
-    const catchUp = store.state.kv.recordsPulled ? undefined : { records: 0 };
+    const behind = CATCH_UP.filter((entity) => !store.state.kv[`${entity}Pulled`]);
+    const catchUp = behind.length ? Object.fromEntries(behind.map((entity) => [entity, 0])) : undefined;
     const res = await transport(cfg.url, {
       action: 'sync',
       token: cfg.token,
@@ -144,7 +159,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     await store.setKV({
       cursor: Math.max(store.state.kv.cursor || 0, Number(res.cursor) || 0),
       programSince: Math.max(store.state.kv.programSince || 0, Number(res.programUpdatedAt) || 0),
-      ...(catchUp && known.has('records') ? { recordsPulled: true } : {}),
+      ...Object.fromEntries(behind.filter((entity) => known.has(entity)).map((entity) => [`${entity}Pulled`, true])),
     });
     return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size };
   }

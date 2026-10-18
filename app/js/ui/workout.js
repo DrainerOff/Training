@@ -10,6 +10,7 @@ import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalo
 import { previousExposures, compareExposures } from '../lib/plateau.js';
 import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
+import { SETUP_MAX } from '../data/store.js';
 
 const STALE_MS = 12 * 3600 * 1000;
 
@@ -168,6 +169,38 @@ function PrevHint({ prevs, session, category }) {
   </div>`;
 }
 
+// Settings of this exercise variant (seat, handles, stops…): they stay with the machine, so they
+// are shown in every workout until changed. Each variant has its own.
+function SetupLine({ item }) {
+  const text = app.store.setupOf(item.seriesKey);
+  const open = () => openSheet((close) => html`<${SetupSheet} item=${item} onClose=${close} />`);
+  return text
+    ? html`<button type="button" class="setup" onClick=${open} aria-label=${`Настройки «${item.name}»: ${text}. Изменить`}>
+        <${Icon} name="tune" /><span class="setup__text"><span class="setup__label">Настройки:</span> ${text}</span>
+      </button>`
+    : html`<button type="button" class="setup setup--empty" onClick=${open}><${Icon} name="tune" />Настройки тренажёра</button>`;
+}
+
+function SetupSheet({ item, onClose }) {
+  const [text, setText] = useState(app.store.setupOf(item.seriesKey));
+  const save = async () => {
+    try {
+      await app.store.saveSetup(item.seriesKey, item.name, text);
+      onClose();
+    } catch (err) {
+      app.ui.toast(`Не удалось сохранить: ${err.message}`);
+    }
+  };
+  return html`<${Sheet} title=${`Настройки: ${item.name}`} onClose=${onClose}>
+    <p class="muted" style="font-size:14px">Сохраняются для этого варианта и видны в каждой тренировке. У других вариантов — свои.</p>
+    <div class="sheet__section">
+      <textarea class="input" style="min-height:90px" maxlength=${SETUP_MAX} aria-label="Настройки тренажёра"
+        placeholder="Например: сиденье 5, ручки 3, упор на 2-м отверстии" value=${text} onInput=${(e) => setText(e.currentTarget.value)}></textarea>
+    </div>
+    <button type="button" class="btn btn--primary btn--block" onClick=${save}>Сохранить</button>
+  <//>`;
+}
+
 function ExercisePanel({ row, session, next, onNext }) {
   const { item, sets, target, prevs, complete } = row;
   const total = target.sets + target.drop;
@@ -182,6 +215,7 @@ function ExercisePanel({ row, session, next, onNext }) {
       </div>
       <button type="button" class="swap" onClick=${() => openSwap(session, item)}><${Icon} name="swap" />Заменить</button>
     </div>
+    <${SetupLine} item=${item} />
     <${PrevHint} prevs=${prevs} session=${session} category=${item.category} />
     <ol class="sets" aria-label="Подходы сегодня">
       ${sets.map(
@@ -196,6 +230,9 @@ function ExercisePanel({ row, session, next, onNext }) {
             ${s.pain ? html`<span class="tag tag--bad">боль</span>` : null}
             ${s.technique ? html`<span class="tag tag--bad">техника</span>` : null}
             ${s.seriesKey !== item.seriesKey ? html`<span class="tag">${s.exercise}</span>` : null}
+            <button type="button" class=${'set__note' + (s.note ? ' set__note--on' : '')} title=${s.note || null}
+              aria-label=${s.note ? `Заметка к подходу ${i + 1}: ${s.note}. Изменить` : `Добавить заметку к подходу ${i + 1}`}
+              onClick=${() => openSetEdit(s, item, { focus: 'note' })}><${Icon} name="note" /></button>
           </span>
         </li>`,
       )}
@@ -216,7 +253,7 @@ function ExercisePanel({ row, session, next, onNext }) {
         </div>`
       : null}
     <div class="panel__tools">
-      <button type="button" class="toggle" onClick=${() => openMarks(session, item)}><${Icon} name="flag" />Отметки и заметка</button>
+      <button type="button" class="toggle" onClick=${() => openMarks(session, item)}><${Icon} name="flag" />Отметки и комментарий</button>
       ${!complete && !sets.length
         ? html`<button type="button" class="toggle" onClick=${() => app.store.updateItem(session.id, item.slotId, { skipped: true })}>Пропустить</button>`
         : null}
@@ -354,11 +391,11 @@ function LastTime({ prevs, category, index, drop }) {
 
 // ---------------------------------------------------------------- sheets
 
-function openSetEdit(set, item) {
-  openSheet((close) => html`<${SetEditSheet} set=${set} item=${item} onClose=${close} />`);
+function openSetEdit(set, item, { focus = null } = {}) {
+  openSheet((close) => html`<${SetEditSheet} set=${set} item=${item} focus=${focus} onClose=${close} />`);
 }
 
-function SetEditSheet({ set, item, onClose }) {
+function SetEditSheet({ set, item, focus, onClose }) {
   const [v, setV] = useState({ ...set });
   const up = (p) => setV((x) => ({ ...x, ...p }));
   const save = async () => {
@@ -390,7 +427,8 @@ function SetEditSheet({ set, item, onClose }) {
       <${Toggle} on=${v.technique} tone="bad" onChange=${(technique) => up({ technique })}>Техника хуже</${Toggle}>
     </div>
     <div class="sheet__section">
-      <input class="input" placeholder="Заметка к подходу" value=${v.note || ''} onInput=${(e) => up({ note: e.currentTarget.value })} />
+      <input class="input" placeholder="Заметка к подходу" aria-label="Заметка к подходу" value=${v.note || ''} autofocus=${focus === 'note'}
+        onInput=${(e) => up({ note: e.currentTarget.value })} />
     </div>
     <div class="btn-row">
       <button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>
@@ -407,10 +445,45 @@ function SwapSheet({ session, item, onClose }) {
   const { series } = derived();
   const [name, setName] = useState('');
   const [category, setCategory] = useState(item.category);
+  // Sets already recorded under the current variant: were they really done on it?
+  const [asking, setAsking] = useState(null);
+  const logged = app.store.setsOf(session.id, item.slotId).filter((x) => x.seriesKey === item.seriesKey);
   const choose = async (opt) => {
+    if (logged.length && opt.key !== item.seriesKey) {
+      setAsking(opt);
+      return;
+    }
     await app.store.swapVariant(session.id, item.slotId, opt);
     onClose();
   };
+  const finish = async (move) => {
+    try {
+      if (move) {
+        const { moved } = await app.store.reassignVariant(session.id, item.slotId, asking);
+        app.ui.toast(`${moved} ${plural(moved, 'подход перенесён', 'подхода перенесены', 'подходов перенесены')} в «${asking.name}»`);
+      } else {
+        await app.store.swapVariant(session.id, item.slotId, asking);
+      }
+      onClose();
+    } catch (err) {
+      app.ui.toast(`Не удалось сохранить: ${err.message}`);
+    }
+  };
+  if (asking) {
+    const n = logged.length;
+    const sets = logged.map((x) => `${fmtWeight(x.weight, item.category)}×${x.reps}`).join(', ');
+    return html`<${Sheet} title=${`«${asking.name}»`} onClose=${onClose}>
+      <p class="muted" style="font-size:14px">Уже ${plural(n, 'записан', 'записано', 'записано')} ${n} ${plural(n, 'подход', 'подхода', 'подходов')} на «${item.name}»: ${sets}.</p>
+      <div class="sheet__section">
+        <button type="button" class="choice" onClick=${() => finish(true)}>
+          <span class="choice__main">Записал не то упражнение — перенести их<span class="choice__sub">Подходы перейдут в серию «${asking.name}». Веса, повторения, RIR и дата не меняются.</span></span>
+        </button>
+        <button type="button" class="choice" onClick=${() => finish(false)}>
+          <span class="choice__main">Дальше делаю «${asking.name}»<span class="choice__sub">Записанные подходы остаются в «${item.name}» — они сделаны на нём.</span></span>
+        </button>
+      </div>
+    <//>`;
+  }
   return html`<${Sheet} title="Заменить упражнение" onClose=${onClose}>
     <p class="muted" style="font-size:14px">Каждый вариант — отдельная силовая серия. Результаты разных вариантов не сравниваются между собой.</p>
     <div class="sheet__section">
@@ -431,7 +504,7 @@ function SwapSheet({ session, item, onClose }) {
       </div>
       <button type="button" class="btn btn--block" style="margin-top:10px" disabled=${!name.trim()}
         onClick=${async () => {
-          await app.store.updateItem(session.id, item.slotId, { category });
+          if (category !== item.category) await app.store.updateItem(session.id, item.slotId, { category });
           await choose(makeOption(name.trim()));
         }}>Заменить на «${name.trim() || '…'}»</button>
     </div>
@@ -454,7 +527,9 @@ function MarksSheet({ session, item, onClose }) {
     ${row('technique', 'Техника хуже', 'Прирост в этот день не засчитывается как прогресс.', 'bad')}
     ${row('baseline', 'Новая точка отсчёта', 'Техника строже, другие настройки или амплитуда: сравнение начнётся заново, без ложного регресса.')}
     <div class="sheet__section">
-      <textarea class="input" style="min-height:90px" placeholder="Заметка: настройки тренажёра, ощущения…" value=${note} onInput=${(e) => setNote(e.currentTarget.value)}></textarea>
+      <textarea class="input" style="min-height:90px" aria-label="Комментарий к упражнению в этой тренировке"
+        placeholder="Комментарий к этой тренировке: ощущения, что изменить в следующий раз…" value=${note} onInput=${(e) => setNote(e.currentTarget.value)}></textarea>
+      <p class="muted" style="font-size:12px;margin-top:4px">Сиденье, ручки, ограничители — в «Настройках» над подходами: они сохраняются для варианта, а не для одной тренировки.</p>
     </div>
     <button type="button" class="btn btn--primary btn--block" onClick=${async () => {
       await app.store.updateItem(session.id, item.slotId, { flags, note });

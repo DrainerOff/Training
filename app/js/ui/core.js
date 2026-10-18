@@ -56,6 +56,8 @@ const ICONS = {
   down: 'M12 5v14M6 13l6 6 6-6',
   edit: 'M4 20h4L19 9l-4-4L4 16v4z',
   flag: 'M5 21V4h11l-2 4 2 4H5',
+  note: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
+  tune: 'M4 7h9M17 7h3M15 4v6M4 17h3M11 17h9M9 14v6',
 };
 
 export function Icon({ name, label = null }) {

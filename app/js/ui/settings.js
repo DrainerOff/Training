@@ -2,11 +2,11 @@
 
 import { html, useState, app, Icon, Sheet, openSheet, Seg, Toggle, confirmSheet } from './core.js';
 import {
-  CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeSlot, makeOption, parseProgramText, programToText, parseOverride,
+  CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeSlot, optionsFromNames, parseProgramText, programToText, parseOverride,
   fmtOverride, targetFor, fmtTarget, reuseKeys,
 } from '../lib/program.js';
 import { parseResultsText } from '../lib/textimport.js';
-import { fmtDay, fmtTime, normName, uid } from '../lib/util.js';
+import { fmtDay, fmtTime, uid } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { findSameSlotSession } from '../lib/planner.js';
 
@@ -287,13 +287,7 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   const up = (p) => setV((x) => ({ ...x, ...p }));
   const save = () => {
     const names = [v.name.trim(), ...v.alts.split('\n').map((s) => s.trim()).filter(Boolean)];
-    const old = slot?.options || [];
-    const options = names.map((n, i) => {
-      const same = old.find((o) => normName(o.name) === normName(n));
-      if (same) return { key: same.key, name: n };
-      if (i === 0 && old[0]) return { key: old[0].key, name: n }; // rename keeps history
-      return makeOption(n);
-    });
+    const options = optionsFromNames(names, slot?.options || []);
     const overrides = {};
     [1, 2, 3].forEach((w, i) => {
       const o = parseOverride(v.w[i]);

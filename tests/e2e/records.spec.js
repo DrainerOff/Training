@@ -173,7 +173,7 @@ test('sync: a manual record reaches App_Records; with the old Apps Script it wai
         expect(st.waiting).toBeGreaterThan(0);
         expect(st.pending).toBe(0); // waiting for the script is not «в очереди»
         await page.getByRole('button', { name: /Синхронизация:/ }).first().click();
-        await expect(page.locator('.sync-notice')).toContainText('Рекорды, добавленные вручную');
+        await expect(page.locator('.sync-notice')).toContainText(/рекорды, добавленные вручную — \d+/);
         await expect(page.locator('.sync-notice')).toContainText('после обновления Apps Script');
       }
     } finally {
@@ -204,7 +204,7 @@ test('update from release 7705635: the database gains the records store, workout
       await page.waitForFunction(() => window.__trainer?.store.state.loaded || document.querySelector('.diag'));
     }
     expect(await page.evaluate(() => window.__trainer.build)).toBe('new1');
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 2 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 3 }]);
     expect(await page.evaluate(() => window.__trainer.store.state.sets.size)).toBe(sets);
     await page.evaluate(() => window.__trainer.store.saveRecord({ seriesKey: 'naklonnyy-zhim-hammer-naklon', exercise: 'Наклонный жим: Hammer - наклон', category: 'hammer', date: '2025-04-12', weight: 95, reps: 5 }));
     await page.reload();

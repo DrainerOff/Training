@@ -36,7 +36,7 @@ export function RecordsOverview() {
   const fresh = recentAchievements(books, { today, days: 60, limit: 5 });
   const open = (key) => app.ui.go({ view: { type: 'records', key } });
 
-  const waiting = app.sync?.status?.waiting || 0;
+  const waiting = app.sync?.status?.waitingBy?.records || 0;
   const waitingNote = waiting
     ? html`<p class="notice notice--caution" style="margin-bottom:12px">Рекорды, добавленные вручную (${waiting}), сохранены на телефоне и попадут в Google Таблицу после обновления Apps Script (инструкция в docs/SETUP.md).</p>`
     : null;

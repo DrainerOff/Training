@@ -12,7 +12,8 @@
 
 // 2: manual personal records (App_Records); the response's `ack` lists every entity handled,
 // so a client never treats records as saved by a server that doesn't know them.
-var API_VERSION = 2;
+// 3: per-variant exercise settings (App_Exercises).
+var API_VERSION = 3;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -83,6 +84,19 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  // One row per exercise variant: settings that stay with the machine, not with a workout.
+  exercises: {
+    sheet: 'App_Exercises',
+    cols: [
+      ['exercise', 'exercise', 'text'],
+      ['setup', 'setup', 'text'],
+      ['series_key', 'seriesKey', 'key'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
   metrics: {
     sheet: 'App_Metrics',
     cols: [
@@ -98,7 +112,7 @@ var SCHEMA = {
     ],
   },
 };
-var ENTITIES = ['sessions', 'sets', 'metrics', 'records'];
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -464,6 +478,7 @@ function sanitize_(entity, rec) {
   out.updatedAt = updatedAt;
   // A record without what makes it a record is refused (and stays queued on the phone).
   if (entity === 'records' && (!out.date || !out.seriesKey || !(out.reps >= 1) || out.weight == null)) ok = false;
+  if (entity === 'exercises' && (!out.seriesKey || out.id !== 'x:' + out.seriesKey)) ok = false;
   return ok ? out : null;
 }
 
@@ -591,7 +606,14 @@ function readProgram_() {
       id: String(r[11] || '') || 'row' + (i + 2),
       category: CATEGORIES.indexOf(String(r[5])) >= 0 ? String(r[5]) : 'iso',
       step: Number(String(r[6]).replace(',', '.')) || 2.5,
-      options: names.map(function (n, k) { return { key: keys[k] && ID_RE.test(keys[k]) ? keys[k] : slugify_(n), name: n }; }),
+      // Keys go with names by position. If a hand edit changed the number of alternatives without
+      // the `keys` column, positions no longer match: a name keeps a key only if it is its own,
+      // otherwise it starts a series of its own — two variants never share one.
+      options: names.map(function (n, k) {
+        var slug = slugify_(n);
+        var key = keys.length === names.length ? keys[k] : keys.indexOf(slug) >= 0 ? slug : null;
+        return { key: key && ID_RE.test(key) ? key : slug, name: n };
+      }),
       overrides: overrides,
       note: String(r[10] || ''),
       order: Number(r[2]) || i,
@@ -678,7 +700,7 @@ function rebuildSummary() {
 
 // ---------------------------------------------------------------------------- manual edits
 
-// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records is edited by hand,
+// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records / App_Exercises is edited by hand,
 // bump its version so the app pulls the correction on the next sync.
 function onEdit(e) {
   if (!e || !e.range) return;
