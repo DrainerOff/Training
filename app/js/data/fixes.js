@@ -112,11 +112,22 @@ export function pendingFix(state, fix = FIX_2026_10_18) {
   return plan.moves.length || plan.program ? plan : null;
 }
 
-// One application at a time: a second tap while the first is still writing waits for it.
-const inflight = new Map();
+// Apply and undo of one fix run one after another, never interleaved; a second tap on
+// «Исправить» while it is still writing gets the same result instead of a second run.
+const running = new Map(); // fix id -> { kind, promise }
+function enqueue(id, kind, fn) {
+  const before = running.get(id)?.promise || Promise.resolve();
+  const promise = before.catch(() => {}).then(fn).finally(() => {
+    if (running.get(id)?.promise === promise) running.delete(id);
+  });
+  running.set(id, { kind, promise });
+  return promise;
+}
+
 export function applyFix(store, fix = FIX_2026_10_18) {
-  if (!inflight.has(fix.id)) inflight.set(fix.id, run(store, fix).finally(() => inflight.delete(fix.id)));
-  return inflight.get(fix.id);
+  const cur = running.get(fix.id);
+  if (cur?.kind === 'apply') return cur.promise;
+  return enqueue(fix.id, 'apply', () => run(store, fix));
 }
 
 // The program as it was is saved before anything changes; then the program, then each exercise
@@ -149,7 +160,11 @@ async function run(store, fix) {
 
 // Puts the listed sets and the items back under what was recorded and the program as it was;
 // the fix is offered again. Meant right after applying («Отменить»).
-export async function revertFix(store, fix = FIX_2026_10_18) {
+export function revertFix(store, fix = FIX_2026_10_18) {
+  return enqueue(fix.id, 'revert', () => undo(store, fix));
+}
+
+async function undo(store, fix) {
   const record = store.state.kv.fixes?.[fix.id];
   if (!record) return false;
   for (const m of fix.moves.filter((x) => record.moved.includes(x.slotId))) {

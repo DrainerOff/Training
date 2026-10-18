@@ -278,6 +278,21 @@ test('a double tap on «Исправить» applies it once; «Отменить
   assert.equal(liveSets(phone.store).filter((x) => FIX.moves.some((m) => x.seriesKey === m.from.key)).length, 9);
 });
 
+test('«Отменить» and «Исправить» tapped while the other is still writing run one after the other', async () => {
+  const { phone } = await today();
+  const recorded = liveSets(phone.store).map((x) => `${x.id}:${x.seriesKey}`).sort();
+  const program = JSON.stringify(phone.store.state.program.days);
+  await applyFix(phone.store);
+  const undo = revertFix(phone.store);
+  const again = applyFix(phone.store); // queued behind the undo, not mixed into it
+  await Promise.all([undo, again]);
+  assert.equal(pendingFix(phone.store.state), null);
+  assert.equal(liveSets(phone.store).filter((x) => FIX.moves.some((m) => x.seriesKey === m.to.key)).length, 9);
+  await revertFix(phone.store);
+  assert.deepEqual(liveSets(phone.store).map((x) => `${x.id}:${x.seriesKey}`).sort(), recorded);
+  assert.equal(JSON.stringify(phone.store.state.program.days), program);
+});
+
 test('edits on another device before it synced put parts back: they are offered again and finished, the edits stay', async () => {
   const { gas, token, net, phone } = await today();
   const tablet = await device(token, net);

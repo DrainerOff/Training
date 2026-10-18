@@ -135,10 +135,11 @@ test('«Отменить» right after: the workout and the program are back as 
   await card(page).getByRole('button', { name: 'Исправить' }).click();
   await page.getByRole('button', { name: 'Отменить' }).click();
   await expect(card(page)).toBeVisible();
+  // The three exercises and the program go back one after another; wait for the last of them.
+  await expect.poll(() => page.evaluate(() => JSON.stringify(window.__trainer.store.state.program.days))).toBe(program);
+  await expect.poll(async () => (await workout(page)).items).toEqual(before.items);
   const back = await workout(page);
-  expect(back.items).toEqual(before.items);
   expect(back.sets.map((r) => r.split('|').slice(0, 3).join('|'))).toEqual(before.sets.map((r) => r.split('|').slice(0, 3).join('|')));
-  expect(await page.evaluate(() => JSON.stringify(window.__trainer.store.state.program.days))).toBe(program);
 });
 
 test('«Позже» hides the card until the next launch and changes nothing', async ({ page }) => {
