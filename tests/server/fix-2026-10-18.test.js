@@ -85,7 +85,8 @@ test('apply: series and names change; weights, reps, RIR, dates, order and ids s
   const { phone } = await today();
   const before = new Map(liveSets(phone.store).map((x) => [x.id, x]));
   const res = await applyFix(phone.store);
-  assert.deepEqual(res.moved.map((m) => m.sets), [3, 3, 3]);
+  assert.equal(res.sets, 9);
+  assert.equal(res.program, true);
 
   const after = liveSets(phone.store);
   assert.equal(after.length, 22, 'no set added or removed');
@@ -131,7 +132,7 @@ test('apply: series and names change; weights, reps, RIR, dates, order and ids s
   const backups = phone.store.state.kv.corrections;
   assert.equal(backups.length, 3);
   assert.deepEqual(backups.map((b) => [b.from.key, b.to.key, b.sets.map((x) => `${x.id}:${x.seriesKey}:${x.weight}x${x.reps}`).join(',')]), FIX.moves.map((m) => [
-    m.from, m.to.key, m.setIds.map((id) => `${id}:${m.from}:${before.get(id).weight}x${before.get(id).reps}`).join(','),
+    m.from.key, m.to.key, m.setIds.map((id) => `${id}:${m.from.key}:${before.get(id).weight}x${before.get(id).reps}`).join(','),
   ]));
   assert.ok(phone.store.state.kv.fixes[FIX.id].programBefore);
 
@@ -231,7 +232,7 @@ test('records and progress follow the variant: no record left on the old series,
   await applyFix(phone.store);
   const after = books(phone.store.state);
   for (const m of FIX.moves) {
-    assert.ok(!after.has(m.from), `${m.from}: no records once its sets moved`);
+    assert.ok(!after.has(m.from.key), `${m.from.key}: no records once its sets moved`);
     const b = after.get(m.to.key);
     assert.ok(b, `${m.to.key}: records from the moved sets`);
     assert.deepEqual(b.perfs.map((p) => p.setId).sort(), [...m.setIds].sort());
@@ -262,4 +263,75 @@ test('the way back: undo puts the sets and the program back as they were, and th
   const rows = sheetRows(gas, 'App_Sets');
   assert.equal(rows.filter((r) => r.series_key === 'giperekstenziya-s-vesom').length, 3);
   assert.equal(new Set(rows.map((r) => r.id)).size, rows.length);
+});
+
+test('a double tap on «Исправить» applies it once; «Отменить» then puts the program back too', async () => {
+  const { phone } = await today();
+  const program = JSON.stringify(phone.store.state.program.days);
+  const [a, b] = await Promise.all([applyFix(phone.store), applyFix(phone.store)]);
+  assert.equal(a, b, 'the second tap waits for the first');
+  assert.equal(a.sets, 9);
+  assert.equal(await applyFix(phone.store), null, 'nothing left to do');
+  assert.equal(phone.store.state.kv.corrections.length, 3);
+  await revertFix(phone.store);
+  assert.equal(JSON.stringify(phone.store.state.program.days), program);
+  assert.equal(liveSets(phone.store).filter((x) => FIX.moves.some((m) => x.seriesKey === m.from.key)).length, 9);
+});
+
+test('edits on another device before it synced put parts back: they are offered again and finished, the edits stay', async () => {
+  const { gas, token, net, phone } = await today();
+  const tablet = await device(token, net);
+  await tablet.sync.syncNow(); // the tablet has the workout as recorded
+  await applyFix(phone.store);
+  await phone.sync.syncNow();
+
+  // The tablet, still without the fix, is used offline: a note on a moved set, a comment on another
+  // exercise of 18.10 (the whole workout record), a change of day 1 in the program.
+  net.online = false;
+  const set = tablet.store.state.sets.get(FIX.moves[0].setIds[1]);
+  await tablet.store.updateSet(set.id, { note: 'спина устала' });
+  await tablet.store.updateItem(FIX.sessionId, 'D2-04', { note: 'пауза 1 с' });
+  const p = structuredClone(tablet.store.state.program);
+  p.days[0].slots[0].step = 1.25;
+  await tablet.store.saveProgram(p);
+  net.online = true;
+  await tablet.sync.syncNow(); // its newer whole records win in the sheet
+  await phone.sync.syncNow();
+
+  // The phone now has parts of the fix undone — and offers exactly those.
+  const plan = pendingFix(phone.store.state);
+  assert.ok(plan, 'offered again');
+  const byslot = Object.fromEntries(plan.moves.map((m) => [m.slotId, { item: m.item.seriesKey, sets: m.sets.map((x) => x.id) }]));
+  assert.deepEqual(byslot['D2-03'], { item: FIX.moves[0].from.key, sets: [set.id] });
+  assert.deepEqual(byslot['D2-05'], { item: FIX.moves[1].from.key, sets: [] });
+  assert.ok(plan.program, 'day 2 variants are missing again');
+
+  await applyFix(phone.store);
+  await phone.sync.syncNow();
+  await tablet.sync.syncNow();
+  for (const dev of [phone, tablet]) {
+    const st = dev.store.state;
+    assert.equal(pendingFix(st), null);
+    for (const m of FIX.moves) {
+      for (const id of m.setIds) assert.equal(st.sets.get(id).seriesKey, m.to.key);
+      assert.equal(st.sessions.get(FIX.sessionId).items.find((i) => i.slotId === m.slotId).seriesKey, m.to.key);
+    }
+    // What was done on the tablet stays.
+    assert.equal(st.sets.get(set.id).note, 'спина устала');
+    assert.equal(st.sessions.get(FIX.sessionId).items.find((i) => i.slotId === 'D2-04').note, 'пауза 1 с');
+    assert.equal(st.program.days[0].slots[0].step, 1.25);
+    assert.equal(st.program.days[1].slots[2].options[0].key, 'giperekstenziya-v-trenazhere');
+  }
+  const rows = sheetRows(gas, 'App_Sets');
+  assert.equal(rows.length, 22);
+  assert.equal(new Set(rows.map((r) => r.id)).size, 22);
+});
+
+test('a later change of day 2 by the owner is not undone: the card does not come back for it', async () => {
+  const { phone } = await today();
+  await applyFix(phone.store);
+  const p = structuredClone(phone.store.state.program);
+  p.days[1].slots[4].options = p.days[1].slots[4].options.filter((o) => o.key !== 'obratnaya-babochka-odnoy-rukoy');
+  await phone.store.saveProgram(p);
+  assert.equal(pendingFix(phone.store.state), null);
 });

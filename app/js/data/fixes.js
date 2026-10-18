@@ -1,7 +1,8 @@
 // One-time corrections of recorded data, confirmed by the owner in the app (a card on Home).
-// Each names the exact records it changes — ids read from the sheet — and is offered only while
-// those records are still as recorded. So it is idempotent and safe on every device: a device that
-// already got the correction through sync shows nothing, and a record changed since is left alone.
+// Each names the exact records it changes — ids read from the sheet — and is offered while any of
+// them is not yet as corrected, so it is idempotent and safe on every device: a device that already
+// got the correction through sync shows nothing. If an edit made on another device before it synced
+// puts part of it back (a whole record wins by its newer version), the card offers what is left.
 
 // 18.10.2026 (cycle 1, week 2, day 2): three exercises were done on other machines than the program
 // named. Weights, reps, RIR, dates and ids stay; the sets move to the series of what was done.
@@ -13,19 +14,19 @@ export const FIX_2026_10_18 = {
   moves: [
     {
       slotId: 'D2-03',
-      from: 'giperekstenziya-s-vesom',
+      from: { key: 'giperekstenziya-s-vesom', name: 'Гиперэкстензия с весом' },
       to: { key: 'giperekstenziya-v-trenazhere', name: 'Гиперэкстензия в тренажере' },
       setIds: ['stmve9o1wc35a3b3b5c46c5835', 'stmve9raxac5302fe65bdeb01a', 'stmve9u2p62ea30a89347e6b08'],
     },
     {
       slotId: 'D2-05',
-      from: 'krossover-na-zadnyuyu-deltu',
+      from: { key: 'krossover-na-zadnyuyu-deltu', name: 'Кроссовер на заднюю дельту' },
       to: { key: 'obratnaya-babochka-dvumya-rukami', name: 'Обратная бабочка двумя руками' },
       setIds: ['stmvea8fz256a2da97325e375d', 'stmveacbe6e16740ebcc0ff870', 'stmveahgqk68e5cceb874d4018'],
     },
     {
       slotId: 'D2-06',
-      from: 'podem-ez-grifa-pered-soboy',
+      from: { key: 'podem-ez-grifa-pered-soboy', name: 'Подъем EZ-грифа перед собой' },
       to: { key: 'tyaga-shtangi-k-podborodku-v-smite', name: 'Тяга штанги к подбородку в Смите' },
       setIds: ['stmveanu245dde3f0c12785702', 'stmveasoz8942fa1b483bd3bb8', 'stmveaxrcd4c79d4ff275ae06b'],
     },
@@ -60,25 +61,31 @@ export const FIX_2026_10_18 = {
 
 export const FIXES = [FIX_2026_10_18];
 
-const sameIds = (a, b) => a.length === b.length && a.every((id) => b.includes(id));
-
-// What `fix` would change on this device now: { moves: [{…move, item, sets}], skipped, program }.
-// `program` is the new program, or null when it already has these variants.
+// What `fix` would change on this device now:
+//   moves:   [{ …move, item, sets }] — `sets` are the listed sets still on `from` (the item may
+//            already be on `to`, or the sets may be and only the item is not);
+//   skipped: exercises where this slot has sets on `from` that are not the recorded ones;
+//   program: the new program, or null.
+// The program part is offered with a move, or when the program has lost the variants the moved
+// sets now belong to — not when the owner later changed day 2 in some other way.
 export function planFix(state, fix) {
   const session = state.sessions.get(fix.sessionId);
   const out = { moves: [], skipped: [], program: null };
   if (!session || session.deleted) return out;
   for (const m of fix.moves) {
     const item = session.items.find((i) => i.slotId === m.slotId);
-    if (!item || item.seriesKey !== m.from) continue; // already moved (here or on another device)
-    const sets = [...state.sets.values()]
-      .filter((x) => !x.deleted && x.sessionId === fix.sessionId && x.slotId === m.slotId && x.seriesKey === m.from)
-      .sort((a, b) => a.setNo - b.setNo);
-    // Exactly the recorded sets, or nothing: no guessing by name.
-    if (sameIds(sets.map((x) => x.id), m.setIds)) out.moves.push({ ...m, item, sets });
-    else out.skipped.push({ ...m, item, sets });
+    if (!item) continue;
+    const listed = m.setIds.map((id) => state.sets.get(id)).filter((x) => x && !x.deleted && x.sessionId === fix.sessionId && x.slotId === m.slotId);
+    const sets = listed.filter((x) => x.seriesKey === m.from.key).sort((a, b) => a.setNo - b.setNo);
+    // Sets on `from` in this exercise that are not the recorded ones: don't guess, leave it alone.
+    const others = [...state.sets.values()].some((x) => !x.deleted && x.sessionId === fix.sessionId && x.slotId === m.slotId && x.seriesKey === m.from.key && !m.setIds.includes(x.id));
+    if (!sets.length && item.seriesKey !== m.from.key) continue; // done (here or through sync)
+    if (others) out.skipped.push({ ...m, item, sets });
+    else out.moves.push({ ...m, item, sets });
   }
-  out.program = programAfterFix(state.program, fix);
+  const movedKeys = fix.moves.filter((m) => state.sets.get(m.setIds[0])?.seriesKey === m.to.key).map((m) => m.to.key);
+  const known = new Set((state.program?.days || []).flatMap((d) => d.slots.flatMap((s) => s.options.map((o) => o.key))));
+  if (out.moves.length || movedKeys.some((k) => !known.has(k))) out.program = programAfterFix(state.program, fix);
   return out;
 }
 
@@ -100,37 +107,55 @@ export function programAfterFix(program, fix) {
   return changed ? next : null;
 }
 
-// Offered while something of it can still be applied here and the owner hasn't applied it here.
 export function pendingFix(state, fix = FIX_2026_10_18) {
-  if (state.kv.fixes?.[fix.id]?.appliedAt) return null;
   const plan = planFix(state, fix);
-  return plan.moves.length ? plan : null;
+  return plan.moves.length || plan.program ? plan : null;
 }
 
-// Program first (the new variants get their category from it), then each exercise in one
-// transaction with its backup (kv `corrections`). If something fails half-way, what is left stays
-// offered and applying again finishes it.
-export async function applyFix(store, fix = FIX_2026_10_18) {
+// One application at a time: a second tap while the first is still writing waits for it.
+const inflight = new Map();
+export function applyFix(store, fix = FIX_2026_10_18) {
+  if (!inflight.has(fix.id)) inflight.set(fix.id, run(store, fix).finally(() => inflight.delete(fix.id)));
+  return inflight.get(fix.id);
+}
+
+// The program as it was is saved before anything changes; then the program, then each exercise
+// in one transaction with its backup (kv `corrections`). If something fails half-way, what is left
+// stays offered, and applying again finishes it into the same record.
+async function run(store, fix) {
   const plan = planFix(store.state, fix);
-  if (!plan.moves.length) return null;
-  const programBefore = plan.program ? store.state.program : null;
+  if (!plan.moves.length && !plan.program) return null;
+  const prev = store.state.kv.fixes?.[fix.id] || {};
+  const record = {
+    moved: [...(prev.moved || [])],
+    programBefore: prev.programBefore || (plan.program ? store.state.program : null),
+    startedAt: prev.startedAt || Date.now(),
+    appliedAt: null,
+  };
+  const keep = () => store.setKV({ fixes: { ...(store.state.kv.fixes || {}), [fix.id]: { ...record } } });
+  await keep();
   if (plan.program) await store.saveProgram(plan.program);
-  const moved = [];
+  let sets = 0;
   for (const m of plan.moves) {
-    const r = await store.reassignVariant(fix.sessionId, m.slotId, m.to, { reason: fix.id });
-    moved.push({ slotId: m.slotId, from: { key: m.item.seriesKey, name: m.item.name }, to: m.to, sets: r?.moved || 0, backup: r?.backup?.id || null });
+    const r = await store.reassignVariant(fix.sessionId, m.slotId, m.to, { setIds: m.setIds, reason: fix.id });
+    sets += r?.moved || 0;
+    if (!record.moved.includes(m.slotId)) record.moved.push(m.slotId);
+    await keep();
   }
-  const result = { appliedAt: Date.now(), moved, programBefore };
-  await store.setKV({ fixes: { ...(store.state.kv.fixes || {}), [fix.id]: result } });
-  return result;
+  record.appliedAt = Date.now();
+  await keep();
+  return { sets, program: !!plan.program, record };
 }
 
-// Puts the exercises back under what was recorded and the program as it was; the fix is offered again.
+// Puts the listed sets and the items back under what was recorded and the program as it was;
+// the fix is offered again. Meant right after applying («Отменить»).
 export async function revertFix(store, fix = FIX_2026_10_18) {
-  const result = store.state.kv.fixes?.[fix.id];
-  if (!result) return false;
-  for (const m of result.moved) await store.reassignVariant(fix.sessionId, m.slotId, m.from, { reason: `${fix.id}:undo` });
-  if (result.programBefore) await store.saveProgram(result.programBefore);
+  const record = store.state.kv.fixes?.[fix.id];
+  if (!record) return false;
+  for (const m of fix.moves.filter((x) => record.moved.includes(x.slotId))) {
+    await store.reassignVariant(fix.sessionId, m.slotId, m.from, { setIds: m.setIds, reason: `${fix.id}:undo` });
+  }
+  if (record.programBefore) await store.saveProgram(record.programBefore);
   const fixes = { ...(store.state.kv.fixes || {}) };
   delete fixes[fix.id];
   await store.setKV({ fixes });

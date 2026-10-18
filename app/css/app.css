@@ -756,6 +756,12 @@ p {
   color: var(--bad);
   border-color: currentColor;
 }
+/* in a set row a long tag (another variant's name) wraps instead of covering the numbers */
+.set__tags .tag {
+  white-space: normal;
+  text-align: right;
+  max-width: 100%;
+}
 .tag--caution {
   background: var(--caution);
   border-color: var(--caution);

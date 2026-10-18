@@ -606,7 +606,14 @@ function readProgram_() {
       id: String(r[11] || '') || 'row' + (i + 2),
       category: CATEGORIES.indexOf(String(r[5])) >= 0 ? String(r[5]) : 'iso',
       step: Number(String(r[6]).replace(',', '.')) || 2.5,
-      options: names.map(function (n, k) { return { key: keys[k] && ID_RE.test(keys[k]) ? keys[k] : slugify_(n), name: n }; }),
+      // Keys go with names by position. If a hand edit changed the number of alternatives without
+      // the `keys` column, positions no longer match: a name keeps a key only if it is its own,
+      // otherwise it starts a series of its own — two variants never share one.
+      options: names.map(function (n, k) {
+        var slug = slugify_(n);
+        var key = keys.length === names.length ? keys[k] : keys.indexOf(slug) >= 0 ? slug : null;
+        return { key: key && ID_RE.test(key) ? key : slug, name: n };
+      }),
       overrides: overrides,
       note: String(r[10] || ''),
       order: Number(r[2]) || i,

@@ -204,14 +204,28 @@ test('smallest iPhone: settings line, set tags and note icons fit in the row', a
     await store.saveSetup(s.items[1].seriesKey, s.items[1].name, 'сиденье 5, ручки 3, упор на втором отверстии, спинка на 4, ограничители на 7');
     const a = await store.logSet(s.id, slot, { weight: 92.5, reps: 9, rir: 1 });
     await store.updateSet(a.set.id, { pain: true, technique: true, note: 'длинная заметка к подходу, чтобы проверить перенос' });
+    // A set of another variant carries that variant's name as a tag.
+    await store.swapVariant(s.id, slot, s.items[1].options[1]);
+    await store.logSet(s.id, slot, { weight: 32, reps: 10, rir: 2 });
+    await store.swapVariant(s.id, slot, s.items[1].options[0]);
   });
   await openExercise(page, HAMMER);
   const panel = page.locator('.panel');
   const pb = await panel.boundingBox();
-  for (const sel of ['.setup', '.set__note', '.set__tags']) {
-    const b = await panel.locator(sel).first().boundingBox();
-    expect(b.x).toBeGreaterThanOrEqual(pb.x - 0.5);
-    expect(b.x + b.width).toBeLessThanOrEqual(pb.x + pb.width + 0.5);
+  for (const sel of ['.setup', '.set__note', '.set__tags', '.set__tags .tag']) {
+    for (const b of await Promise.all((await panel.locator(sel).all()).map((l) => l.boundingBox()))) {
+      expect(b.x).toBeGreaterThanOrEqual(pb.x - 0.5);
+      expect(b.x + b.width).toBeLessThanOrEqual(pb.x + pb.width + 0.5);
+    }
+  }
+  // Tags never cover the weight × reps of their row.
+  for (const row of await panel.locator('.set').all()) {
+    if (!(await row.locator('.set__nums').count())) continue; // a planned row
+    const nums = await row.locator('.set__nums').boundingBox();
+    for (const t of await row.locator('.set__tags .tag').all()) {
+      const b = await t.boundingBox();
+      expect(b.x >= nums.x + nums.width - 0.5 || b.y >= nums.y + nums.height - 0.5).toBe(true);
+    }
   }
   expect(await page.evaluate(() => document.querySelector('.screen').scrollWidth)).toBeLessThanOrEqual(320);
   await context.close();

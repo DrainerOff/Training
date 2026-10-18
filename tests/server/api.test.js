@@ -234,6 +234,20 @@ test('program: a hand edit of App_Program wins over an older program from the ph
   assert.ok(r.programUpdatedAt > 6000);
 });
 
+test('program: an alternative removed by hand without editing `keys` never gives a variant another one\'s series', () => {
+  const { gas, token } = boot();
+  const options = [
+    { key: 'krossover-na-zadnyuyu-deltu', name: 'Кроссовер на заднюю дельту' },
+    { key: 'obratnaya-babochka-dvumya-rukami', name: 'Обратная бабочка двумя руками' },
+    { key: 'obratnaya-babochka-odnoy-rukoy', name: 'Обратная бабочка одной рукой' },
+  ];
+  const program = { id: 'main', updatedAt: 5000, days: [{ day: 2, slots: [{ id: 'D2-05', category: 'iso', options }] }] };
+  gas.post({ action: 'sync', token, push: { program } });
+  gas.sheet('App_Program').getRange(2, 5).setValue('Обратная бабочка одной рукой'); // «двумя руками» deleted, keys left as they were
+  const back = gas.post({ action: 'sync', token, programSince: 5000 }).pull.program.days[0].slots[0].options;
+  assert.deepEqual(back, [options[0], options[2]]);
+});
+
 test('summary sheet is a readable digest', () => {
   const { gas, token } = boot();
   const session = { id: 'ss1', date: '2026-10-16', cycle: 1, week: 1, day: 1, status: 'done', startedAt: 1, finishedAt: 2, note: '', items: [], updatedAt: 1000, deleted: false };

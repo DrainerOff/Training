@@ -229,19 +229,20 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   }
 
   // A correction, not a swap: the exercise was recorded under the wrong variant. The item and
-  // its sets recorded under the current variant move to `option`; weights, reps, RIR, dates and
-  // ids stay, so the sheet updates the same rows and every device takes the change by
-  // `updatedAt`. Sets of this slot recorded under another variant (a swap mid-exercise) stay
-  // where they are. The previous values are kept in kv `corrections` (undo: move back).
-  async function reassignVariant(sessionId, slotId, option, { reason = '' } = {}) {
+  // its sets recorded under the current variant (or exactly `setIds` of this slot) move to
+  // `option`; weights, reps, RIR, dates and ids stay, so the sheet updates the same rows and every
+  // device takes the change by `updatedAt`. Sets of this slot recorded under another variant (a
+  // swap mid-exercise) stay where they are. The previous values are kept in kv `corrections`.
+  async function reassignVariant(sessionId, slotId, option, { reason = '', setIds = null } = {}) {
     const s = state.sessions.get(sessionId);
     const it = s?.items.find((i) => i.slotId === slotId);
     if (!it) return null;
     const opt = option.key ? { key: option.key, name: option.name } : makeOption(option.name);
-    if (opt.key === it.seriesKey && opt.name === it.name) return { moved: 0 };
-    const sets = setsOf(sessionId, slotId).filter((x) => x.seriesKey === it.seriesKey);
+    const sets = setsOf(sessionId, slotId).filter((x) => (setIds ? setIds.includes(x.id) && x.seriesKey !== opt.key : x.seriesKey === it.seriesKey));
+    const itemMoves = opt.key !== it.seriesKey || opt.name !== it.name;
+    if (!itemMoves && !sets.length) return { moved: 0 };
     const options = it.options.some((o) => o.key === opt.key) ? it.options : [...it.options, opt];
-    const items = s.items.map((x) => (x.slotId === slotId ? { ...x, seriesKey: opt.key, name: opt.name, options } : x));
+    const items = itemMoves ? s.items.map((x) => (x.slotId === slotId ? { ...x, seriesKey: opt.key, name: opt.name, options } : x)) : s.items;
     const backup = {
       id: uid('cr'),
       at: now(),
@@ -255,7 +256,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     };
     await saveAll(
       [
-        ['sessions', [{ ...s, items, updatedAt: stamp(s) }]],
+        ['sessions', itemMoves ? [{ ...s, items, updatedAt: stamp(s) }] : []],
         ['sets', sets.map((x) => ({ ...x, seriesKey: opt.key, exercise: opt.name, updatedAt: stamp(x) }))],
       ],
       { corrections: [...(state.kv.corrections || []), backup].slice(-MAX_CORRECTIONS) },
@@ -294,13 +295,14 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     const t = now();
     // Store-level double-tap guard: the same weight × reps within 1.5 s is the same tap
     // (RIR is ignored: the composer resets it after each set, so a second tap would differ only there).
-    if (last && t - last.createdAt < DOUBLE_TAP_MS && last.weight === v.weight && last.reps === v.reps && !!last.drop === !!v.drop) {
+    const justNow = (x) => t - x.createdAt >= 0 && t - x.createdAt < DOUBLE_TAP_MS; // not a set from a clock ahead
+    if (last && justNow(last) && last.weight === v.weight && last.reps === v.reps && !!last.drop === !!v.drop) {
       return { set: last, duplicate: true };
     }
     // The last set of an exercise opens the next one under the same finger: a second tap there
     // is the same double tap, not a first set of the next exercise.
     const latest = setsOf(sessionId).reduce((a, x) => (!a || x.createdAt > a.createdAt ? x : a), null);
-    if (latest && latest.slotId !== slotId && t - latest.createdAt < DOUBLE_TAP_MS) {
+    if (latest && latest.slotId !== slotId && justNow(latest)) {
       return { set: latest, duplicate: true };
     }
     const rec = {
@@ -560,37 +562,52 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   async function applyRemote(data, { queue = false } = {}) {
     const ops = [];
     const outboxEntries = [];
+    // If the write fails, memory goes back too: the next pull then brings these records again
+    // (the cursor only moves after a successful apply) instead of finding them already "known".
+    const undo = [];
+    const dropOutbox = (key) => {
+      undo.push(['outbox', key, state.outbox.get(key)]);
+      state.outbox.delete(key);
+      ops.push({ store: 'outbox', delete: key });
+    };
     let changed = 0;
     for (const entity of ENTITIES) {
       for (const r of data?.[entity] || []) {
         if (!r || !r.id) continue;
         const local = state[entity].get(r.id);
         if (local && (local.updatedAt || 0) >= (r.updatedAt || 0)) continue;
+        undo.push([entity, r.id, local]);
         putRecord(entity, r);
         ops.push({ store: entity, value: r });
         const key = `${entity}:${r.id}`;
         if (queue) outboxEntries.push({ entity, id: r.id, updatedAt: r.updatedAt });
-        else if (state.outbox.has(key)) {
-          state.outbox.delete(key);
-          ops.push({ store: 'outbox', delete: key });
-        }
+        else if (state.outbox.has(key)) dropOutbox(key);
         changed++;
       }
     }
     const rp = normalizeProgram(data?.program);
+    const programBefore = state.program;
     if (rp && rp.updatedAt > (state.program?.updatedAt || 0)) {
       state.program = rp;
       ops.push({ store: 'kv', value: { k: 'program', v: rp } });
       if (queue) outboxEntries.push({ entity: 'program', id: 'main', updatedAt: rp.updatedAt });
-      else if (state.outbox.has('program:main')) {
-        state.outbox.delete('program:main');
-        ops.push({ store: 'outbox', delete: 'program:main' });
-      }
+      else if (state.outbox.has('program:main')) dropOutbox('program:main');
       changed++;
     }
     if (ops.length) {
       emit();
-      await persist(ops, outboxEntries);
+      try {
+        await persist(ops, outboxEntries);
+      } catch (err) {
+        for (const [what, id, prev] of undo.reverse()) {
+          if (what === 'outbox') state.outbox.set(id, prev);
+          else if (prev) putRecord(what, prev);
+          else dropRecord(what, id);
+        }
+        state.program = programBefore;
+        emit();
+        throw err;
+      }
     }
     return { changed };
   }

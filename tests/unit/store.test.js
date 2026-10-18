@@ -137,3 +137,30 @@ test('variant settings: one record per variant, trimmed and short; the same text
   assert.equal(store.state.exercises.size, 1);
   assert.equal(store.setupOf('naklonnyy-zhim-hammer-naklon'), '');
 });
+
+test('a pull whose write fails is taken back, so the next pull brings it again and it is kept', async () => {
+  const adapter = flakyAdapter();
+  const { store, s, tick } = await setup(adapter);
+  tick(10_000);
+  const { set } = await store.logSet(s.id, s.items[0].slotId, { weight: 20, reps: 6 });
+  await store.ack([{ key: `sets:${set.id}`, updatedAt: set.updatedAt }]);
+  const remote = { ...set, note: 'с другого телефона', updatedAt: set.updatedAt + 1000 };
+  adapter.fail = true;
+  await assert.rejects(store.applyRemote({ sets: [remote] }));
+  assert.equal(store.state.sets.get(set.id).note, '', 'memory is back to what the phone has stored');
+  adapter.fail = false;
+  await store.applyRemote({ sets: [remote] });
+  assert.equal(store.state.sets.get(set.id).note, 'с другого телефона');
+  const again = createStore(adapter, { now: () => 0 });
+  await again.load();
+  assert.equal(again.state.sets.get(set.id).note, 'с другого телефона', 'and it is on disk');
+});
+
+test('a set from a device whose clock runs ahead does not block logging here', async () => {
+  const { store, s, tick } = await setup();
+  tick(60_000);
+  const t = tick(0);
+  await store.applyRemote({ sets: [{ id: 'st-ahead', sessionId: s.id, slotId: s.items[0].slotId, seriesKey: s.items[0].seriesKey, exercise: s.items[0].name, date: s.date, cycle: 1, week: 2, day: 1, setNo: 1, weight: 24, reps: 6, rir: null, drop: false, pain: false, technique: false, note: '', createdAt: t + 120_000, updatedAt: t + 120_000, deleted: false }] });
+  const r = await store.logSet(s.id, s.items[1].slotId, { weight: 90, reps: 9 });
+  assert.equal(r.duplicate, false);
+});
