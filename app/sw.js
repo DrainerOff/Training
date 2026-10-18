@@ -22,6 +22,7 @@ const SHELL = [
   './js/data/db.js',
   './js/data/store.js',
   './js/data/sync.js',
+  './js/data/fixes.js',
   './js/data/gsheets-snapshot.js',
   './js/data/legacy-import.js',
   './js/ui/core.js',

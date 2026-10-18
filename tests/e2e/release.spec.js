@@ -1,7 +1,7 @@
-// The owner's iPhone runs 3f386f8 (published from the working branch, accepted on the phone).
-// v1.0.0 is the same code published from main under a new build stamp. Updating must keep every
-// workout, set, record and measurement, not repeat the one-time import, not add a single row to
-// the sheet for data it already has, and keep working offline.
+// The owner's iPhone runs v1.0.0 — the code of 3f386f8 (accepted on the phone), published from main
+// as 6a3334c. Updating to the current release (the database gains a store) must keep every
+// workout, set, note, record and measurement, not repeat the one-time import, not add a single row
+// to the sheet for data it already has, and keep working offline.
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
 import { startFakeGas } from '../helpers/servers.js';
@@ -19,7 +19,8 @@ function snapshot(page) {
     const live = (m) => [...m.values()].filter((r) => !r.deleted);
     return {
       sessions: live(st.sessions).map((s) => `${s.id}|${s.date}|${s.status}`).sort(),
-      sets: live(st.sets).map((s) => `${s.id}|${s.seriesKey}|${s.weight}x${s.reps}`).sort(),
+      sets: live(st.sets).map((s) => `${s.id}|${s.seriesKey}|${s.weight}x${s.reps}|${s.note}`).sort(),
+      notes: live(st.sessions).flatMap((s) => s.items.filter((i) => i.note).map((i) => `${s.id}|${i.slotId}|${i.note}`)).sort(),
       metrics: live(st.metrics).map((m) => `${m.id}|${m.bodyweight}`).sort(),
       records: live(st.records).map((r) => `${r.id}|${r.date}|${r.weight}x${r.reps}`).sort(),
       imports: Object.keys(st.kv.imports || {}),
@@ -60,7 +61,9 @@ test('update from 3f386f8 (on the phone) to the release from main: data, records
       const { store } = window.__trainer;
       const s = await store.startSession({ cycle: 1, week: 2, day: 1 });
       await store.logSet(s.id, s.items[0].slotId, { weight: 95, reps: 9, rir: 1 });
-      await store.logSet(s.id, s.items[0].slotId, { weight: 95, reps: 8, rir: 1 });
+      const second = await store.logSet(s.id, s.items[0].slotId, { weight: 95, reps: 8, rir: 1 });
+      await store.updateSet(second.set.id, { note: 'последний тяжело' });
+      await store.updateItem(s.id, s.items[0].slotId, { note: 'хват чуть шире' });
       await store.finishSession(s.id);
       await store.saveRecord({ seriesKey: 'naklonnyy-zhim-hammer-naklon', exercise: 'Наклонный жим: Hammer - наклон', category: 'hammer', date: '2025-04-12', weight: 95, reps: 5, note: 'старый рекорд' });
       await store.saveMetric('2026-10-17', { bodyweight: 81.5 });
@@ -84,7 +87,7 @@ test('update from 3f386f8 (on the phone) to the release from main: data, records
     await booted(page);
     expect(await page.evaluate(() => [window.__boot?.build, window.__trainer?.build])).toEqual(['main100', 'main100']);
     await expect(page.locator('.diag')).toHaveCount(0);
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 2 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 3 }]);
     expect(await page.evaluate(() => caches.keys())).toEqual(['trainer-main100']);
     expect(await snapshot(page)).toEqual(before);
 

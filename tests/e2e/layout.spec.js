@@ -132,7 +132,7 @@ for (const screen of SCREENS) {
     expect(g.scrollTop).toBeGreaterThan(200);
     expect(g.tabbar).toEqual(before.tabbar);
     expectPinned(g, screen, 'tabbar');
-    const last = await page.getByText(/^Версия 1\.0\.0/).boundingBox();
+    const last = await page.getByText(/^Версия \d+\.\d+\.\d+/).boundingBox();
     expect(last.y + last.height).toBeLessThanOrEqual(g.tabbar.top);
     expect(await reachable(page, '.tabbar')).toBe('ok');
 

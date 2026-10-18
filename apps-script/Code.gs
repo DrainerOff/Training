@@ -12,7 +12,8 @@
 
 // 2: manual personal records (App_Records); the response's `ack` lists every entity handled,
 // so a client never treats records as saved by a server that doesn't know them.
-var API_VERSION = 2;
+// 3: per-variant exercise settings (App_Exercises).
+var API_VERSION = 3;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -83,6 +84,19 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  // One row per exercise variant: settings that stay with the machine, not with a workout.
+  exercises: {
+    sheet: 'App_Exercises',
+    cols: [
+      ['exercise', 'exercise', 'text'],
+      ['setup', 'setup', 'text'],
+      ['series_key', 'seriesKey', 'key'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
   metrics: {
     sheet: 'App_Metrics',
     cols: [
@@ -98,7 +112,7 @@ var SCHEMA = {
     ],
   },
 };
-var ENTITIES = ['sessions', 'sets', 'metrics', 'records'];
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -464,6 +478,7 @@ function sanitize_(entity, rec) {
   out.updatedAt = updatedAt;
   // A record without what makes it a record is refused (and stays queued on the phone).
   if (entity === 'records' && (!out.date || !out.seriesKey || !(out.reps >= 1) || out.weight == null)) ok = false;
+  if (entity === 'exercises' && (!out.seriesKey || out.id !== 'x:' + out.seriesKey)) ok = false;
   return ok ? out : null;
 }
 
@@ -678,7 +693,7 @@ function rebuildSummary() {
 
 // ---------------------------------------------------------------------------- manual edits
 
-// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records is edited by hand,
+// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records / App_Exercises is edited by hand,
 // bump its version so the app pulls the correction on the next sync.
 function onEdit(e) {
   if (!e || !e.range) return;

@@ -5,8 +5,9 @@ import { derived } from './derive.js';
 import { nextWorkout, findSameSlotSession, itemsForDay, itemTarget } from '../lib/planner.js';
 import { PHASE, phaseSummary, fmtTarget } from '../lib/program.js';
 import { previousExposures } from '../lib/plateau.js';
-import { isoDate, fmtDay, fmtDayWeekday } from '../lib/util.js';
+import { isoDate, fmtDay, fmtDayWeekday, plural } from '../lib/util.js';
 import { CycleWeekDay } from './workout.js';
+import { pendingFix, applyFix, revertFix } from '../data/fixes.js';
 
 export function Home({ syncStatus }) {
   const st = app.store.state;
@@ -34,6 +35,7 @@ export function Home({ syncStatus }) {
     </header>
 
     <${ImportNotice} />
+    <${FixNotice} />
 
     ${st.program.draft
       ? html`<div class="notice notice--caution">
@@ -115,6 +117,47 @@ function ImportNotice() {
         ? html`<button type="button" class="btn" onClick=${() => { dismiss(); app.ui.go({ view: { type: 'session', id: session.id } }); }}>Открыть 16 октября</button>`
         : null}
       <button type="button" class="btn" onClick=${dismiss}>Понятно</button>
+    </div>
+  </div>`;
+}
+
+// The 18.10.2026 correction: shown on a device that has those records as recorded, until the
+// owner applies it here (or another device's correction arrives through sync). Nothing changes
+// before «Исправить».
+let fixLater = false;
+function FixNotice() {
+  const [, rerender] = useState(0);
+  const plan = fixLater ? null : pendingFix(app.store.state);
+  if (!plan) return null;
+  const apply = async () => {
+    try {
+      const res = await applyFix(app.store);
+      const n = res.moved.reduce((a, m) => a + m.sets, 0);
+      app.ui.toast(`Исправлено: ${n} ${plural(n, 'подход', 'подхода', 'подходов')}${res.programBefore ? ', программа дня 2' : ''}`, {
+        ms: 15000,
+        action: { label: 'Отменить', fn: () => revertFix(app.store).catch((err) => app.ui.toast(`Не удалось отменить: ${err.message}`)) },
+      });
+    } catch (err) {
+      app.ui.toast(`Исправлено не всё: ${err.message}. Нажмите «Исправить» ещё раз — остальное доделается.`, { ms: 10000 });
+    }
+  };
+  return html`<div class="notice notice--caution fix" aria-label="Исправление тренировки 18 октября">
+    <h3>Исправить тренировку 18 октября</h3>
+    <p>Записано под упражнениями программы, а сделано на других тренажёрах. Подходы перейдут в серии того, что было сделано. Веса, повторения, RIR и дата не меняются.</p>
+    <ul class="fix__list">
+      ${plan.moves.map((m) => html`<li>
+        <span class="fix__what"><span class="fix__from">${m.item.name}</span> → <b>${m.to.name}</b></span>
+        <span class="fix__sets">${m.sets.map((x) => `${fmtWeight(x.weight, m.item.category)}×${x.reps}`).join(', ')}</span>
+      </li>`)}
+    </ul>
+    ${plan.skipped.map((m) => html`<p>«${m.item.name}»: подходы изменились после тренировки, их не трогаю. При необходимости — «Заменить» в этой тренировке.</p>`)}
+    ${plan.program
+      ? html`<p>Программа, день 2: основными станут «Гиперэкстензия в тренажере» и «Тяга штанги к подбородку в Смите», прежние варианты останутся альтернативами. К кроссоверу добавятся «Обратная бабочка двумя руками» и «одной рукой».</p>`
+      : null}
+    <p>Перед изменением на телефоне сохраняется резервная копия, после — можно отменить.</p>
+    <div class="btn-row">
+      <button type="button" class="btn btn--primary" onClick=${apply}>Исправить</button>
+      <button type="button" class="btn" onClick=${() => { fixLater = true; rerender((x) => x + 1); }}>Позже</button>
     </div>
   </div>`;
 }

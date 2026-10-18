@@ -1,7 +1,7 @@
 {
   "name": "training-tracker",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Offline-first strength training tracker (PWA) with Google Sheets sync via Apps Script",
   "type": "module",
   "scripts": {

@@ -42,7 +42,7 @@ test('App_Records: readable rows, idempotent resend, last writer wins, deletion 
   const rec = { ...record(), id: 'pr-1', createdAt: 1000, updatedAt: 1000, deleted: false };
   const req = { action: 'sync', token, since: 0, push: { records: [rec] } };
   const r1 = gas.post(req);
-  assert.equal(r1.api, 2);
+  assert.ok(r1.api >= 2);
   assert.equal(r1.ack.records, 1);
   gas.post(req);
   const sh = gas.sheet('App_Records');
@@ -112,7 +112,7 @@ test('old Apps Script (API 1): records are never treated as saved; they reach th
   assert.equal(st.state, 'idle', 'not an error: everything else synced');
   assert.equal(a.store.state.outbox.size, 1, 'the record is still queued');
   assert.deepEqual([st.pending, st.waiting], [0, 1], 'waiting for the script, not pending: no retries every minute');
-  assert.match(st.notice, /Рекорды, добавленные вручную \(1\), сохранены на телефоне/);
+  assert.match(st.notice, /Сохранены на телефоне .*: рекорды, добавленные вручную — 1\./);
   assert.equal(gas.sheet('App_Records'), null, 'the old script does not know records');
   assert.equal(gas.sheet('App_Sessions').getLastRow(), 2, 'the workout itself synced');
   assert.ok(a.store.state.sessions.get(s.id));

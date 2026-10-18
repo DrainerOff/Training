@@ -7,8 +7,10 @@ import { uid, isoDate } from '../lib/util.js';
 import { normalizeProgram, starterProgram, makeOption, CATEGORY } from '../lib/program.js';
 import { itemsForDay } from '../lib/planner.js';
 
-export const ENTITIES = ['sessions', 'sets', 'metrics', 'records'];
+export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises'];
 const DOUBLE_TAP_MS = 1500;
+const MAX_CORRECTIONS = 50;
+export const SETUP_MAX = 300;
 
 export function createStore(adapter, { now = () => Date.now() } = {}) {
   const state = {
@@ -18,6 +20,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     sets: new Map(),
     metrics: new Map(),
     records: new Map(), // manual personal records; automatic ones are derived from sets
+    exercises: new Map(), // per-variant settings, id `x:<seriesKey>`
     outbox: new Map(),
     kv: {},
     version: 0,
@@ -37,6 +40,12 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     }
   }
 
+  function dropRecord(entity, id) {
+    const prev = state[entity].get(id);
+    state[entity].delete(id);
+    if (entity === 'sets' && prev) bySession.get(prev.sessionId)?.delete(id);
+  }
+
   function emit() {
     state.version++;
     for (const fn of listeners) fn(state);
@@ -46,9 +55,13 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return Math.max(now(), (prev?.updatedAt || 0) + 1);
   }
 
+  // A failed write leaves no trace in memory: queued outbox entries are taken back here and
+  // the callers restore their records, so nothing reaches the sheet that the phone hasn't kept.
   async function persist(ops, outboxEntries = []) {
+    const before = [];
     for (const e of outboxEntries) {
       const entry = { key: `${e.entity}:${e.id}`, entity: e.entity, id: e.id, updatedAt: e.updatedAt };
+      before.push([entry.key, state.outbox.get(entry.key)]);
       state.outbox.set(entry.key, entry);
       ops.push({ store: 'outbox', value: entry });
     }
@@ -59,38 +72,68 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
         emit();
       }
     } catch (err) {
+      for (const [key, prev] of before.reverse()) {
+        if (prev) state.outbox.set(key, prev);
+        else state.outbox.delete(key);
+      }
       state.storageError = `Не удалось сохранить на устройстве: ${err?.message || err}`;
       emit();
       throw err;
     }
   }
 
-  // Memory first (instant UI), then disk + outbox in one transaction.
-  async function save(entity, records) {
-    if (!records.length) return;
-    for (const r of records) putRecord(entity, r);
+  // Memory first (instant UI), then disk + outbox in one transaction. Several entities (and kv)
+  // can go in one call: all of it is saved, or none of it.
+  async function saveAll(groups, kvPatch = null) {
+    const ops = [];
+    const outbox = [];
+    const undo = [];
+    for (const [entity, records] of groups) {
+      for (const r of records) {
+        undo.push([entity, r.id, state[entity].get(r.id)]);
+        putRecord(entity, r);
+        ops.push({ store: entity, value: r });
+        outbox.push({ entity, id: r.id, updatedAt: r.updatedAt });
+      }
+    }
+    const kvBefore = kvPatch ? Object.fromEntries(Object.keys(kvPatch).map((k) => [k, state.kv[k]])) : null;
+    if (kvPatch) {
+      Object.assign(state.kv, kvPatch);
+      for (const [k, v] of Object.entries(kvPatch)) ops.push({ store: 'kv', value: { k, v } });
+    }
+    if (!ops.length) return;
     emit();
-    await persist(
-      records.map((r) => ({ store: entity, value: r })),
-      records.map((r) => ({ entity, id: r.id, updatedAt: r.updatedAt })),
-    );
-    onLocalChange?.();
+    try {
+      await persist(ops, outbox);
+    } catch (err) {
+      for (const [entity, id, prev] of undo.reverse()) {
+        if (prev) putRecord(entity, prev);
+        else dropRecord(entity, id);
+      }
+      if (kvBefore) Object.assign(state.kv, kvBefore);
+      emit();
+      throw err;
+    }
+    if (outbox.length) onLocalChange?.();
   }
 
-  async function setKV(patch) {
-    Object.assign(state.kv, patch);
-    emit();
-    await persist(Object.entries(patch).map(([k, v]) => ({ store: 'kv', value: { k, v } })));
+  function save(entity, records) {
+    return saveAll([[entity, records]]);
+  }
+
+  function setKV(patch) {
+    return saveAll([], patch);
   }
 
   async function load() {
-    const [sessions, sets, metrics, records, outbox, kv] = await Promise.all(
-      ['sessions', 'sets', 'metrics', 'records', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
+    const [sessions, sets, metrics, records, exercises, outbox, kv] = await Promise.all(
+      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
     for (const r of sets) putRecord('sets', r);
     for (const r of metrics) state.metrics.set(r.id, r);
     for (const r of records) state.records.set(r.id, r);
+    for (const r of exercises) state.exercises.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
     // The starter program has updatedAt 0 and is never pushed: a fresh device must not
@@ -185,6 +228,41 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     await updateItem(sessionId, slotId, { seriesKey: opt.key, name: opt.name, options });
   }
 
+  // A correction, not a swap: the exercise was recorded under the wrong variant. The item and
+  // its sets recorded under the current variant move to `option`; weights, reps, RIR, dates and
+  // ids stay, so the sheet updates the same rows and every device takes the change by
+  // `updatedAt`. Sets of this slot recorded under another variant (a swap mid-exercise) stay
+  // where they are. The previous values are kept in kv `corrections` (undo: move back).
+  async function reassignVariant(sessionId, slotId, option, { reason = '' } = {}) {
+    const s = state.sessions.get(sessionId);
+    const it = s?.items.find((i) => i.slotId === slotId);
+    if (!it) return null;
+    const opt = option.key ? { key: option.key, name: option.name } : makeOption(option.name);
+    if (opt.key === it.seriesKey && opt.name === it.name) return { moved: 0 };
+    const sets = setsOf(sessionId, slotId).filter((x) => x.seriesKey === it.seriesKey);
+    const options = it.options.some((o) => o.key === opt.key) ? it.options : [...it.options, opt];
+    const items = s.items.map((x) => (x.slotId === slotId ? { ...x, seriesKey: opt.key, name: opt.name, options } : x));
+    const backup = {
+      id: uid('cr'),
+      at: now(),
+      reason,
+      sessionId,
+      slotId,
+      date: s.date,
+      from: { key: it.seriesKey, name: it.name },
+      to: opt,
+      sets: sets.map((x) => ({ id: x.id, seriesKey: x.seriesKey, exercise: x.exercise, weight: x.weight, reps: x.reps, rir: x.rir, updatedAt: x.updatedAt })),
+    };
+    await saveAll(
+      [
+        ['sessions', [{ ...s, items, updatedAt: stamp(s) }]],
+        ['sets', sets.map((x) => ({ ...x, seriesKey: opt.key, exercise: opt.name, updatedAt: stamp(x) }))],
+      ],
+      { corrections: [...(state.kv.corrections || []), backup].slice(-MAX_CORRECTIONS) },
+    );
+    return { moved: sets.length, backup };
+  }
+
   async function addItem(sessionId, { name, category = 'iso' }) {
     const s = state.sessions.get(sessionId);
     if (!s) return null;
@@ -218,6 +296,12 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     // (RIR is ignored: the composer resets it after each set, so a second tap would differ only there).
     if (last && t - last.createdAt < DOUBLE_TAP_MS && last.weight === v.weight && last.reps === v.reps && !!last.drop === !!v.drop) {
       return { set: last, duplicate: true };
+    }
+    // The last set of an exercise opens the next one under the same finger: a second tap there
+    // is the same double tap, not a first set of the next exercise.
+    const latest = setsOf(sessionId).reduce((a, x) => (!a || x.createdAt > a.createdAt ? x : a), null);
+    if (latest && latest.slotId !== slotId && t - latest.createdAt < DOUBLE_TAP_MS) {
+      return { set: latest, duplicate: true };
     }
     const rec = {
       id: uid('st'),
@@ -339,14 +423,39 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     await save('records', [{ ...prev, deleted: false, updatedAt: stamp(prev) }]);
   }
 
+  // --- per-variant settings (seat, handles, stops…) ---------------------------------------------
+  // One record per series key, deterministic id → two devices edit the same row, never two rows.
+
+  function setupOf(seriesKey) {
+    const r = state.exercises.get(`x:${seriesKey}`);
+    return r && !r.deleted ? r.setup || '' : '';
+  }
+
+  async function saveSetup(seriesKey, exercise, text) {
+    const id = `x:${seriesKey}`;
+    const prev = state.exercises.get(id);
+    const setup = String(text || '').trim().slice(0, SETUP_MAX);
+    if (prev && !prev.deleted && (prev.setup || '') === setup) return prev;
+    const rec = { id, seriesKey, exercise, setup, updatedAt: stamp(prev), deleted: false };
+    await save('exercises', [rec]);
+    return rec;
+  }
+
   // --- program -------------------------------------------------------------------------
 
   async function saveProgram(program) {
     const p = normalizeProgram({ ...program, draft: false });
     p.updatedAt = Math.max(now(), (state.program?.updatedAt || 0) + 1);
+    const before = state.program;
     state.program = p;
     emit();
-    await persist([{ store: 'kv', value: { k: 'program', v: p } }], [{ entity: 'program', id: 'main', updatedAt: p.updatedAt }]);
+    try {
+      await persist([{ store: 'kv', value: { k: 'program', v: p } }], [{ entity: 'program', id: 'main', updatedAt: p.updatedAt }]);
+    } catch (err) {
+      state.program = before;
+      emit();
+      throw err;
+    }
     onLocalChange?.();
     return p;
   }
@@ -433,6 +542,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       sets: [...state.sets.values()],
       metrics: [...state.metrics.values()],
       records: [...state.records.values()],
+      exercises: [...state.exercises.values()],
     };
   }
 
@@ -521,6 +631,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     deleteSession,
     updateItem,
     swapVariant,
+    reassignVariant,
     addItem,
     logSet,
     updateSet,
@@ -531,6 +642,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     saveRecord,
     deleteRecord,
     restoreRecord,
+    setupOf,
+    saveSetup,
     saveProgram,
     importParsedSessions,
     exportAll,

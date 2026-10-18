@@ -2,6 +2,8 @@
 // against the DOM of each screen. Used by the live check (tools/blockers/check.mjs) and the
 // snapshot test (tests/e2e/blockers.spec.js).
 
+import { realSession, realSets } from '../../tests/helpers/real-data.js';
+
 // Runs in the page: which selectors match at least one element right now.
 export function matchSelectors(page, selectors) {
   return page.evaluate((list) => {
@@ -30,6 +32,11 @@ export async function walkScreens(page, url, visit) {
   await page.getByText('Перенесено из Google Таблицы').waitFor();
   await visit('home (first launch notice)');
   await page.getByRole('button', { name: 'Понятно' }).click();
+  // The owner's 18.10.2026 workout as recorded: the one-time correction card appears.
+  await page.evaluate(({ s, sets }) => window.__trainer.store.applyRemote({ sessions: [s], sets }), { s: realSession(), sets: realSets() });
+  await page.getByText('Исправить тренировку 18 октября').waitFor();
+  await visit('home (correction card)');
+  await page.getByRole('button', { name: 'Позже' }).click();
 
   await page.getByRole('button', { name: 'Начать тренировку' }).click();
   await page.locator('.dock').waitFor();
@@ -37,9 +44,19 @@ export async function walkScreens(page, url, visit) {
   await page.locator('.dock .btn--primary').click();
   await page.waitForTimeout(300);
   await visit('workout after a set (undo toast)');
+  await page.locator('.panel .setup').click();
+  await page.getByRole('dialog').getByLabel('Настройки тренажёра').fill('сиденье 5, ручки 3');
+  await visit('variant settings sheet');
+  await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
+  await visit('workout with settings and a set note icon');
   await page.getByRole('button', { name: 'Заменить' }).first().click();
   await page.getByRole('dialog').waitFor();
   await visit('swap sheet');
+  await page.getByRole('dialog').getByPlaceholder('Название').fill('Жим в Смите');
+  await page.getByRole('dialog').getByRole('button', { name: 'Заменить на «Жим в Смите»' }).click();
+  await page.getByText('Записал не то упражнение').waitFor();
+  await visit('swap: move the recorded sets?');
   await page.keyboard.press('Escape');
   await page.mouse.click(5, 5);
 
