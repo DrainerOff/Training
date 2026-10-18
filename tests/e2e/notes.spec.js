@@ -29,8 +29,16 @@ async function gym(page, { cycle = 2 } = {}) {
 async function openExercise(page, name) {
   const row = page.locator('.ex__row', { hasText: name });
   await expect(page.locator('.panel')).toBeVisible();
-  if ((await page.locator('.panel .panel__title').textContent()) !== name) await row.click();
-  await expect(page.locator('.panel .panel__title')).toHaveText(name);
+  const title = page.locator('.panel .panel__title');
+  await expect(async () => {
+    if ((await title.textContent()) !== name) await row.click({ timeout: 1000 });
+    await expect(title).toHaveText(name, { timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
+}
+// A sheet closes once its write is committed to IndexedDB — what the owner sees before leaving.
+async function save(dialog) {
+  await dialog.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(dialog).toHaveCount(0);
 }
 const execUrl = (gas) => `http://127.0.0.1:${gas.server.address().port}/exec`;
 const activeSets = (page) =>
@@ -50,7 +58,7 @@ test('settings of a variant: shown when it opens, its own per variant, kept offl
     await panel.getByRole('button', { name: 'Настройки тренажёра' }).click();
     const sheet = page.getByRole('dialog', { name: `Настройки: ${HAMMER}` });
     await sheet.getByLabel('Настройки тренажёра').fill('сиденье 5, ручки 3');
-    await sheet.getByRole('button', { name: 'Сохранить' }).click();
+    await save(sheet);
     await expect(panel.locator('.setup')).toHaveText('Настройки: сиденье 5, ручки 3');
 
     // Another variant of the same exercise has its own settings (none yet).
@@ -71,7 +79,7 @@ test('settings of a variant: shown when it opens, its own per variant, kept offl
     await expect(panel.locator('.setup')).toHaveText('Настройки: сиденье 5, ручки 3');
     await panel.locator('.setup').click();
     await page.getByRole('dialog', { name: `Настройки: ${HAMMER}` }).getByLabel('Настройки тренажёра').fill('сиденье 6, ручки 3');
-    await page.getByRole('dialog', { name: `Настройки: ${HAMMER}` }).getByRole('button', { name: 'Сохранить' }).click();
+    await save(page.getByRole('dialog', { name: `Настройки: ${HAMMER}` }));
     await page.reload();
     await ready(page);
     await openExercise(page, HAMMER);
@@ -107,14 +115,14 @@ test('three levels of notes stay apart: a note on a set (icon), a comment for th
   await panel.getByRole('button', { name: 'Добавить заметку к подходу 1' }).click();
   const edit = page.getByRole('dialog', { name: `Подход 1: ${HAMMER}` });
   await edit.getByLabel('Заметка к подходу').fill('плечо тянуло');
-  await edit.getByRole('button', { name: 'Сохранить' }).click();
+  await save(edit);
   const icon = panel.getByRole('button', { name: 'Заметка к подходу 1: плечо тянуло. Изменить' });
   await expect(icon).toHaveClass(/set__note--on/);
 
   // This workout's comment on the exercise.
   await panel.getByRole('button', { name: 'Отметки и комментарий' }).click();
   await page.getByLabel('Комментарий к упражнению в этой тренировке').fill('опустил сиденье на одно деление');
-  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await save(page.getByRole('dialog', { name: HAMMER }));
   await expect(panel.locator('.item-note')).toContainText('опустил сиденье на одно деление');
 
   // The variant settings are separate and still empty.
