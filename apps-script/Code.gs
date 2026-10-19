@@ -14,7 +14,8 @@
 // so a client never treats records as saved by a server that doesn't know them.
 // 3: per-variant exercise settings (App_Exercises).
 // 4: body measurements (App_Body, one real measurement per row) and main sleep per wake date
-// (App_Sleep). Old clients never send them and never receive them.
+// (App_Sleep). Old clients never send them and never receive them. `ingest`: iPhone Shortcuts
+// add weight, waist and sleep with their own key, which can do nothing else.
 var API_VERSION = 4;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
@@ -211,7 +212,18 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: 'bad_request', message: 'Тело запроса не JSON' });
   }
-  // Every action needs the access key; without it nothing is read or written.
+  // Shortcuts: their own key, append-only, nothing is read back.
+  if (req && req.action === 'ingest') {
+    if (body.length > INGEST_MAX_BODY) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
+    var ingestKey = PropertiesService.getScriptProperties().getProperty('INGEST_KEY');
+    if (!ingestKey || typeof req.key !== 'string' || !sameSecret_(req.key, ingestKey)) return json_({ ok: false, error: 'unauthorized' });
+    try {
+      return json_(ingest_(req));
+    } catch (err) {
+      return json_({ ok: false, error: 'server_error', message: String(err && err.message ? err.message : err) });
+    }
+  }
+  // Every other action needs the access key; without it nothing is read or written.
   var token = PropertiesService.getScriptProperties().getProperty('API_TOKEN');
   if (!token || !req || typeof req.token !== 'string' || !sameSecret_(req.token, token)) return json_({ ok: false, error: 'unauthorized' });
   try {
@@ -326,6 +338,264 @@ function sync_(req) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------------------------------------------------------------------------- ingest (Shortcuts)
+
+// A shortcut sends one type per request: { action: 'ingest', key, type, lines }, where `lines` is
+// the text it builds from «Найти данные Здоровья»: one sample per line, «value|start|end|source».
+// Measurements are only added (a known one, or one the owner deleted, is left as it is); sleep is
+// recomputed per wake date from the samples sent and updates a row unless the owner edited or
+// deleted it, and never shrinks it (a window that cuts a night short must not overwrite it).
+var INGEST_MAX_BODY = 1024 * 1024;
+var INGEST_MAX_LINES = 3000;
+var INGEST_TYPES = { weight: 'weight', waist: 'waist', fat: 'fat', sleep: 'sleep' };
+var INGEST_FIRST_DAY = Date.UTC(2015, 0, 1);
+var HEALTH_LOG_SHEET = 'App_HealthLog';
+var HEALTH_LOG_COLS = ['received_at', 'type', 'lines', 'added', 'updated', 'same', 'kept', 'rejected', 'sources'];
+
+function ingest_(req) {
+  var type = INGEST_TYPES[String(req.type || '')];
+  if (!type) return { ok: false, error: 'bad_request', message: 'Неизвестный тип данных' };
+  var lines = String(req.lines || '').split(/\r?\n/).filter(function (l) { return l.replace(/[|\s]/g, ''); });
+  if (lines.length > INGEST_MAX_LINES) return { ok: false, error: 'bad_request', message: 'Слишком много строк: не больше ' + INGEST_MAX_LINES };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return { ok: false, error: 'busy' };
+  try {
+    ensureSheets_();
+    var props = PropertiesService.getScriptProperties();
+    var srv = Math.max(Date.now(), Number(props.getProperty('LAST_SRV') || 0) + 1);
+    var now = Date.now();
+    var res = { ok: true, api: API_VERSION, type: type, received: lines.length, added: 0, updated: 0, same: 0, kept: 0, rejected: 0, errors: [] };
+    var bad = function (i, reason) {
+      res.rejected++;
+      res.errors.push({ line: i + 1, reason: reason });
+    };
+    var samples = [];
+    var sources = {};
+    lines.forEach(function (line, i) {
+      var f = line.split('|').map(function (x) { return x.trim(); });
+      var start = ingestTime_(f[1]);
+      var end = ingestTime_(f[2] || f[1]);
+      if (!start || !end) return bad(i, 'дата');
+      if (start.utc < INGEST_FIRST_DAY || end.utc > now + 86400000 || end.utc < start.utc) return bad(i, 'дата вне диапазона');
+      var source = String(f[3] || '').slice(0, 64);
+      if (source) sources[source] = true;
+      samples.push({ i: i, value: f[0], start: start, end: end, source: source });
+    });
+    var table = readTable_(type === 'sleep' ? 'sleep' : 'body');
+    if (type === 'sleep') ingestSleep_(samples, table, res, now, function () { return srv++; });
+    else ingestBody_(type, samples, table, res, now, bad, function () { return srv++; });
+    writeTable_(table);
+    props.setProperty('LAST_SRV', String(srv));
+    // Freshness for the owner and the app; counts only, never values.
+    logIngest_([new Date(now).toISOString(), type, res.received, res.added, res.updated, res.same, res.kept, res.rejected, Object.keys(sources).join(', ').slice(0, 200)]);
+    SpreadsheetApp.flush();
+    res.errors = res.errors.sort(function (x, y) { return x.line - y.line; }).slice(0, 5);
+    return res;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Same rules as the app (js/lib/bodydata.js): a stable family per source app, the UTC time to the
+// second, the value × 100. A measurement the app imported from a CSV (to the minute) is the same
+// measurement when kind, family, minute and value agree.
+function ingestBody_(kind, samples, table, res, now, bad, nextSrv) {
+  var range = BODY_KINDS[kind];
+  var byMatch = {};
+  table.rows.forEach(function (row) {
+    var t = ingestTime_(String(row[table.map.measuredAt] || ''));
+    if (!t) return;
+    var orig = row[table.map.origValue];
+    var v = orig === '' || orig == null ? row[table.map.value] : orig;
+    byMatch[matchKey_(String(row[table.map.kind]), String(row[table.map.family]), t.utc, Number(v))] = true;
+  });
+  samples.forEach(function (x) {
+    var value = Math.round(Number(String(x.value).replace(',', '.').replace(/[^0-9.\-]/g, '')) * 100) / 100;
+    if (!isFinite(value) || !(value >= range[0] && value <= range[1])) return bad(x.i, 'значение вне диапазона');
+    var family = sourceFamily_(x.source);
+    var id = 'b:' + kind + ':' + family + ':' + utcStamp_(x.start.utc, x.start.precision) + ':' + Math.round(value * 100);
+    var key = matchKey_(kind, family, x.start.utc, value);
+    if (table.index[id] != null || byMatch[key]) {
+      res.same++;
+      return;
+    }
+    var rec = {
+      id: id, kind: kind, value: value, origValue: value, unit: kind === 'fat' ? '%' : kind === 'weight' ? 'кг' : 'см',
+      measuredAt: x.start.local, date: x.start.local.slice(0, 10), source: x.source || 'Здоровье', family: family,
+      via: 'shortcut', srcId: '', batch: 'sc' + x.start.local.slice(0, 10).replace(/-/g, ''), excluded: null,
+      edited: false, note: '', updatedAt: now, deleted: false, _srv: nextSrv(),
+    };
+    byMatch[key] = true;
+    table.index[id] = table.rows.length;
+    table.rows.push(toRow_('body', rec, table, null));
+    table.changed[table.rows.length - 1] = true;
+    res.added++;
+  });
+}
+
+function ingestSleep_(samples, table, res, now, nextSrv) {
+  sleepFromSamples_(samples).forEach(function (n) {
+    var id = 's:' + n.wakeDate;
+    var at = table.index[id];
+    var rec = { id: id, wakeDate: n.wakeDate, hours: n.hours, total: n.total, episodes: n.episodes, start: n.start, end: n.end,
+      core: n.core, deep: n.deep, rem: n.rem, unspec: n.unspec, segments: n.segments, source: n.source,
+      via: 'shortcut', batch: 'sc' + n.wakeDate.replace(/-/g, ''), edited: false, note: '', updatedAt: now, deleted: false };
+    if (at == null) {
+      rec._srv = nextSrv();
+      table.index[id] = table.rows.length;
+      table.rows.push(toRow_('sleep', rec, table, null));
+      table.changed[table.rows.length - 1] = true;
+      res.added++;
+      return;
+    }
+    var old = fromRow_('sleep', table.rows[at], table);
+    if (old.deleted || old.edited) {
+      res.kept++;
+      return;
+    }
+    var oldTotal = old.total != null ? old.total : old.hours || 0;
+    if (n.total < oldTotal - 0.01 || (n.total === oldTotal && n.hours === old.hours && n.start === old.start && n.end === old.end)) {
+      res.same++;
+      return;
+    }
+    rec.note = old.note || '';
+    rec.updatedAt = Math.max(now, (Number(old.updatedAt) || 0) + 1);
+    rec._srv = nextSrv();
+    table.rows[at] = toRow_('sleep', rec, table, table.rows[at]);
+    table.changed[at] = true;
+    res.updated++;
+  });
+}
+
+function logIngest_(row) {
+  var ss = ss_();
+  var sh = ss.getSheetByName(HEALTH_LOG_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(HEALTH_LOG_SHEET, ss.getSheets().length);
+    sh.getRange(1, 1, 1, HEALTH_LOG_COLS.length).setValues([HEALTH_LOG_COLS]);
+    sh.setFrozenRows(1);
+  }
+  sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+}
+
+// Stage names come in English even on a Russian iPhone.
+function sleepStage_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  if (/^(core|ядро|основн)/.test(s)) return 'core';
+  if (/^(deep|глубок)/.test(s)) return 'deep';
+  if (/^(rem|быстр)/.test(s)) return 'rem';
+  if (/^(awake|бодрств)/.test(s)) return 'awake';
+  if (/^(in ?bed|в кровати)/.test(s)) return 'inbed';
+  if (/^(asleep|unspecified|сон|спит)/.test(s)) return 'unspec';
+  return null;
+}
+
+// The app's sleepFromSamples (js/lib/bodydata.js), line for line: a gap over 90 min starts a new
+// episode, main = longest episode of 2 h+, total = all sleep of episodes ending on that date.
+function sleepFromSamples_(samples) {
+  var pts = [];
+  samples.forEach(function (x) {
+    var stage = sleepStage_(x.value);
+    if (!stage || stage === 'awake' || stage === 'inbed' || x.end.utc <= x.start.utc) return;
+    pts.push({ stage: stage, a: x.start.utc, b: x.end.utc, start: x.start.local, end: x.end.local, source: x.source || '' });
+  });
+  pts.sort(function (p, q) { return p.a - q.a || p.b - q.b; });
+  var episodes = [];
+  var cur = null;
+  pts.forEach(function (p) {
+    if (cur && p.a - cur.b <= 90 * 60000) {
+      cur.pts.push(p);
+      if (p.b > cur.b) {
+        cur.b = p.b;
+        cur.end = p.end;
+      }
+    } else {
+      cur = { a: p.a, b: p.b, start: p.start, end: p.end, pts: [p] };
+      episodes.push(cur);
+    }
+  });
+  var union = function (list) {
+    var ms = 0;
+    var end = -Infinity;
+    list.forEach(function (p) {
+      var from = Math.max(p.a, end);
+      if (p.b > from) ms += p.b - from;
+      end = Math.max(end, p.b);
+    });
+    return ms / 3600000;
+  };
+  var byDate = {};
+  var dates = [];
+  episodes.forEach(function (e) {
+    var ep = { start: e.start, end: e.end, hours: union(e.pts), segments: e.pts.length, sources: {} };
+    ['core', 'deep', 'rem', 'unspec'].forEach(function (k) {
+      ep[k] = union(e.pts.filter(function (p) { return p.stage === k; }));
+    });
+    e.pts.forEach(function (p) { if (p.source) ep.sources[p.source] = true; });
+    var date = e.end.slice(0, 10);
+    if (!byDate[date]) {
+      byDate[date] = [];
+      dates.push(date);
+    }
+    byDate[date].push(ep);
+  });
+  var r2 = function (n) { return Math.round(n * 100) / 100; };
+  var out = [];
+  dates.sort().forEach(function (wakeDate) {
+    var eps = byDate[wakeDate];
+    var total = eps.reduce(function (t, e) { return t + e.hours; }, 0);
+    if (total < 1) return;
+    var main = eps.filter(function (e) { return e.hours >= 2; }).sort(function (x, y) { return y.hours - x.hours; })[0] || null;
+    var base = main || eps.slice().sort(function (x, y) { return y.hours - x.hours; })[0];
+    out.push({
+      wakeDate: wakeDate, start: base.start, end: base.end, hours: main ? r2(main.hours) : null, total: r2(total), episodes: eps.length,
+      core: r2(base.core), deep: r2(base.deep), rem: r2(base.rem), unspec: r2(base.unspec), segments: base.segments,
+      source: Object.keys(base.sources).join(', ') || 'Apple Watch',
+    });
+  });
+  return out;
+}
+
+// «2026-10-16T18:44:32+03:00» (what Shortcuts writes) or with a space; the offset is required.
+function ingestTime_(raw) {
+  var m = String(raw || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})$/);
+  if (!m) return null;
+  var y = +m[1], mo = +m[2], d = +m[3], h = +m[4], mi = +m[5];
+  var sec = m[6] != null ? +m[6] : null;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || (sec != null && sec > 59)) return null;
+  var off = 0;
+  if (m[7] !== 'Z') {
+    var z = m[7].replace(':', '');
+    off = (z[0] === '-' ? -1 : 1) * (Number(z.slice(1, 3)) * 60 + Number(z.slice(3, 5)));
+  }
+  var p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+  var oa = Math.abs(off);
+  var local = y + '-' + p2(mo) + '-' + p2(d) + 'T' + p2(h) + ':' + p2(mi) + (sec != null ? ':' + p2(sec) : '') + (off < 0 ? '-' : '+') + p2(Math.floor(oa / 60)) + ':' + p2(oa % 60);
+  return { utc: Date.UTC(y, mo - 1, d, h, mi, sec || 0) - off * 60000, local: local, precision: sec != null ? 's' : 'm' };
+}
+
+function utcStamp_(utc, precision) {
+  var t = new Date(utc).toISOString();
+  var base = t.slice(0, 4) + t.slice(5, 7) + t.slice(8, 10) + 'T' + t.slice(11, 13) + t.slice(14, 16);
+  return precision === 's' ? base + t.slice(17, 19) : base;
+}
+
+function matchKey_(kind, family, utc, value) {
+  return kind + '|' + family + '|' + utcStamp_(utc, 'm') + '|' + Math.round(Number(value) * 100);
+}
+
+function sourceFamily_(name) {
+  var s = String(name || '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (s === 'manual' || s === 'вручную') return 'manual';
+  if (/zepp|mi fit|mifit/.test(s)) return 'zepp';
+  if (/fitdays/.test(s)) return 'fitdays';
+  if (/watch/.test(s)) return 'watch';
+  if (s === 'здоровье' || s === 'health' || s === 'apple health') return 'health';
+  var slug = s.replace(/[^a-z0-9а-яё]+/g, '-').replace(/^-+|-+$/g, '');
+  return /^[a-z0-9-]+$/.test(slug) && slug ? slug.slice(0, 24) : 'other';
 }
 
 // ---------------------------------------------------------------------------- sheets io
@@ -831,6 +1101,8 @@ function onOpen() {
     .addItem('Обновить сводку', 'rebuildSummary')
     .addItem('Описать старые листы (для переноса)', 'describeLegacySheets')
     .addItem('Резервная копия таблицы', 'backupSpreadsheet')
+    .addItem('Ключ для «Команд» iPhone', 'showIngestKey')
+    .addItem('Сменить ключ для «Команд»', 'rotateIngestKey')
     .addToUi();
 }
 
@@ -879,6 +1151,25 @@ function backupSpreadsheet() {
   var copy = ss.copy(ss.getName() + ' — резервная копия ' + stamp);
   notify_('Резервная копия создана:\n' + copy.getName() + '\n' + copy.getUrl());
   return copy.getId();
+}
+
+// The Shortcuts key only adds weight, waist and sleep: it cannot read the sheet or change workouts.
+function showIngestKey() {
+  var props = PropertiesService.getScriptProperties();
+  var key = props.getProperty('INGEST_KEY');
+  if (!key) {
+    key = newToken_();
+    props.setProperty('INGEST_KEY', key);
+  }
+  notify_('Ключ для «Команд» (только добавляет вес, талию и сон, ничего не читает):\n' + key);
+  return key;
+}
+
+function rotateIngestKey() {
+  var key = newToken_();
+  PropertiesService.getScriptProperties().setProperty('INGEST_KEY', key);
+  notify_('Новый ключ для «Команд» (старый больше не работает):\n' + key + '\n\nВставьте его в команду на iPhone.');
+  return key;
 }
 
 function showToken() {
