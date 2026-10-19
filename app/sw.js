@@ -36,6 +36,7 @@ const SHELL = [
   './js/ui/records.js',
   './js/ui/history.js',
   './js/ui/body.js',
+  './js/ui/bodyentry.js',
   './js/ui/settings.js',
   './fonts/alumni-sans-cyrillic-wght-normal.woff2',
   './fonts/alumni-sans-latin-wght-normal.woff2',

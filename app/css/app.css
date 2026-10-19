@@ -1994,3 +1994,30 @@ button.src {
   font-size: 13px;
   color: var(--steel);
 }
+
+/* Body tab: measurements, sleep, import */
+.body-value {
+  font-size: 22px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.body-when {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.body-deleted .row__title,
+.body-deleted .body-value {
+  color: var(--steel);
+  text-decoration: line-through;
+}
+.body-import {
+  margin-top: 4px;
+  cursor: pointer;
+}
+.body-empty {
+  padding: 20px 8px;
+}
+.screen > .btn-row {
+  margin-bottom: 4px;
+}

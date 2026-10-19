@@ -1,21 +1,36 @@
-// Bodyweight, sleep, recovery — and the rate of weight gain.
+// Body: weight and its rate of change, girths, main sleep, recovery — and where each came from.
+// Device data (App_Body, App_Sleep) wins for its day over a v1.0 check-in, so nothing counts twice.
 
 import { html, useState, app, openSheet, Sheet } from './core.js';
 import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, sum } from '../lib/util.js';
+import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf, isCounted } from '../lib/bodydata.js';
+import { ImportButton, openAddBody, openBodyRecord, openKindHistory, openNights, Sources, suspectText } from './bodyentry.js';
 
 export function Body() {
-  const metrics = [...app.store.state.metrics.values()].filter((m) => !m.deleted).sort((a, b) => b.date.localeCompare(a.date));
-  const trend = weightTrend(metrics, { today: isoDate() });
+  const st = app.store.state;
+  const today = isoDate();
+  const metrics = [...st.metrics.values()].filter((m) => !m.deleted).sort((a, b) => b.date.localeCompare(a.date));
+  const body = [...st.body.values()];
+  const { days, suspects } = dailyWeights(body, metrics);
+  const trend = weightTrend(days, { today });
   const recent = metrics.filter((m) => m.recovery != null).slice(0, 7);
   const recAvg = recent.length ? sum(recent.map((m) => m.recovery)) / recent.length : null;
-  const sleeps = metrics.filter((m) => m.sleep != null).slice(0, 7);
-  const sleepAvg = sleeps.length ? sum(sleeps.map((m) => m.sleep)) / sleeps.length : null;
+  const { nights } = sleepNights(st.sleep.values(), metrics);
+  const s7 = sleepAverage(nights, today, 7);
+  const s30 = sleepAverage(nights, today, 30);
+  const lastNight = nights[nights.length - 1] || null;
+  const weighIns = body.filter((r) => r.kind === 'weight' && !r.deleted).sort((a, b) => (a.measuredAt < b.measuredAt ? 1 : -1));
+  const girths = ['fat', ...GIRTHS].map((k) => latestOf(body, k)).filter(Boolean);
+  const nothing = !metrics.length && !body.some((r) => !r.deleted) && !nights.length;
 
   return html`<main class="screen">
     <header class="topbar"><h1>Тело и восстановление</h1></header>
-    <button type="button" class="btn btn--primary btn--block" onClick=${() => openEntry(isoDate())}>Записать за сегодня</button>
+    <div class="btn-row">
+      <button type="button" class="btn btn--primary" onClick=${() => openEntry(today)}>Записать самочувствие</button>
+      <button type="button" class="btn" onClick=${() => openAddBody()}>Добавить замер</button>
+    </div>
 
     <div class="stat-row">
       <div class="stat">
@@ -24,32 +39,75 @@ export function Body() {
         <div class="stat__unit">кг</div>
       </div>
       <div class="stat">
-        <div class="stat__label">Темп набора</div>
+        <div class="stat__label">Темп</div>
         <div class="stat__value">${trend?.perWeek != null ? `${trend.perWeek >= 0 ? '+' : '−'}${fmtNum(Math.abs(trend.perWeek), 2)}` : '–'}</div>
         <div class="stat__unit">кг в неделю</div>
       </div>
       <div class="stat">
-        <div class="stat__label">Восстановление</div>
-        <div class="stat__value">${recAvg != null ? fmtNum(recAvg, 1) : '–'}</div>
-        <div class="stat__unit">из 5, за 7 записей</div>
+        <div class="stat__label">Сон, 7 дней</div>
+        <div class="stat__value">${s7.avg != null ? fmtNum(s7.avg, 1) : '–'}</div>
+        <div class="stat__unit">${s7.nights ? `ч, ночей: ${s7.nights}` : 'ч'}</div>
       </div>
     </div>
     <p class="muted" style="font-size:13px">
       ${trend?.perWeek != null
         ? `Темп по взвешиваниям за 4 недели: ${trend.perWeekPct >= 0 ? '+' : '−'}${fmtNum(Math.abs(trend.perWeekPct), 2)}% массы в неделю.`
-        : 'Темп появится, когда будет хотя бы 4 взвешивания за 10+ дней.'}
-      ${sleepAvg != null ? ` Сон в среднем ${fmtNum(sleepAvg, 1)} ч.` : ''}
+        : 'Темп появится, когда будет хотя бы 4 дня со взвешиванием за 10+ дней.'}
+      ${recAvg != null ? ` Восстановление ${fmtNum(recAvg, 1)} из 5 (последние ${recent.length} записей).` : ''}
     </p>
 
     ${trend && trend.points.length >= 2 ? html`<${WeightChart} points=${trend.points.slice(-60)} />` : null}
 
-    <h2 class="section-title">Записи</h2>
+    ${nothing
+      ? html`<div class="empty body-empty">
+          <h2>Пока нет данных</h2>
+          <p>Добавьте замер вручную или загрузите историю: вес и сон из экспорта «Здоровья», обхваты из Fitdays+.</p>
+        </div>`
+      : null}
+
+    <h2 class="section-title">Сон</h2>
+    ${lastNight
+      ? html`<button type="button" class="row" onClick=${() => openNights()}>
+          <span class="row__title">${fmtDay(lastNight.date)}: ${fmtNum(lastNight.hours, 1)} ч</span>
+          <span class="muted">${s30.avg != null ? `30 дней: ${fmtNum(s30.avg, 1)} ч` : ''}</span>
+          <span class="row__sub">${sleepLine(lastNight)}</span>
+        </button>`
+      : html`<p class="muted">Нет данных о сне. Основной сон по фазам Apple Watch можно загрузить из файла.</p>`}
+
+    <h2 class="section-title">Обхваты</h2>
+    ${girths.length
+      ? html`<ul class="rows">
+          ${girths.map(
+            (g) => html`<li><button type="button" class="row" onClick=${() => openKindHistory(g.last.kind)}>
+              <span class="row__title">${KINDS[g.last.kind].label}</span>
+              <span class="num body-value">${fmtNum(g.last.value, 1)} ${KINDS[g.last.kind].unit}</span>
+              <span class="row__sub">${fmtDay(g.last.date)}${g.change != null ? `, за 4+ недели ${g.change >= 0 ? '+' : '−'}${fmtNum(Math.abs(g.change), 1)}` : ''}${g.last.kind === 'fat' ? ', оценка весов, не точное измерение' : ''}</span>
+            </button></li>`,
+          )}
+        </ul>`
+      : html`<p class="muted">Нет замеров. Талию можно добавить вручную, остальные обхваты — из экспорта Fitdays+.</p>`}
+
+    <h2 class="section-title">Взвешивания</h2>
+    ${weighIns.length
+      ? html`<ul class="rows">
+          ${weighIns.slice(0, 40).map(
+            (r) => html`<li><button type="button" class="row" onClick=${() => openBodyRecord(r.id)}>
+              <span class="row__title">${fmtDay(r.date)}, ${r.measuredAt.slice(11, 16)}</span>
+              <span class="num body-value">${fmtNum(r.value, 2)} кг</span>
+              <span class="row__sub">${[r.source, r.edited ? 'исправлено' : null, !isCounted(r, suspects) ? (r.excluded === true ? 'не учитывается' : suspectText(suspects.get(r.id))) : null, r.note || null].filter(Boolean).join(' · ')}</span>
+            </button></li>`,
+          )}
+        </ul>
+        ${weighIns.length > 40 ? html`<button type="button" class="btn btn--quiet btn--block" onClick=${() => openKindHistory('weight')}>Все взвешивания (${weighIns.length})</button>` : null}`
+      : html`<p class="muted">Взвешиваний из «Здоровья» пока нет. Вес из записей самочувствия учитывается в среднем и темпе.</p>`}
+
+    <h2 class="section-title">Самочувствие</h2>
     ${metrics.length === 0 ? html`<p class="muted">Пока нет записей. Вес лучше записывать утром, натощак.</p>` : null}
     <ul class="rows">
-      ${metrics.slice(0, 60).map(
+      ${metrics.slice(0, 30).map(
         (m) => html`<li><button type="button" class="row" onClick=${() => openEntry(m.date)}>
           <span class="row__title">${fmtDay(m.date)}</span>
-          <span class="num" style="font-size:22px;font-weight:700">${m.bodyweight != null ? fmtNum(m.bodyweight, 1) + ' кг' : ''}</span>
+          <span class="num body-value">${m.bodyweight != null ? fmtNum(m.bodyweight, 1) + ' кг' : ''}</span>
           <span class="row__sub">${[
             m.recovery != null ? `восстановление ${m.recovery}/5` : null,
             m.sleep != null ? `сон ${fmtNum(m.sleep, 1)} ч` : null,
@@ -58,7 +116,24 @@ export function Body() {
         </button></li>`,
       )}
     </ul>
+
+    <h2 class="section-title">Источники и загрузка</h2>
+    <${Sources} />
+    <${ImportButton} />
   </main>`;
+}
+
+export function sleepLine(n) {
+  if (n.from !== 'sleep') return 'из записи самочувствия';
+  const r = n.rec;
+  const parts = [
+    r.start && r.end ? `${r.start.slice(11, 16)}–${r.end.slice(11, 16)}` : null,
+    r.core != null ? `основной ${fmtNum(r.core, 1)}` : null,
+    r.deep != null ? `глубокий ${fmtNum(r.deep, 1)}` : null,
+    r.rem != null ? `REM ${fmtNum(r.rem, 1)}` : null,
+    r.source || null,
+  ];
+  return parts.filter(Boolean).join(' · ');
 }
 
 function openEntry(date) {
