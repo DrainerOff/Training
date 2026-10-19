@@ -870,6 +870,42 @@ p {
   color: var(--iron);
   background: var(--hairline);
 }
+/* settings of each variant in the program editor */
+.setup-field {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.setup-field__name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.setup-field textarea.input {
+  min-height: 0;
+  height: 64px;
+}
+.slot-edit__setup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--steel);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.slot-edit__setup svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.topbar__action {
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 15px;
+}
 /* one-time correction card */
 .fix__list {
   list-style: none;
@@ -1116,27 +1152,66 @@ p {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* above the iOS keyboard and no taller than what is visible (set by trackViewport) */
+  bottom: var(--kb, 0px);
   z-index: 41;
+  display: flex;
+  flex-direction: column;
   background: var(--paper);
   border-radius: 22px 22px 0 0;
-  padding: 8px 16px calc(16px + var(--safe-bottom));
-  max-height: calc(100% - var(--safe-top) - 16px);
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
+  max-height: calc(var(--vvh, 100%) - var(--safe-top) - 12px);
+  overflow: hidden;
   animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+/* the header stays put; only the content scrolls */
+.sheet__head {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 6px 6px 6px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
 .sheet__grip {
+  grid-column: 1 / -1;
   width: 40px;
   height: 5px;
   border-radius: 3px;
   background: var(--hairline);
-  margin: 0 auto 10px;
+  margin: 0 auto 4px;
 }
 .sheet__title {
   font-size: 20px;
   font-weight: 700;
-  margin-bottom: 12px;
+  line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sheet__close {
+  align-self: start;
+}
+.sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 12px 16px calc(16px + var(--safe-bottom));
+}
+.sheet--footer .sheet__body {
+  padding-bottom: 12px;
+}
+/* the main action, always reachable */
+.sheet__foot {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px calc(10px + var(--safe-bottom));
+  border-top: 1px solid var(--hairline);
+  background: var(--paper);
+}
+.sheet__foot .btn {
+  flex: 1;
 }
 .sheet__section {
   margin: 14px 0;

@@ -126,24 +126,65 @@ export function SyncBadge({ status, onClick }) {
 
 // ---------------------------------------------------------------- sheet & number pad
 
-export function Sheet({ title, children, onClose }) {
+// A bottom sheet. The header with «Закрыть» stays in place while the content scrolls; `footer`
+// (the main action) stays at the bottom, above the iOS keyboard too. With `dirty`, closing by ×,
+// a tap on the backdrop or Escape first asks whether to drop the changes.
+export function Sheet({ title, children, onClose, footer = null, dirty = false }) {
   const ref = useRef(null);
+  const state = useRef({});
+  state.current.dirty = dirty;
+  state.current.onClose = onClose;
+  const requestClose = async () => {
+    const st = state.current;
+    if (st.asking) return;
+    if (st.dirty) {
+      st.asking = true;
+      const drop = await confirmSheet({ title: 'Закрыть без сохранения?', text: 'Изменения в этом окне не сохранятся.', okLabel: 'Не сохранять', cancelLabel: 'Продолжить', danger: true });
+      st.asking = false;
+      if (!drop) return;
+    }
+    st.onClose();
+  };
   useEffect(() => {
     const prev = document.activeElement;
     ref.current?.focus();
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    // Escape closes only the sheet on top (a confirmation over a form, a keypad over a sheet).
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      const all = document.querySelectorAll('.sheet');
+      if (all[all.length - 1] === ref.current) requestClose();
+    };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
   }, []);
-  return html`<div class="backdrop" onClick=${onClose}></div>
-    <div class="sheet" role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref}>
-      <div class="sheet__grip"></div>
-      ${title ? html`<h2 class="sheet__title">${title}</h2>` : null}
-      ${children}
+  return html`<div class="backdrop" onClick=${requestClose}></div>
+    <div class=${'sheet' + (footer ? ' sheet--footer' : '')} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref}>
+      <div class="sheet__head">
+        <div class="sheet__grip"></div>
+        ${title ? html`<h2 class="sheet__title">${title}</h2>` : html`<span></span>`}
+        <button type="button" class="icon-btn sheet__close" aria-label="Закрыть" onClick=${requestClose}><${Icon} name="close" /></button>
+      </div>
+      <div class="sheet__body">${children}</div>
+      ${footer ? html`<div class="sheet__foot">${footer}</div>` : null}
     </div>`;
+}
+
+// The visible part of the screen above the iOS keyboard, for sheets: --vvh (its height) and
+// --kb (how much of the bottom the keyboard covers).
+export function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement.style;
+  const set = () => {
+    root.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    root.setProperty('--kb', `${Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))}px`);
+  };
+  vv.addEventListener('resize', set);
+  vv.addEventListener('scroll', set);
+  set();
 }
 
 export function openSheet(renderFn) {
@@ -214,7 +255,7 @@ export function RirPicker({ value, target, onChange, label = 'RIR' }) {
   </div>`;
 }
 
-export function confirmSheet({ title, text, okLabel, danger = false }) {
+export function confirmSheet({ title, text, okLabel, cancelLabel = 'Отмена', danger = false }) {
   return new Promise((resolve) => {
     let done = false;
     const id = openSheet((close) => {
@@ -228,7 +269,7 @@ export function confirmSheet({ title, text, okLabel, danger = false }) {
       return html`<${Sheet} title=${title} onClose=${() => finish(false)}>
         ${text ? html`<p class="muted" style="margin-bottom:16px">${text}</p>` : null}
         <div class="btn-row">
-          <button type="button" class="btn" onClick=${() => finish(false)}>Отмена</button>
+          <button type="button" class="btn" onClick=${() => finish(false)}>${cancelLabel}</button>
           <button type="button" class=${'btn ' + (danger ? 'btn--danger' : 'btn--primary')} onClick=${() => finish(true)}>${okLabel}</button>
         </div>
       <//>`;

@@ -1,6 +1,6 @@
 // Root component: tabs, routing, sheet stack, toast.
 
-import { html, render, useState, useEffect, useLayoutEffect, useRef, app, Icon } from './core.js';
+import { html, render, useState, useEffect, useLayoutEffect, useRef, app, Icon, trackViewport } from './core.js';
 import { activeSession } from '../lib/planner.js';
 import { Home } from './home.js';
 import { Workout } from './workout.js';
@@ -142,6 +142,7 @@ export function mount(el, { store, sync, version, storageKind }) {
   app.storageKind = storageKind;
   render(html`<${App} />`, el);
   pinDocument();
+  trackViewport();
 }
 
 // iOS, notably in a home-screen app, can leave the document scrolled after the keyboard closes:

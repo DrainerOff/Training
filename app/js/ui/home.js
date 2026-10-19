@@ -185,7 +185,9 @@ function openStart(plan, days, setPick, past, start) {
 function StartSheet({ plan, days, past, onPick, onClose }) {
   const [v, setV] = useState({ ...plan, date: past ? '' : plan.date });
   const dup = findSameSlotSession(derived().sessions, v);
-  return html`<${Sheet} title=${past ? 'Прошедшая тренировка' : 'Выбрать тренировку'} onClose=${onClose}>
+  const footer = html`<button type="button" class="btn btn--primary btn--big" disabled=${past && !v.date}
+    onClick=${() => onPick(v)}>${past ? 'Открыть для записи' : 'Выбрать'}</button>`;
+  return html`<${Sheet} title=${past ? 'Прошедшая тренировка' : 'Выбрать тренировку'} onClose=${onClose} footer=${footer}>
     ${past
       ? html`<div class="sheet__section">
           <div class="sheet__label">Дата тренировки</div>
@@ -194,7 +196,5 @@ function StartSheet({ plan, days, past, onPick, onClose }) {
       : null}
     <${CycleWeekDay} value=${v} days=${days} onChange=${setV} />
     ${dup ? html`<p class="warn-line">Уже есть: ${fmtDay(dup.date)}. Будет ещё одна тренировка с теми же отметками.</p>` : null}
-    <button type="button" class="btn btn--primary btn--block btn--big" style="margin-top:14px" disabled=${past && !v.date}
-      onClick=${() => onPick(v)}>${past ? 'Открыть для записи' : 'Выбрать'}</button>
   <//>`;
 }

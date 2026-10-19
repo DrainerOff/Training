@@ -182,7 +182,8 @@ function SetupLine({ item }) {
 }
 
 function SetupSheet({ item, onClose }) {
-  const [text, setText] = useState(app.store.setupOf(item.seriesKey));
+  const [initial] = useState(() => app.store.setupOf(item.seriesKey));
+  const [text, setText] = useState(initial);
   const save = async () => {
     try {
       await app.store.saveSetup(item.seriesKey, item.name, text);
@@ -191,13 +192,13 @@ function SetupSheet({ item, onClose }) {
       app.ui.toast(`Не удалось сохранить: ${err.message}`);
     }
   };
-  return html`<${Sheet} title=${`Настройки: ${item.name}`} onClose=${onClose}>
-    <p class="muted" style="font-size:14px">Сохраняются для этого варианта и видны в каждой тренировке. У других вариантов — свои.</p>
+  return html`<${Sheet} title=${`Настройки: ${item.name}`} onClose=${onClose} dirty=${text.trim() !== initial}
+    footer=${html`<button type="button" class="btn btn--primary" onClick=${save}>Сохранить</button>`}>
+    <p class="muted" style="font-size:14px">Сохраняются для этого варианта и видны в каждой тренировке. У других вариантов — свои. Их же можно править в Настройках → Программа.</p>
     <div class="sheet__section">
       <textarea class="input" style="min-height:90px" maxlength=${SETUP_MAX} aria-label="Настройки тренажёра"
         placeholder="Например: сиденье 5, ручки 3, упор на 2-м отверстии" value=${text} onInput=${(e) => setText(e.currentTarget.value)}></textarea>
     </div>
-    <button type="button" class="btn btn--primary btn--block" onClick=${save}>Сохранить</button>
   <//>`;
 }
 
@@ -396,7 +397,8 @@ function openSetEdit(set, item, { focus = null } = {}) {
 }
 
 function SetEditSheet({ set, item, focus, onClose }) {
-  const [v, setV] = useState({ ...set });
+  const [start] = useState(() => ({ ...set }));
+  const [v, setV] = useState(start);
   const up = (p) => setV((x) => ({ ...x, ...p }));
   const save = async () => {
     await app.store.updateSet(set.id, { weight: v.weight, reps: v.reps, rir: v.rir, drop: v.drop, pain: v.pain, technique: v.technique, note: v.note });
@@ -407,7 +409,10 @@ function SetEditSheet({ set, item, focus, onClose }) {
     onClose();
     app.ui.toast('Подход удалён', { action: { label: 'Вернуть', fn: () => app.store.restoreSet(set.id) } });
   };
-  return html`<${Sheet} title=${`Подход ${set.setNo}: ${set.exercise}`} onClose=${onClose}>
+  const footer = html`
+    <button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>
+    <button type="button" class="btn btn--primary" disabled=${v.weight == null || !v.reps} onClick=${save}>Сохранить</button>`;
+  return html`<${Sheet} title=${`Подход ${set.setNo}: ${set.exercise}`} onClose=${onClose} footer=${footer} dirty=${JSON.stringify(v) !== JSON.stringify(start)}>
     <div class="dock__grid">
       <div>
         <div class="field__label">${item.category === 'pullup' ? 'Доп. вес, кг' : 'Вес, кг'}</div>
@@ -429,10 +434,6 @@ function SetEditSheet({ set, item, focus, onClose }) {
     <div class="sheet__section">
       <input class="input" placeholder="Заметка к подходу" aria-label="Заметка к подходу" value=${v.note || ''} autofocus=${focus === 'note'}
         onInput=${(e) => up({ note: e.currentTarget.value })} />
-    </div>
-    <div class="btn-row">
-      <button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>
-      <button type="button" class="btn btn--primary" disabled=${v.weight == null || !v.reps} onClick=${save}>Сохранить</button>
     </div>
   <//>`;
 }
@@ -522,7 +523,13 @@ function MarksSheet({ session, item, onClose }) {
     <span class="choice__main">${title}<span class="choice__sub">${sub}</span></span>
     <span class=${'toggle' + (tone ? ' toggle--' + tone : '')} aria-hidden="true" aria-pressed=${String(!!flags[key])}>${flags[key] ? 'да' : 'нет'}</span>
   </button>`;
-  return html`<${Sheet} title=${item.name} onClose=${onClose}>
+  const dirty = note !== (item.note || '') || ['pain', 'technique', 'baseline'].some((k) => !!flags[k] !== !!item.flags?.[k]);
+  const save = async () => {
+    await app.store.updateItem(session.id, item.slotId, { flags, note });
+    onClose();
+  };
+  return html`<${Sheet} title=${item.name} onClose=${onClose} dirty=${dirty}
+    footer=${html`<button type="button" class="btn btn--primary" onClick=${save}>Сохранить</button>`}>
     ${row('pain', 'Боль', 'Эта тренировка не учитывается в оценке плато и регресса.', 'bad')}
     ${row('technique', 'Техника хуже', 'Прирост в этот день не засчитывается как прогресс.', 'bad')}
     ${row('baseline', 'Новая точка отсчёта', 'Техника строже, другие настройки или амплитуда: сравнение начнётся заново, без ложного регресса.')}
@@ -531,10 +538,6 @@ function MarksSheet({ session, item, onClose }) {
         placeholder="Комментарий к этой тренировке: ощущения, что изменить в следующий раз…" value=${note} onInput=${(e) => setNote(e.currentTarget.value)}></textarea>
       <p class="muted" style="font-size:12px;margin-top:4px">Сиденье, ручки, ограничители — в «Настройках» над подходами: они сохраняются для варианта, а не для одной тренировки.</p>
     </div>
-    <button type="button" class="btn btn--primary btn--block" onClick=${async () => {
-      await app.store.updateItem(session.id, item.slotId, { flags, note });
-      onClose();
-    }}>Сохранить</button>
   <//>`;
 }
 
@@ -612,17 +615,19 @@ function openSessionEdit(session) {
 function SessionEditSheet({ session, onClose }) {
   const [v, setV] = useState({ cycle: session.cycle, week: session.week, day: session.day, date: session.date });
   const days = app.store.state.program.days.map((d) => d.day);
-  return html`<${Sheet} title="Параметры тренировки" onClose=${onClose}>
+  const dirty = v.cycle !== session.cycle || v.week !== session.week || v.day !== session.day || v.date !== session.date;
+  const save = async () => {
+    await app.store.updateSession(session.id, v);
+    onClose();
+  };
+  return html`<${Sheet} title="Параметры тренировки" onClose=${onClose} dirty=${dirty}
+    footer=${html`<button type="button" class="btn btn--primary" disabled=${!v.date} onClick=${save}>Сохранить</button>`}>
     <${CycleWeekDay} value=${v} days=${days} onChange=${setV} />
     <div class="sheet__section">
       <div class="sheet__label">Дата</div>
       <input class="input" type="date" value=${v.date} onInput=${(e) => setV({ ...v, date: e.currentTarget.value })} />
     </div>
     <p class="muted" style="font-size:13px">Состав упражнений не меняется — меняются только отметки дня и фазы.</p>
-    <button type="button" class="btn btn--primary btn--block" style="margin-top:12px" disabled=${!v.date} onClick=${async () => {
-      await app.store.updateSession(session.id, v);
-      onClose();
-    }}>Сохранить</button>
   <//>`;
 }
 
@@ -654,18 +659,20 @@ function CheckinSheet({ date, onClose }) {
   const prev = app.store.state.metrics.get(`m${date}`);
   // Bodyweight is NOT pre-filled from an older weigh-in: saving recovery alone must not
   // invent a measurement. The last value is shown as a hint and as the ± starting point.
-  const [v, setV] = useState({
+  const [start] = useState(() => ({
     recovery: prev?.recovery ?? null,
     sleep: prev?.sleep ?? null,
     bodyweight: prev?.bodyweight ?? null,
-  });
-  return html`<${Sheet} title=${`Самочувствие, ${fmtDay(date)}`} onClose=${onClose}>
+  }));
+  const [v, setV] = useState(start);
+  const save = async () => {
+    await app.store.saveMetric(date, v);
+    onClose();
+    app.ui.toast('Сохранено');
+  };
+  return html`<${Sheet} title=${`Самочувствие, ${fmtDay(date)}`} onClose=${onClose} dirty=${JSON.stringify(v) !== JSON.stringify(start)}
+    footer=${html`<button type="button" class="btn btn--primary" onClick=${save}>Сохранить</button>`}>
     <${MetricFields} v=${v} setV=${setV} />
-    <button type="button" class="btn btn--primary btn--block" style="margin-top:14px" onClick=${async () => {
-      await app.store.saveMetric(date, v);
-      onClose();
-      app.ui.toast('Сохранено');
-    }}>Сохранить</button>
   <//>`;
 }
 
@@ -708,7 +715,10 @@ function FinishSheet({ session, rows, onClose }) {
     app.ui.go({ tab: 'today', view: null });
     app.ui.toast('Тренировка сохранена');
   };
-  return html`<${Sheet} title="Итог тренировки" onClose=${onClose}>
+  const footer = html`
+    <button type="button" class="btn" onClick=${onClose}>Продолжить</button>
+    <button type="button" class="btn btn--primary" onClick=${finish}>Завершить</button>`;
+  return html`<${Sheet} title="Итог тренировки" onClose=${onClose} footer=${footer}>
     <p class="muted">${allSets} ${plural(allSets, 'подход', 'подхода', 'подходов')}${minutes > 0 ? `, ${minutes} мин` : ''}. Сравнение — с той же неделей прошлого цикла.</p>
     <ul class="rows" style="margin-top:10px">
       ${rows.filter((r) => r.sets.length).map((r) => {
@@ -724,10 +734,6 @@ function FinishSheet({ session, rows, onClose }) {
       })}
     </ul>
     ${missing > 0 ? html`<p class="warn-line">Не выполнено подходов по плану: ${missing}. Можно завершить и так.</p>` : null}
-    <div class="btn-row" style="margin-top:14px">
-      <button type="button" class="btn" onClick=${onClose}>Продолжить</button>
-      <button type="button" class="btn btn--primary" onClick=${finish}>Завершить</button>
-    </div>
   <//>`;
 }
 

@@ -8,6 +8,7 @@ import {
 import { parseResultsText } from '../lib/textimport.js';
 import { fmtDay, fmtTime, uid } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
+import { SETUP_MAX } from '../data/store.js';
 import { findSameSlotSession } from '../lib/planner.js';
 
 const ORIGINAL_PROGRAM_URL = 'https://docs.google.com/spreadsheets/d/1uiEDiFZYKHKUqVUqPT4HrZlBR8fqNGYr/edit';
@@ -40,10 +41,11 @@ async function copy(text) {
   }
 }
 
-function Back({ title }) {
+function Back({ title, onBack = null, action = null }) {
   return html`<header class="topbar">
-    <button type="button" class="icon-btn" aria-label="Назад" onClick=${() => app.ui.back()}><${Icon} name="back" /></button>
+    <button type="button" class="icon-btn" aria-label="Назад" onClick=${() => (onBack ? onBack() : app.ui.back())}><${Icon} name="back" /></button>
     <h1>${title}</h1>
+    ${action}
   </header>`;
 }
 
@@ -233,10 +235,16 @@ export function ProgramEditor() {
     app.ui.toast('Программа сохранена');
     app.ui.back();
   };
+  // Leaving with unsaved changes asks first; «Сохранить» stays at the top while there are any.
+  const leave = async () => {
+    if (dirty && !(await confirmSheet({ title: 'Выйти без сохранения программы?', text: 'Изменения программы не сохранятся.', okLabel: 'Выйти', cancelLabel: 'Остаться', danger: true }))) return;
+    app.ui.back();
+  };
+  const saveTop = dirty ? html`<button type="button" class="btn btn--primary topbar__action" onClick=${save}>Сохранить</button>` : null;
 
   if (!d) return html`<main class="screen"><${Back} title="Программа" /></main>`;
   return html`<main class="screen">
-    <${Back} title="Программа" />
+    <${Back} title="Программа" onBack=${leave} action=${saveTop} />
     <p class="muted" style="font-size:14px">Изменения применяются к новым тренировкам. Прошлые тренировки не меняются.</p>
     <div style="margin:12px 0">
       <${Seg} label="День" value=${d.day} onChange=${setDay}
@@ -250,6 +258,7 @@ export function ProgramEditor() {
           <button type="button" style="text-align:left" onClick=${() => editSlot(s, i)}>
             <div style="font-weight:600">${s.options[0].name}</div>
             <div class="muted" style="font-size:13px">${CATEGORY[s.category].label}${s.options.length > 1 ? `; альтернативы: ${s.options.slice(1).map((o) => o.name).join(', ')}` : ''}</div>
+            ${setupsLine(s)}
           </button>
           <div class="slot-edit__btns">
             <button type="button" class="icon-btn" aria-label="Выше" onClick=${() => move(i, -1)}><${Icon} name="up" /></button>
@@ -274,9 +283,17 @@ export function ProgramEditor() {
   </main>`;
 }
 
+// Which variants of a slot have machine settings, for the editor list.
+function setupsLine(slot) {
+  const set = slot.options.map((o) => [o, app.store.setupOf(o.key)]).filter(([, t]) => t);
+  if (!set.length) return null;
+  const text = slot.options.length === 1 ? set[0][1] : `${set.length} из ${slot.options.length} вариантов`;
+  return html`<div class="slot-edit__setup"><${Icon} name="tune" /> Настройки: ${text}</div>`;
+}
+
 function SlotSheet({ slot, onSave, onDelete, onClose }) {
   const isNew = !slot;
-  const [v, setV] = useState(() => ({
+  const [start] = useState(() => ({
     name: slot?.options[0].name || '',
     alts: (slot?.options.slice(1) || []).map((o) => o.name).join('\n'),
     category: slot?.category || 'base',
@@ -284,19 +301,36 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
     w: [1, 2, 3].map((w) => fmtOverride(slot?.overrides?.[w])),
     note: slot?.note || '',
   }));
+  const [v, setV] = useState(start);
   const up = (p) => setV((x) => ({ ...x, ...p }));
-  const save = () => {
-    const names = [v.name.trim(), ...v.alts.split('\n').map((s) => s.trim()).filter(Boolean)];
-    const options = optionsFromNames(names, slot?.options || []);
+  // The variants as they will be saved (same keys as on «Готово»), each with its settings
+  // (App_Exercises by series key — the same records the workout's «Настройки» line edits).
+  const names = [v.name.trim(), ...v.alts.split('\n').map((x) => x.trim()).filter(Boolean)];
+  const options = v.name.trim() ? optionsFromNames(names, slot?.options || []) : [];
+  const [typed, setTyped] = useState({}); // series key -> settings typed here
+  const setupText = (key) => (key in typed ? typed[key] : app.store.setupOf(key));
+  const setupsChanged = options.filter((o) => o.key in typed && typed[o.key].trim() !== app.store.setupOf(o.key));
+  const dirty = JSON.stringify(v) !== JSON.stringify(start) || setupsChanged.length > 0;
+  const save = async () => {
+    try {
+      for (const o of setupsChanged) await app.store.saveSetup(o.key, o.name, typed[o.key]);
+    } catch (err) {
+      app.ui.toast(`Не удалось сохранить настройки: ${err.message}`);
+      return;
+    }
     const overrides = {};
     [1, 2, 3].forEach((w, i) => {
       const o = parseOverride(v.w[i]);
       if (o) overrides[w] = o;
     });
-    onSave({ id: slot?.id || uid('sl'), category: v.category, step: Number(v.step) || 2.5, options, overrides, note: v.note });
+    // Only settings changed: the program draft stays as it was (nothing to «Сохранить»).
+    if (isNew || JSON.stringify(v) !== JSON.stringify(start)) onSave({ id: slot?.id || uid('sl'), category: v.category, step: Number(v.step) || 2.5, options, overrides, note: v.note });
     onClose();
   };
-  return html`<${Sheet} title=${isNew ? 'Новое упражнение' : 'Упражнение'} onClose=${onClose}>
+  const footer = html`
+    ${onDelete ? html`<button type="button" class="btn btn--danger" onClick=${() => { onDelete(); onClose(); }}>Удалить</button>` : null}
+    <button type="button" class="btn btn--primary" disabled=${!v.name.trim()} onClick=${save}>Готово</button>`;
+  return html`<${Sheet} title=${isNew ? 'Новое упражнение' : 'Упражнение'} onClose=${onClose} footer=${footer} dirty=${dirty}>
     ${isNew
       ? html`<div class="sheet__section"><div class="sheet__label">Быстрый выбор</div>
           <div class="seg">${exerciseCatalog(app.store.state.program).map((k) => html`<button type="button" onClick=${() => up({ name: k.name, category: k.category, alts: (k.alts || []).join('\n') })}>${k.name}</button>`)}</div>
@@ -311,6 +345,17 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
       <div class="sheet__label">Альтернативы, по одной в строке (каждая — отдельная серия)</div>
       <textarea class="input" style="min-height:70px" value=${v.alts} onInput=${(e) => up({ alts: e.currentTarget.value })}></textarea>
     </div>
+    ${options.length
+      ? html`<div class="sheet__section" role="group" aria-label="Настройки тренажёра по вариантам">
+          <div class="sheet__label">Настройки тренажёра — у каждого варианта свои</div>
+          <p class="muted" style="font-size:12px;margin-bottom:8px">Сиденье, рукоятки, ограничители, особенности техники. В тренировке они видны над подходами. Сохраняются по «Готово», отдельно от программы.</p>
+          ${options.map((o) => html`<label class="setup-field" key=${o.key}>
+            <span class="setup-field__name">${o.name}</span>
+            <textarea class="input" rows="2" maxlength=${SETUP_MAX} aria-label=${`Настройки: ${o.name}`} placeholder="например: сиденье 5, ручки 3"
+              value=${setupText(o.key)} onInput=${(e) => { const t = e.currentTarget.value; setTyped((x) => ({ ...x, [o.key]: t })); }}></textarea>
+          </label>`)}
+        </div>`
+      : null}
     <div class="sheet__section">
       <div class="sheet__label">Категория</div>
       <${Seg} label="Категория" value=${v.category} onChange=${(category) => up({ category })} options=${CATEGORY_KEYS.map((k) => ({ value: k, label: CATEGORY[k].label }))} />
@@ -327,11 +372,9 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
       </div>`)}
     </div>
     <div class="sheet__section">
-      <input class="input" placeholder="Заметка (настройки тренажёра…)" value=${v.note} onInput=${(e) => up({ note: e.currentTarget.value })} />
-    </div>
-    <div class="btn-row">
-      ${onDelete ? html`<button type="button" class="btn btn--danger" onClick=${() => { onDelete(); onClose(); }}>Удалить</button>` : null}
-      <button type="button" class="btn btn--primary" disabled=${!v.name.trim()} onClick=${save}>Готово</button>
+      <div class="sheet__label">Заметка тренера — общая для упражнения и всех его вариантов</div>
+      <textarea class="input" rows="2" style="min-height:72px" aria-label="Заметка тренера" placeholder="например: держать стабильную технику"
+        value=${v.note} onInput=${(e) => up({ note: e.currentTarget.value })}></textarea>
     </div>
   <//>`;
 }

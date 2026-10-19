@@ -294,7 +294,7 @@ export function openRecordSheet({ record = null, preset = null } = {}) {
 function RecordSheet({ record, preset, onClose }) {
   const { metrics, steps } = recordsDerived();
   const init = record || preset || {};
-  const [v, setV] = useState({
+  const [start] = useState(() => ({
     seriesKey: init.seriesKey || null,
     exercise: init.exercise || '',
     category: init.category || null,
@@ -304,7 +304,9 @@ function RecordSheet({ record, preset, onClose }) {
     rir: record?.rir ?? null,
     bodyweight: record?.bodyweight ?? null,
     note: record?.note || '',
-  });
+  }));
+  const [v, setV] = useState(start);
+  const dirty = JSON.stringify(v) !== JSON.stringify(start);
   const [busy, setBusy] = useState(false);
   const up = (p) => setV((x) => ({ ...x, ...p }));
   const pullup = v.category === 'pullup';
@@ -343,7 +345,10 @@ function RecordSheet({ record, preset, onClose }) {
     app.ui.toast('Запись удалена', { action: { label: 'Вернуть', fn: () => app.store.restoreRecord(record.id) } });
   };
 
-  return html`<${Sheet} title=${record ? 'Изменить рекорд' : 'Новый рекорд'} onClose=${onClose}>
+  const footer = html`
+    ${record ? html`<button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>` : null}
+    <button type="button" class="btn btn--primary" disabled=${!!problem || busy} onClick=${save}>${problem && !v.seriesKey ? problem : 'Сохранить'}</button>`;
+  return html`<${Sheet} title=${record ? 'Изменить рекорд' : 'Новый рекорд'} onClose=${onClose} footer=${footer} dirty=${dirty && !busy}>
     <button type="button" class="choice" aria-label=${`Упражнение: ${v.exercise || 'не выбрано'}`}
       onClick=${() => openSheet((c) => html`<${ExercisePicker} onClose=${c} onPick=${(x) => up({ seriesKey: x.seriesKey, exercise: x.exercise, category: x.category })} />`)}>
       <span class="choice__main">${v.exercise || 'Выберите упражнение'}<span class="choice__sub">${v.exercise ? `${CATEGORY[v.category]?.label || ''} · изменить` : 'вариант из вашей программы'}</span></span>
@@ -378,10 +383,6 @@ function RecordSheet({ record, preset, onClose }) {
         <input class="input" placeholder="например, соревнования, до травмы" value=${v.note} onInput=${(e) => up({ note: e.currentTarget.value })} /></label>
     </div>
     ${problem && v.seriesKey ? html`<p class="muted" style="font-size:13px">${problem}</p>` : null}
-    <div class="btn-row" style="margin-top:12px">
-      ${record ? html`<button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>` : null}
-      <button type="button" class="btn btn--primary" disabled=${!!problem || busy} onClick=${save}>${problem && !v.seriesKey ? problem : 'Сохранить'}</button>
-    </div>
   <//>`;
 }
 
