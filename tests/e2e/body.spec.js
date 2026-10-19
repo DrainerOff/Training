@@ -199,6 +199,8 @@ test('update from v1.0.2: the database gains body and sleep, workouts and check-
     await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
     const sheet = await upload(page, 'weight.csv', WEIGHT);
     await sheet.getByRole('button', { name: 'Загрузить 6' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect.poll(() => live(page, 'body')).toBe(6);
     await page.reload();
     await page.waitForFunction(() => window.__trainer?.store.state.loaded);
     expect(await live(page, 'body')).toBe(6);
