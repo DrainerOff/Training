@@ -16,7 +16,8 @@
 // 4: body measurements (App_Body, one real measurement per row) and main sleep per wake date
 // (App_Sleep). Old clients never send them and never receive them. `ingest`: iPhone Shortcuts
 // add weight, waist and sleep with their own key, which can do nothing else.
-var API_VERSION = 4;
+// 5: bulk / cut / maintenance phases with a target rate (App_Phases).
+var API_VERSION = 5;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -167,14 +168,31 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  // A period of bulk, cut or maintenance: from start to end (empty = still going), with the target
+  // rate of weight change in % of body weight per week (negative on a cut).
+  phases: {
+    sheet: 'App_Phases',
+    cols: [
+      ['start', 'start', 'date'],
+      ['end', 'end', 'date'],
+      ['mode', 'mode', 'key'],
+      ['target_pct_week', 'targetPct', 'snum'],
+      ['note', 'note', 'text'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
 };
+var PHASE_MODES = { bulk: true, cut: true, maintain: true };
 var BODY_KINDS = {
   weight: [20, 300], fat: [2, 70], waist: [10, 250], chest: [10, 250], shoulders: [10, 250], neck: [10, 250],
   arm_l: [10, 250], arm_r: [10, 250], hips: [10, 250], thigh_l: [10, 250], thigh_r: [10, 250],
   calf_l: [10, 250], calf_r: [10, 250], head: [10, 250],
 };
 var STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?[+-]\d{2}:\d{2}$/;
-var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep'];
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -751,6 +769,7 @@ function toCell_(v, type) {
       return !!v;
     case 'int':
     case 'num':
+    case 'snum':
     case 'ms':
       return Number(v);
     case 'json':
@@ -788,6 +807,7 @@ function fromCell_(v, type) {
       return v === true || v === 'TRUE' || v === 'true' || v === 1;
     case 'int':
     case 'num':
+    case 'snum':
     case 'ms':
       if (v === '' || v === null) return null;
       var n = Number(String(v).replace(',', '.'));
@@ -829,7 +849,11 @@ function sanitize_(entity, rec) {
       out[f] = t === 'bool' ? false : null;
       return;
     }
-    if (t === 'int' || t === 'num' || t === 'ms') {
+    if (t === 'snum') {
+      var sn = Number(v);
+      if (!isFinite(sn) || Math.abs(sn) > 100000) ok = false;
+      out[f] = sn;
+    } else if (t === 'int' || t === 'num' || t === 'ms') {
       var n = Number(v);
       if (!isFinite(n) || n < 0 || (t !== 'ms' && n > 100000)) ok = false;
       out[f] = t === 'int' ? Math.round(n) : n;
@@ -862,6 +886,10 @@ function sanitize_(entity, rec) {
     if (!out.wakeDate || out.id !== 's:' + out.wakeDate) ok = false;
     else if (!out.deleted && !((out.hours > 0 && out.hours <= 24) || (out.total > 0 && out.total <= 24))) ok = false;
     else if (out.total != null && out.total > 24) ok = false;
+  }
+  if (entity === 'phases') {
+    if (!PHASE_MODES[out.mode] || !out.start || (out.end && out.end < out.start)) ok = false;
+    else if (out.targetPct == null || Math.abs(out.targetPct) > 2) ok = false;
   }
   return ok ? out : null;
 }

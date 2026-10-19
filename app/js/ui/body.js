@@ -7,6 +7,9 @@ import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, sum } from '../lib/util.js';
 import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf, isCounted } from '../lib/bodydata.js';
 import { ImportButton, openAddBody, openBodyRecord, openKindHistory, openNights, Sources, suspectText, sleepLine } from './bodyentry.js';
+import { PhaseCard } from './phase.js';
+import { phaseOn, phaseReport } from '../lib/phase.js';
+import { derived } from './derive.js';
 
 export function Body() {
   const st = app.store.state;
@@ -24,6 +27,8 @@ export function Body() {
   const weighIns = body.filter((r) => r.kind === 'weight' && !r.deleted).sort((a, b) => (a.measuredAt < b.measuredAt ? 1 : -1));
   const girths = ['fat', ...GIRTHS].map((k) => latestOf(body, k)).filter(Boolean);
   const nothing = !metrics.length && !body.some((r) => !r.deleted) && !nights.length;
+  const phase = phaseOn(st.phases.values(), today);
+  const report = phase ? phaseReport(phase, { days, body, nights, series: derived().series, today }) : null;
 
   return html`<main class="screen">
     <header class="topbar"><h1>Тело и восстановление</h1></header>
@@ -31,6 +36,8 @@ export function Body() {
       <button type="button" class="btn btn--primary" onClick=${() => openEntry(today)}>Записать самочувствие</button>
       <button type="button" class="btn" onClick=${() => openAddBody()}>Добавить замер</button>
     </div>
+
+    <${PhaseCard} phase=${phase} report=${report} />
 
     <div class="stat-row">
       <div class="stat">

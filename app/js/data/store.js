@@ -7,8 +7,9 @@ import { uid, isoDate } from '../lib/util.js';
 import { normalizeProgram, starterProgram, makeOption, CATEGORY } from '../lib/program.js';
 import { itemsForDay } from '../lib/planner.js';
 import { KINDS, bodyId, parseTime } from '../lib/bodydata.js';
+import { MODES, addDays } from '../lib/phase.js';
 
-export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep'];
+export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
 const MAX_BODY_IMPORTS = 30;
 const DOUBLE_TAP_MS = 1500;
 const MAX_CORRECTIONS = 50;
@@ -25,6 +26,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     exercises: new Map(), // per-variant settings, id `x:<seriesKey>`
     body: new Map(), // one real measurement per record (bodydata.js)
     sleep: new Map(), // main sleep per wake date, id `s:<wakeDate>`
+    phases: new Map(), // bulk / cut / maintenance periods (lib/phase.js)
     outbox: new Map(),
     kv: {},
     version: 0,
@@ -130,8 +132,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   }
 
   async function load() {
-    const [sessions, sets, metrics, records, exercises, body, sleep, outbox, kv] = await Promise.all(
-      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
+    const [sessions, sets, metrics, records, exercises, body, sleep, phases, outbox, kv] = await Promise.all(
+      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
     for (const r of sets) putRecord('sets', r);
@@ -140,6 +142,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     for (const r of exercises) state.exercises.set(r.id, r);
     for (const r of body) state.body.set(r.id, r);
     for (const r of sleep) state.sleep.set(r.id, r);
+    for (const r of phases) state.phases.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
     // The starter program has updatedAt 0 and is never pushed: a fresh device must not
@@ -512,6 +515,26 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return next;
   }
 
+  // --- bulk / cut / maintenance phases -------------------------------------------------------
+  // One phase runs at a time: a new one ends the running one the day before it starts.
+  async function savePhase({ id = null, mode, start, end = null, targetPct, note = '' }) {
+    if (!MODES[mode]) throw new Error('Не выбран режим');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '')) throw new Error('Не указано начало');
+    if (end && end < start) throw new Error('Конец раньше начала');
+    if (!(Math.abs(targetPct) <= 2)) throw new Error('Темп — от −2 до +2 % массы в неделю');
+    const prev = id ? state.phases.get(id) : null;
+    const rec = { id: prev?.id || uid('ph'), mode, start, end: end || null, targetPct, note: String(note || '').slice(0, 300), updatedAt: stamp(prev), deleted: false };
+    const out = [rec];
+    if (!prev) {
+      for (const p of state.phases.values()) {
+        if (p.deleted || p.start >= start || (p.end && p.end < start)) continue;
+        out.push({ ...p, end: addDays(start, -1), updatedAt: stamp(p) });
+      }
+    }
+    await save('phases', out);
+    return rec;
+  }
+
   // Writes the records of an import plan (bodydata.planImport) in one transaction, with an entry
   // in kv `bodyImports` so the whole import can be undone.
   async function importBody(plan, { batch, file = '', extra = [] } = {}) {
@@ -650,6 +673,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       exercises: [...state.exercises.values()],
       body: [...state.body.values()],
       sleep: [...state.sleep.values()],
+      phases: [...state.phases.values()],
     };
   }
 
@@ -773,6 +797,9 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     editSleep,
     deleteSleep: (id) => setDeleted('sleep')(id, true),
     restoreSleep: (id) => setDeleted('sleep')(id, false),
+    savePhase,
+    deletePhase: (id) => setDeleted('phases')(id, true),
+    restorePhase: (id) => setDeleted('phases')(id, false),
     importBody,
     undoImport,
     saveProgram,

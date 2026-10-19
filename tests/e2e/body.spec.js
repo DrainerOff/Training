@@ -193,7 +193,7 @@ test('update from v1.0.2: the database gains body and sleep, workouts and check-
       await page.waitForFunction(() => window.__trainer?.store.state.loaded || document.querySelector('.diag'));
     }
     expect(await page.evaluate(() => window.__trainer.build)).toBe('new1');
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 4 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 5 }]);
     expect(await page.evaluate(() => ({ sets: window.__trainer.store.state.sets.size, metrics: window.__trainer.store.state.metrics.size }))).toEqual(before);
 
     await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
@@ -264,4 +264,52 @@ test('import while the sheet cannot be reached: the preview warns that recent «
   await connectSync(page, 'http://127.0.0.1:9/exec', 'a'.repeat(64)); // nothing listens on port 9
   const sheet = await upload(page, 'weight.csv', WEIGHT);
   await expect(sheet).toContainText('Таблица сейчас недоступна');
+});
+
+test('bulk phase: set it, an honest «данных недостаточно», then the rate against the target from weigh-ins', async ({ browser }) => {
+  const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 320, height: 568 }, locale: 'ru-RU', timezoneId: 'Europe/Moscow' });
+  const page = await context.newPage();
+  await open(page);
+  const card = page.locator('.phase');
+  await expect(card).toContainText('Режим не задан');
+  await card.getByRole('button', { name: 'Задать режим' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Новый режим' });
+  await sheet.getByRole('button', { name: 'Сушка' }).click();
+  await expect(sheet.getByLabel('Целевой темп, % массы в неделю')).toHaveValue('-0,5');
+  await sheet.getByRole('button', { name: 'Набор' }).click();
+  await expect(sheet.getByLabel('Целевой темп, % массы в неделю')).toHaveValue('0,25');
+  const start = await page.evaluate(() => {
+    const d = new Date(Date.now() - 27 * 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  await sheet.getByLabel('Начало').fill(start);
+  await sheet.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(card).toContainText('Набор');
+  await expect(card).toContainText('Темп веса: данных недостаточно');
+  await expect(card).toContainText('Талия: нужны 2 замера');
+
+  // Synthetic weigh-ins: +0.2 kg a week from 80 kg, every day of the phase.
+  await page.evaluate(async (from) => {
+    const { store } = window.__trainer;
+    const t0 = Date.parse(from + 'T07:00:00');
+    for (let i = 0; i < 28; i++) {
+      const d = new Date(t0 + i * 86400000);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      await store.addBody({ kind: 'weight', value: Math.round((80 + (0.2 / 7) * i) * 100) / 100, measuredAt: `${iso}T07:00` });
+    }
+  }, start);
+  await expect(card).toContainText('в пределах цели');
+  await expect(card).toContainText('По 28 дням со взвешиванием');
+  await card.getByText('Средний вес по неделям').click();
+  // Full weeks have an average; the week in progress may show only how many weigh-ins it has.
+  expect(await card.locator('.phase__weeks li', { hasText: 'кг' }).count()).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // Survives a relaunch.
+  await page.reload();
+  await page.waitForFunction(() => window.__trainer?.store.state.loaded);
+  await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
+  await expect(page.locator('.phase')).toContainText('в пределах цели');
+  await context.close();
 });

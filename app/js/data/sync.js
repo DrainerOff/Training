@@ -2,20 +2,21 @@
 // round-trip. Safe to retry at any point — the server upserts by record id, so a lost
 // response followed by a resend never creates a duplicate set.
 
-export const API_VERSION = 4;
+export const API_VERSION = 5;
 const BATCH = 200;
 // What an Apps Script that predates the `ack` map per entity understood.
 const LEGACY_ENTITIES = ['sessions', 'sets', 'metrics'];
 // Entities added after the first release. A device that synced with an older release moved its
 // cursor past their rows without keeping them, so each is pulled once from the very start (the
 // merge is idempotent); `<entity>Pulled` in kv marks it done.
-const CATCH_UP = ['records', 'exercises', 'body', 'sleep'];
+const CATCH_UP = ['records', 'exercises', 'body', 'sleep', 'phases'];
 // What waits on the phone while the Apps Script doesn't know the entity yet.
 const WAITING_LABEL = {
   records: 'рекорды, добавленные вручную',
   exercises: 'настройки упражнений',
   body: 'замеры тела',
   sleep: 'сон',
+  phases: 'режимы набора и сушки',
 };
 
 export class SyncError extends Error {
@@ -118,7 +119,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
 
   async function round(cfg) {
     const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
-    const push = { sessions: [], sets: [], metrics: [], records: [], exercises: [], body: [], sleep: [] };
+    const push = { sessions: [], sets: [], metrics: [], records: [], exercises: [], body: [], sleep: [], phases: [] };
     const sent = [];
     for (const e of entries) {
       if (e.entity === 'program') {
