@@ -20,6 +20,7 @@ var API_VERSION = 4;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
+var PARSE_MAX = 20 * 1024 * 1024;
 
 // [column header, client field, type]. Readable columns first — так листы удобно читать
 // человеку и ChatGPT; технические поля в конце.
@@ -205,7 +206,8 @@ function doGet() {
 
 function doPost(e) {
   var body = e && e.postData ? String(e.postData.contents || '') : '';
-  if (body.length > MAX_BODY) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
+  // Read up to PARSE_MAX so an oversized request from «Команды» can still be recognised and logged.
+  if (body.length > PARSE_MAX) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
   var req;
   try {
     req = JSON.parse(body);
@@ -214,15 +216,16 @@ function doPost(e) {
   }
   // Shortcuts: their own key, append-only, nothing is read back.
   if (req && req.action === 'ingest') {
-    if (body.length > INGEST_MAX_BODY) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
     var ingestKey = PropertiesService.getScriptProperties().getProperty('INGEST_KEY');
     if (!ingestKey || typeof req.key !== 'string' || !sameSecret_(req.key, ingestKey)) return json_({ ok: false, error: 'unauthorized' });
+    if (body.length > INGEST_MAX_BODY) return json_(refuseIngest_(req, 'Слишком большой запрос: больше 1 МБ. В тексте внутри «Повторить» нужны метки «Объект повтора», а не «Данные Здоровья»'));
     try {
       return json_(ingest_(req));
     } catch (err) {
       return json_({ ok: false, error: 'server_error', message: String(err && err.message ? err.message : err) });
     }
   }
+  if (body.length > MAX_BODY) return json_({ ok: false, error: 'bad_request', message: 'Слишком большой запрос' });
   // Every other action needs the access key; without it nothing is read or written.
   var token = PropertiesService.getScriptProperties().getProperty('API_TOKEN');
   if (!token || !req || typeof req.token !== 'string' || !sameSecret_(req.token, token)) return json_({ ok: false, error: 'unauthorized' });
@@ -287,6 +290,19 @@ function sync_(req) {
         if (at != null) {
           var existing = Number(table.rows[at][table.map.updatedAt]) || 0;
           if (clean.updatedAt <= existing) return; // older or identical resend → ignore
+          // A night from «Команды» (all sleep of the day) is not replaced by the same night from a CSV
+          // imported on a phone that had not synced yet; the phone gets the night back instead.
+          if (entity === 'sleep' && clean.via === 'csv' && !clean.edited && !clean.deleted) {
+            var cur = fromRow_('sleep', table.rows[at], table);
+            if (cur && cur.via === 'shortcut') {
+              cur.updatedAt = clean.updatedAt + 1;
+              cur._srv = srv++;
+              table.rows[at] = toRow_(entity, cur, table, table.rows[at]);
+              table.changed[at] = true;
+              touched = true;
+              return;
+            }
+          }
           clean._srv = srv++;
           table.rows[at] = toRow_(entity, clean, table, table.rows[at]);
           table.changed[at] = true;
@@ -352,13 +368,28 @@ var INGEST_MAX_LINES = 3000;
 var INGEST_TYPES = { weight: 'weight', waist: 'waist', fat: 'fat', sleep: 'sleep' };
 var INGEST_FIRST_DAY = Date.UTC(2015, 0, 1);
 var HEALTH_LOG_SHEET = 'App_HealthLog';
-var HEALTH_LOG_COLS = ['received_at', 'type', 'lines', 'added', 'updated', 'same', 'kept', 'rejected', 'sources'];
+var HEALTH_LOG_COLS = ['received_at', 'type', 'lines', 'added', 'updated', 'same', 'kept', 'rejected', 'sources', 'errors'];
+// Reasons are fixed texts: the log and the answer say why a line was refused, never its values.
+var BAD_DATE = 'дата не в формате ISO 8601 с часовым поясом (в «Командах»: метка «Начало» / «Окончание» → Формат даты → ISO 8601, со временем)';
+var BAD_FIELDS = 'нужно 4 поля через |: значение|начало|окончание|источник';
+
+// A whole request refused after the key matched: logged too, so nothing is dropped unseen.
+function refuseIngest_(req, message) {
+  var lines = String(req.lines || '').split(/\r?\n/).filter(function (l) { return l.replace(/[|\s]/g, ''); }).length;
+  var type = String(req.type || '').slice(0, 16);
+  try {
+    logIngest_([new Date().toISOString(), type, lines, 0, 0, 0, 0, lines, '', message.slice(0, 200)]);
+  } catch (e) {
+    // The answer still tells the phone.
+  }
+  return { ok: false, error: 'bad_request', message: message, api: API_VERSION, type: type, received: lines, rejected: lines };
+}
 
 function ingest_(req) {
   var type = INGEST_TYPES[String(req.type || '')];
-  if (!type) return { ok: false, error: 'bad_request', message: 'Неизвестный тип данных' };
+  if (!type) return refuseIngest_(req, 'Неизвестный тип данных: нужен weight, waist, fat или sleep');
   var lines = String(req.lines || '').split(/\r?\n/).filter(function (l) { return l.replace(/[|\s]/g, ''); });
-  if (lines.length > INGEST_MAX_LINES) return { ok: false, error: 'bad_request', message: 'Слишком много строк: не больше ' + INGEST_MAX_LINES };
+  if (lines.length > INGEST_MAX_LINES) return refuseIngest_(req, 'Слишком много строк: не больше ' + INGEST_MAX_LINES);
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) return { ok: false, error: 'busy' };
   try {
@@ -375,9 +406,11 @@ function ingest_(req) {
     var sources = {};
     lines.forEach(function (line, i) {
       var f = line.split('|').map(function (x) { return x.trim(); });
+      // A date first means the value went missing and every field moved one place left.
+      if (f.length < 3 || ingestTime_(f[0])) return bad(i, BAD_FIELDS);
       var start = ingestTime_(f[1]);
       var end = ingestTime_(f[2] || f[1]);
-      if (!start || !end) return bad(i, 'дата');
+      if (!start || !end) return bad(i, BAD_DATE);
       if (start.utc < INGEST_FIRST_DAY || end.utc > now + 86400000 || end.utc < start.utc) return bad(i, 'дата вне диапазона');
       var source = String(f[3] || '').slice(0, 64);
       if (source) sources[source] = true;
@@ -389,9 +422,14 @@ function ingest_(req) {
     writeTable_(table);
     props.setProperty('LAST_SRV', String(srv));
     // Freshness for the owner and the app; counts only, never values.
-    logIngest_([new Date(now).toISOString(), type, res.received, res.added, res.updated, res.same, res.kept, res.rejected, Object.keys(sources).join(', ').slice(0, 200)]);
+    var reasons = {};
+    res.errors.forEach(function (e) { reasons[e.reason] = (reasons[e.reason] || 0) + 1; });
+    var why = Object.keys(reasons).map(function (r) { return r + ' ×' + reasons[r]; }).join('; ');
+    logIngest_([new Date(now).toISOString(), type, res.received, res.added, res.updated, res.same, res.kept, res.rejected, Object.keys(sources).join(', ').slice(0, 200), why.slice(0, 300)]);
     SpreadsheetApp.flush();
     res.errors = res.errors.sort(function (x, y) { return x.line - y.line; }).slice(0, 5);
+    // For «Показать уведомление» in the Shortcut: present only when something was refused.
+    if (res.rejected) res.message = 'Не принято строк: ' + res.rejected + ' из ' + res.received + '. Строка ' + res.errors[0].line + ': ' + res.errors[0].reason;
     return res;
   } finally {
     lock.releaseLock();
@@ -474,9 +512,10 @@ function logIngest_(row) {
   var sh = ss.getSheetByName(HEALTH_LOG_SHEET);
   if (!sh) {
     sh = ss.insertSheet(HEALTH_LOG_SHEET, ss.getSheets().length);
-    sh.getRange(1, 1, 1, HEALTH_LOG_COLS.length).setValues([HEALTH_LOG_COLS]);
     sh.setFrozenRows(1);
   }
+  // A log made by an earlier version gets the new columns in its header.
+  if (sh.getLastColumn() < HEALTH_LOG_COLS.length) sh.getRange(1, 1, 1, HEALTH_LOG_COLS.length).setValues([HEALTH_LOG_COLS]);
   sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setValues([row]);
 }
 

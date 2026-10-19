@@ -236,3 +236,32 @@ test('smallest iPhone: the tab and the import preview fit without sideways scrol
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await context.close();
 });
+
+// 19.10.2026 on the real phone: a day of two parts (main sleep 3,9 ч, all sleep 7,8 ч). The title
+// counts all sleep of the day; the line says the time and the stages are those of the main sleep;
+// Core is «базовый», so «основной» means only the main sleep.
+test('a split day of sleep: all sleep in the title, the main sleep named apart, stages not called «основной»', async ({ page }) => {
+  await open(page);
+  await page.evaluate(async () => {
+    const { store } = window.__trainer;
+    await store.applyRemote({
+      sleep: [
+        { id: 's:2026-10-19', wakeDate: '2026-10-19', hours: 3.93, total: 7.81, episodes: 2, start: '2026-10-19T07:02:02+03:00', end: '2026-10-19T11:19:17+03:00', core: 2.36, deep: 0.81, rem: 0.76, unspec: 0, segments: 16, source: 'Apple Watch', via: 'shortcut', updatedAt: 1, deleted: false },
+        { id: 's:2026-10-17', wakeDate: '2026-10-17', hours: null, total: 1.22, episodes: 1, start: '2026-10-17T09:49:25+03:00', end: '2026-10-17T11:02:38+03:00', core: 0, deep: 0, rem: 0, unspec: 1.22, segments: 1, source: 'Apple Watch', via: 'shortcut', updatedAt: 1, deleted: false },
+      ],
+    });
+  });
+  const day = page.locator('main .row', { hasText: '7,8 ч' });
+  await expect(day).toContainText('2 части, основной сон 3,9 ч · основной 07:02–11:19 · базовый 2,4 · глубокий 0,8 · REM 0,8');
+  await day.click();
+  const sheet = page.getByRole('dialog', { name: 'Сон по дням' });
+  await expect(sheet).toContainText('весь сон за сутки');
+  await expect(sheet.locator('.row', { hasText: '1,2 ч' })).toContainText('нет эпизода от 2 ч · 09:49–11:02 · без фаз');
+});
+
+test('import while the sheet cannot be reached: the preview warns that recent «Команды» records may repeat', async ({ page }) => {
+  await open(page);
+  await connectSync(page, 'http://127.0.0.1:9/exec', 'a'.repeat(64)); // nothing listens on port 9
+  const sheet = await upload(page, 'weight.csv', WEIGHT);
+  await expect(sheet).toContainText('Таблица сейчас недоступна');
+});

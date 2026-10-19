@@ -6,7 +6,7 @@ import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, sum } from '../lib/util.js';
 import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf, isCounted } from '../lib/bodydata.js';
-import { ImportButton, openAddBody, openBodyRecord, openKindHistory, openNights, Sources, suspectText } from './bodyentry.js';
+import { ImportButton, openAddBody, openBodyRecord, openKindHistory, openNights, Sources, suspectText, sleepLine } from './bodyentry.js';
 
 export function Body() {
   const st = app.store.state;
@@ -123,20 +123,6 @@ export function Body() {
   </main>`;
 }
 
-export function sleepLine(n) {
-  if (n.from !== 'sleep') return 'из записи самочувствия';
-  const r = n.rec;
-  const parts = [
-    r.total > 0 && r.hours > 0 && r.total - r.hours > 0.05 ? `основной ${fmtNum(r.hours, 1)} ч, частей: ${r.episodes || 2}` : null,
-    r.total > 0 && !(r.hours > 0) ? 'без основного сна от 2 ч' : null,
-    r.start && r.end ? `${r.start.slice(11, 16)}–${r.end.slice(11, 16)}` : null,
-    r.core != null ? `основной ${fmtNum(r.core, 1)}` : null,
-    r.deep != null ? `глубокий ${fmtNum(r.deep, 1)}` : null,
-    r.rem != null ? `REM ${fmtNum(r.rem, 1)}` : null,
-    r.source || null,
-  ];
-  return parts.filter(Boolean).join(' · ');
-}
 
 function openEntry(date) {
   openSheet((close) => html`<${EntrySheet} date=${date} onClose=${close} />`);

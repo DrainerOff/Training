@@ -164,10 +164,10 @@ test('the log says when and how much arrived, never what', () => {
   send(gas, key, 'weight', [W1, W2]);
   send(gas, key, 'sleep', NIGHTS);
   const log = gas.sheet('App_HealthLog').rows();
-  assert.deepEqual(log[0], ['received_at', 'type', 'lines', 'added', 'updated', 'same', 'kept', 'rejected', 'sources']);
+  assert.deepEqual(log[0], ['received_at', 'type', 'lines', 'added', 'updated', 'same', 'kept', 'rejected', 'sources', 'errors']);
   assert.deepEqual(log.slice(1).map((r) => r.slice(1)), [
-    ['weight', 2, 2, 0, 0, 0, 0, 'Zepp Life'],
-    ['sleep', 7, 2, 0, 0, 0, 0, ''],
+    ['weight', 2, 2, 0, 0, 0, 0, 'Zepp Life', ''],
+    ['sleep', 7, 2, 0, 0, 0, 0, '', ''],
   ]);
   assert.ok(!JSON.stringify(log).includes('80.'), 'no values in the log');
 });
@@ -201,4 +201,112 @@ test('keys are shown in the sheet dialog only, never written to the execution lo
   const log = gas.logs.join('\n');
   for (const secret of [token, key, next, app]) assert.ok(!log.includes(secret));
   assert.match(log, /не записывается в журнал/);
+});
+
+// 19.10.2026 on the real iPhone: refused waist and sleep lines left only `rejected` in the log.
+// Each refusal now says why, in the answer (for the Shortcut's notification) and in the log.
+test('a refused line says why: in the answer, in its message and in the log, never with its values', () => {
+  const { gas, key } = boot();
+  const local = '84.5|19 окт. 2026 г., 18:06|19 окт. 2026 г., 18:06|Fitdays+'; // date tokens left in the default format
+  const shifted = '2026-03-01T07:10:05+03:00|2026-03-01T07:10:05+03:00|Fitdays+'; // the value token is missing
+  const ok = '84.5|2026-03-01T18:06:05+03:00|2026-03-01T18:06:05+03:00|Fitdays+';
+  const res = send(gas, key, 'waist', [local, shifted, ok]);
+  assert.deepEqual([res.ok, res.added, res.rejected], [true, 1, 2]);
+  assert.match(res.errors[0].reason, /ISO 8601/);
+  assert.match(res.errors[1].reason, /значение\|начало\|окончание\|источник/);
+  assert.match(res.message, /^Не принято строк: 2 из 3\. Строка 1: дата/);
+  const clean = send(gas, key, 'waist', [ok]);
+  assert.deepEqual([clean.same, clean.rejected, clean.message], [1, 0, undefined]);
+
+  const log = rows(gas, 'App_HealthLog');
+  assert.match(log[0].errors, /ISO 8601.* ×1; нужно 4 поля.* ×1$/);
+  assert.equal(log[1].errors, '');
+  assert.ok(!JSON.stringify(log).includes('84'), 'no values in the log');
+});
+
+test('a request refused as a whole (too big, too many lines, unknown type) is logged too', () => {
+  const { gas, key } = boot();
+  // The 19.10 mistake: heart tokens put the whole list into every line, 319 × 319 samples.
+  const all = Array.from({ length: 319 }, (_, i) => `Core 2026-03-01T0${i % 10}:00:00+03:00 2026-03-01T0${i % 10}:30:00+03:00`).join(' ');
+  const big = send(gas, key, 'sleep', Array.from({ length: 319 }, () => all));
+  assert.deepEqual([big.ok, big.error, big.rejected], [false, 'bad_request', 319]);
+  assert.match(big.message, /Объект повтора/);
+  assert.equal(send(gas, key, 'steps', [W1]).error, 'bad_request');
+  assert.equal(send(gas, key, 'weight', Array.from({ length: 3001 }, () => W1)).error, 'bad_request');
+  const log = rows(gas, 'App_HealthLog');
+  assert.deepEqual(log.map((r) => [r.type, r.lines, r.rejected]), [['sleep', 319, 319], ['steps', 1, 1], ['weight', 3001, 3001]]);
+  assert.match(log[0].errors, /больше 1 МБ/);
+  // A wrong key is not logged: the log cannot be flooded from outside.
+  send(gas, 'x'.repeat(64), 'sleep', Array.from({ length: 319 }, () => all));
+  assert.equal(rows(gas, 'App_HealthLog').length, 3);
+  // The same sleep sent right afterwards is accepted.
+  assert.equal(send(gas, key, 'sleep', NIGHTS).added, 2);
+});
+
+test('a log created by the first API 4 script gets the errors column', () => {
+  const { gas, key } = boot();
+  send(gas, key, 'weight', [W1]);
+  const log = gas.sheet('App_HealthLog');
+  log.getRange(1, 10, 1, 1).setValues([['']]); // the header as the earlier version wrote it: nine columns
+  assert.equal(log.rows()[0].filter(Boolean).length, 9);
+  assert.equal(send(gas, key, 'weight', ['80|x|x|Zepp Life']).rejected, 1);
+  const r = log.rows();
+  assert.equal(r[0][9], 'errors');
+  assert.match(r[r.length - 1][9], /ISO 8601/);
+});
+
+// The spreadsheet is set to America/Los_Angeles while the phone is at +03:00. Dates come from the
+// offset each sample carries, so the same samples give the same days whatever the sheet's zone.
+test('the spreadsheet time zone does not move measurement dates or wake dates', () => {
+  const run = (timeZone) => {
+    const gas = createGas({ timeZone });
+    gas.call('setup');
+    const key = gas.call('showIngestKey');
+    send(gas, key, 'weight', ['81.25|2026-10-19T01:36:08+03:00|2026-10-19T01:36:08+03:00|Zepp Life']);
+    send(gas, key, 'sleep', [
+      'Core|2026-10-18T22:30:00+03:00|2026-10-19T00:30:00+03:00|',
+      'REM|2026-10-19T00:30:00+03:00|2026-10-19T02:10:00+03:00|',
+      'Core|2026-10-19T13:00:00+03:00|2026-10-19T16:00:00+03:00|',
+    ]);
+    return {
+      body: rows(gas, 'App_Body').map((r) => [r.date, r.measured_at, r.id]),
+      sleep: rows(gas, 'App_Sleep').map((r) => [r.wake_date, r.sleep_h, r.total_h, r.episodes, r.start, r.end]),
+    };
+  };
+  const msk = run('Europe/Moscow');
+  assert.deepEqual(run('America/Los_Angeles'), msk);
+  assert.deepEqual(msk.body, [['2026-10-19', '2026-10-19T01:36:08+03:00', 'b:weight:zepp:20261018T223608:8125']]);
+  // A split day like 19.10: main sleep is the longer part, total is both parts.
+  assert.deepEqual(msk.sleep, [['2026-10-19', 3.67, 6.67, 2, '2026-10-18T22:30:00+03:00', '2026-10-19T02:10:00+03:00']]);
+});
+
+// History loaded from a CSV on a phone that had not synced yet must not replace a night that came
+// from «Команды» (it has all sleep of the day; the CSV only the main sleep).
+test('a CSV night does not overwrite a Shortcuts night in the sheet; the phone gets the Shortcuts night back', async () => {
+  const { gas, token, key } = boot();
+  send(gas, key, 'sleep', NIGHTS);
+  const fromShortcut = rows(gas, 'App_Sleep').find((r) => r.wake_date === '2026-03-03');
+  assert.equal(fromShortcut.episodes, 2);
+
+  const store = createStore(memoryAdapter(), { now: () => 1_792_500_000_000 });
+  await store.load();
+  await store.setKV({ sync: { url: 'https://example/exec', token } });
+  const csv = parseFile([
+    'wake_date,sleep_start_local,sleep_end_local,sleep_hours,core_hours,deep_hours,rem_hours,unspecified_hours,segments,method',
+    '2026-03-03,2026-03-03 07:00:00 +0300,2026-03-03 10:00:00 +0300,3,3,0,0,0,1,stages',
+    '2026-02-20,2026-02-19 23:00:00 +0300,2026-02-20 07:00:00 +0300,8,5,1,2,0,9,stages',
+  ].join('\n'));
+  const plan = planImport(csv, { body: store.state.body, sleep: store.state.sleep });
+  assert.equal(plan.add.length, 2); // the phone does not know the Shortcuts nights yet
+  await store.importBody(plan, { batch: 'i1', file: 'sleep.csv' });
+  const sync = createSync(store, { transport: async (_u, payload) => gas.post(payload) });
+  await sync.syncNow();
+  await sync.syncNow();
+
+  const sheet = rows(gas, 'App_Sleep');
+  const kept = sheet.find((r) => r.wake_date === '2026-03-03');
+  assert.deepEqual([kept.via, kept.total_h, kept.episodes], ['shortcut', fromShortcut.total_h, 2]);
+  assert.equal(sheet.find((r) => r.wake_date === '2026-02-20').via, 'csv'); // history the sheet lacked is added
+  const onPhone = store.state.sleep.get('s:2026-03-03');
+  assert.deepEqual([onPhone.via, onPhone.total, onPhone.episodes], ['shortcut', fromShortcut.total_h, 2]);
 });

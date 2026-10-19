@@ -190,14 +190,14 @@ function NightsSheet({ onClose }) {
     const ok = await confirmSheet({ title: `Удалить сон за ${fmtDay(n.date)}?`, text: 'Ночь перестанет учитываться в среднем. Повторный импорт её не вернёт.', okLabel: 'Удалить', danger: true });
     if (ok) await app.store.deleteSleep(n.rec.id);
   };
-  return html`<${Sheet} title="Основной сон" onClose=${onClose}>
-    <p class="muted" style="font-size:13px">Самый длинный эпизод сна Apple Watch, по дате пробуждения. Нажмите на ночь, чтобы удалить её.</p>
+  return html`<${Sheet} title="Сон по дням" onClose=${onClose}>
+    <p class="muted" style="font-size:13px">Часы — весь сон за сутки по дате пробуждения, из них считается среднее. Если сон был в несколько частей, отдельно указан основной сон (самый длинный эпизод от 2 ч), время и фазы относятся к нему. Нажмите на день, чтобы удалить его.</p>
     <ul class="rows">
       ${list.map(
         (n) => html`<li><button type="button" class="row" disabled=${n.from !== 'sleep'} onClick=${() => remove(n)}>
           <span class="row__title">${fmtDay(n.date)}</span>
           <span class="num body-value">${fmtNum(n.hours, 1)} ч</span>
-          <span class="row__sub">${n.from === 'sleep' ? [n.rec.core != null ? `основной ${fmtNum(n.rec.core, 1)}` : null, n.rec.deep != null ? `глубокий ${fmtNum(n.rec.deep, 1)}` : null, n.rec.rem != null ? `REM ${fmtNum(n.rec.rem, 1)}` : null].filter(Boolean).join(' · ') : 'из записи самочувствия'}</span>
+          <span class="row__sub">${sleepLine(n)}</span>
         </button></li>`,
       )}
     </ul>
@@ -261,7 +261,38 @@ async function undo(e) {
   app.ui.toast(`Удалено записей: ${n}`);
 }
 
+// The hours in the title are all sleep of that day (what averages count). When the day had more
+// than one part, the line names the main sleep (longest part of 2 h+) and that the time and the
+// stages belong to it. Core is «базовый», as the Health app calls it, so «основной» means one thing.
+export function sleepLine(n) {
+  if (n.from !== 'sleep') return 'из записи самочувствия';
+  const r = n.rec;
+  const parts = r.total > 0 ? r.episodes || 1 : 1;
+  const split = parts > 1 || (r.hours > 0 && r.total - r.hours > 0.05);
+  const staged = (r.core || 0) + (r.deep || 0) + (r.rem || 0) > 0;
+  const out = [
+    split && r.hours > 0 ? `${parts} ${parts < 5 ? 'части' : 'частей'}, основной сон ${fmtNum(r.hours, 1)} ч` : null,
+    r.total > 0 && !(r.hours > 0) ? 'нет эпизода от 2 ч' : null,
+    r.start && r.end ? `${split && r.hours > 0 ? 'основной ' : ''}${r.start.slice(11, 16)}–${r.end.slice(11, 16)}` : null,
+    staged ? `базовый ${fmtNum(r.core || 0, 1)} · глубокий ${fmtNum(r.deep || 0, 1)} · REM ${fmtNum(r.rem || 0, 1)}` : 'без фаз',
+    r.source || null,
+  ];
+  return out.filter(Boolean).join(' · ');
+}
+
 // ---------------------------------------------------------------- import
+
+// Measurements and nights from «Команды» reach the phone through sync. The file is compared with
+// them, so a weigh-in or a night already in the sheet is not loaded a second time; when the sheet
+// cannot be reached the preview says so.
+async function syncFirst() {
+  const s = app.sync;
+  const cfg = app.store.state.kv.sync;
+  if (!s || !cfg?.url || !cfg?.token) return true;
+  app.ui.toast('Сверяю с таблицей…');
+  const st = await Promise.race([s.syncNow(), new Promise((r) => setTimeout(() => r(null), 15000))]);
+  return st?.state === 'idle';
+}
 
 export function ImportButton() {
   const pick = async (e) => {
@@ -273,9 +304,10 @@ export function ImportButton() {
     try {
       const parsed = parseFile(await f.text());
       if (!parsed.format) return app.ui.toast(parsed.errors[0]?.reason || 'Формат файла не распознан');
+      const synced = await syncFirst();
       const st = app.store.state;
       const plan = planImport(parsed, { body: st.body, sleep: st.sleep });
-      openSheet((close) => html`<${ImportSheet} plan=${plan} file=${f.name} onClose=${close} />`);
+      openSheet((close) => html`<${ImportSheet} plan=${plan} file=${f.name} synced=${synced} onClose=${close} />`);
     } catch (err) {
       fail(err);
     }
@@ -287,7 +319,7 @@ export function ImportButton() {
   <p class="muted" style="font-size:12px">Файл читается только на этом телефоне. В таблицу попадают сами замеры, файл никуда не отправляется.</p>`;
 }
 
-function ImportSheet({ plan, file, onClose }) {
+function ImportSheet({ plan, file, synced = true, onClose }) {
   const [withNear, setWithNear] = useState(false);
   const [busy, setBusy] = useState(false);
   const extra = withNear ? plan.near.map((n) => n.rec) : [];
@@ -307,6 +339,9 @@ function ImportSheet({ plan, file, onClose }) {
   const footer = html`<button type="button" class="btn btn--primary" disabled=${!total || busy} onClick=${go}>${total ? `Загрузить ${total}` : 'Нечего загружать'}</button>`;
   return html`<${Sheet} title="Загрузка из файла" onClose=${onClose} footer=${footer}>
     <p><b>${FORMAT_LABEL[plan.format]}</b><br /><span class="muted" style="font-size:13px">${file}</span></p>
+    ${synced
+      ? null
+      : html`<p class="body-warn">Таблица сейчас недоступна, поэтому файл сверен только с тем, что уже есть на телефоне. Замеры, пришедшие из «Команд» за последние дни, могут повториться. Надёжнее загрузить файл, когда телефон в сети.</p>`}
     <ul class="rows">
       <li class="row"><span class="row__title">Новые</span><span class="num">${plan.add.length}</span>${kinds.length ? html`<span class="row__sub">${kinds.join(', ')}</span>` : plan.sleepAdded ? html`<span class="row__sub">ночей сна — ${plan.sleepAdded}</span>` : null}</li>
       ${plan.same ? html`<li class="row"><span class="row__title">Уже есть</span><span class="num">${plan.same}</span></li>` : null}

@@ -2021,3 +2021,10 @@ button.src {
 .screen > .btn-row {
   margin-bottom: 4px;
 }
+.body-warn {
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-left: 3px solid var(--caution);
+  background: var(--press);
+}
