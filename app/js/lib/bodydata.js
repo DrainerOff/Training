@@ -416,10 +416,107 @@ export function dailyWeights(body, metrics) {
   return { days, suspects, shadowed };
 }
 
-// Main sleep per wake date: App_Sleep wins over a manual v1.0 "сон, ч" of the same date.
+// --- sleep from raw samples (Shortcuts: «Найти данные Здоровья», type «Сон») ---------------------
+
+// Stage names as Health returns them: English even on a Russian iPhone, Russian just in case.
+const STAGE = [
+  [/^(core|ядро|основн)/i, 'core'],
+  [/^(deep|глубок)/i, 'deep'],
+  [/^(rem|быстр)/i, 'rem'],
+  [/^(awake|бодрств)/i, 'awake'],
+  [/^(in ?bed|в кровати)/i, 'inbed'],
+  [/^(asleep|unspecified|сон|спит)/i, 'unspec'],
+];
+export function sleepStage(value) {
+  const s = String(value || '').trim();
+  const hit = STAGE.find(([re]) => re.test(s));
+  return hit ? hit[1] : null;
+}
+
+const SPLIT_GAP_MIN = 90;
+const MAIN_MIN_H = 2;
+
+// Samples → one record per wake date (the local date the sleep ended). A gap over 90 minutes
+// between sleep samples starts a new episode; the main sleep is the longest episode of 2 h or more
+// (the audit's rule), `total` is all sleep of episodes ending that date (a split day's sleep is not
+// lost). Overlapping samples (two sources) are counted once.
+export function sleepFromSamples(samples, { minTotal = 1 } = {}) {
+  const pts = [];
+  for (const x of samples) {
+    const stage = sleepStage(x.value);
+    const a = parseTime(x.start);
+    const b = parseTime(x.end);
+    if (!stage || stage === 'awake' || stage === 'inbed' || !a || !b || b.utc <= a.utc) continue;
+    pts.push({ stage, a: a.utc, b: b.utc, start: a.local, end: b.local, source: x.source || '' });
+  }
+  pts.sort((p, q) => p.a - q.a || p.b - q.b);
+  const episodes = [];
+  let cur = null;
+  for (const p of pts) {
+    if (cur && p.a - cur.b <= SPLIT_GAP_MIN * 60000) {
+      cur.pts.push(p);
+      if (p.b > cur.b) {
+        cur.b = p.b;
+        cur.end = p.end;
+      }
+    } else {
+      cur = { a: p.a, b: p.b, start: p.start, end: p.end, pts: [p] };
+      episodes.push(cur);
+    }
+  }
+  const byDate = new Map();
+  for (const e of episodes) {
+    // Union of intervals: what was asleep, whatever the source; stages in the same way per stage.
+    const union = (list) => {
+      let ms = 0;
+      let end = -Infinity;
+      for (const p of list) {
+        const from = Math.max(p.a, end);
+        if (p.b > from) ms += p.b - from;
+        end = Math.max(end, p.b);
+      }
+      return ms / 3600000;
+    };
+    const hours = union(e.pts);
+    const st = Object.fromEntries(['core', 'deep', 'rem', 'unspec'].map((k) => [k, union(e.pts.filter((p) => p.stage === k))]));
+    const ep = { start: e.start, end: e.end, hours, ...st, segments: e.pts.length, source: [...new Set(e.pts.map((p) => p.source).filter(Boolean))].join(', ') };
+    const date = e.end.slice(0, 10);
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(ep);
+  }
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const out = [];
+  for (const [wakeDate, eps] of [...byDate].sort((x, y) => x[0].localeCompare(y[0]))) {
+    const total = sum(eps.map((e) => e.hours));
+    if (total < minTotal) continue;
+    const main = eps.filter((e) => e.hours >= MAIN_MIN_H).sort((x, y) => y.hours - x.hours)[0] || null;
+    const base = main || eps.slice().sort((x, y) => y.hours - x.hours)[0];
+    out.push({
+      wakeDate,
+      start: base.start,
+      end: base.end,
+      hours: main ? r2(main.hours) : null,
+      total: r2(total),
+      episodes: eps.length,
+      core: r2(base.core),
+      deep: r2(base.deep),
+      rem: r2(base.rem),
+      unspec: r2(base.unspec),
+      segments: base.segments,
+      source: base.source || 'Apple Watch',
+    });
+  }
+  return out;
+}
+
+// Main sleep per wake date: App_Sleep wins over a manual v1.0 "сон, ч" of the same date. The
+// value counted is all sleep of that date (`total`); records without it (CSV) count the main sleep.
 export function sleepNights(sleep, metrics) {
   const nights = new Map();
-  for (const s of sleep) if (!s.deleted && s.hours > 0) nights.set(s.wakeDate, { date: s.wakeDate, hours: s.hours, from: 'sleep', rec: s });
+  for (const s of sleep) {
+    const h = s.total > 0 ? s.total : s.hours;
+    if (!s.deleted && h > 0) nights.set(s.wakeDate, { date: s.wakeDate, hours: h, main: s.hours ?? null, from: 'sleep', rec: s });
+  }
   const shadowed = new Set();
   for (const m of metrics) {
     if (m.deleted || !(m.sleep > 0)) continue;

@@ -296,3 +296,36 @@ test('latest girth and its change over four weeks', () => {
   assert.equal(r.count, 3);
   assert.equal(latestOf(body, 'neck'), null);
 });
+
+test('sleep from raw samples: English stage names, awake gaps inside, a split day keeps both parts', async () => {
+  const { sleepFromSamples, sleepStage } = await import('../../app/js/lib/bodydata.js');
+  assert.equal(sleepStage('Core'), 'core');
+  assert.equal(sleepStage('Глубокий'), 'deep');
+  assert.equal(sleepStage('Asleep'), 'unspec');
+  assert.equal(sleepStage('In Bed'), 'inbed');
+  const s = (value, a, b, source = '') => ({ value, start: `2026-03-0${a}`, end: `2026-03-0${b}`, source });
+  const out = sleepFromSamples([
+    // 1 March: a short nap only (under an hour) → no record
+    s('Asleep', '1T13:00:00+03:00', '1T13:40:00+03:00'),
+    // 2 March: one night, 7 h, a 2-minute awakening inside
+    s('Core', '1T23:00:00+03:00', '2T02:00:00+03:00'),
+    s('Awake', '2T02:00:00+03:00', '2T02:02:00+03:00'),
+    s('Deep', '2T02:02:00+03:00', '2T03:02:00+03:00'),
+    s('REM', '2T03:02:00+03:00', '2T06:02:00+03:00'),
+    s('Core', '2T05:00:00+03:00', '2T06:00:00+03:00', 'iPhone'), // overlaps: counted once
+    // 3 March: two parts 3 h + 2.5 h, 2 h apart
+    s('Core', '3T07:00:00+03:00', '3T10:00:00+03:00'),
+    s('Core', '3T12:00:00+03:00', '3T13:30:00+03:00'),
+    s('REM', '3T13:30:00+03:00', '3T14:30:00+03:00'),
+  ]);
+  assert.deepEqual(
+    out.map((n) => [n.wakeDate, n.hours, n.total, n.episodes, n.start.slice(11, 16), n.end.slice(11, 16)]),
+    [
+      ['2026-03-02', 7, 7, 1, '23:00', '06:02'],
+      ['2026-03-03', 3, 5.5, 2, '07:00', '10:00'],
+    ],
+  );
+  assert.deepEqual([out[0].core, out[0].deep, out[0].rem], [4, 1, 3]);
+  const { nights } = sleepNights(out.map((n) => ({ ...n, id: 's:' + n.wakeDate })), []);
+  assert.deepEqual(nights.map((n) => [n.date, n.hours, n.main]), [['2026-03-02', 7, 7], ['2026-03-03', 5.5, 3]]);
+});

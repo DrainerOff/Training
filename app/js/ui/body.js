@@ -127,6 +127,8 @@ export function sleepLine(n) {
   if (n.from !== 'sleep') return 'из записи самочувствия';
   const r = n.rec;
   const parts = [
+    r.total > 0 && r.hours > 0 && r.total - r.hours > 0.05 ? `основной ${fmtNum(r.hours, 1)} ч, частей: ${r.episodes || 2}` : null,
+    r.total > 0 && !(r.hours > 0) ? 'без основного сна от 2 ч' : null,
     r.start && r.end ? `${r.start.slice(11, 16)}–${r.end.slice(11, 16)}` : null,
     r.core != null ? `основной ${fmtNum(r.core, 1)}` : null,
     r.deep != null ? `глубокий ${fmtNum(r.deep, 1)}` : null,

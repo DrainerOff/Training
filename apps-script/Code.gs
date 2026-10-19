@@ -138,12 +138,15 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
-  // Main sleep of the night that ended on wake_date (Apple Watch stages), hours by stage.
+  // Sleep of the day that ended on wake_date (Apple Watch stages): sleep_h = main sleep (longest
+  // episode, 2 h+), total_h = all sleep of that date, hours by stage of the main sleep.
   sleep: {
     sheet: 'App_Sleep',
     cols: [
       ['wake_date', 'wakeDate', 'date'],
       ['sleep_h', 'hours', 'num'],
+      ['total_h', 'total', 'num'],
+      ['episodes', 'episodes', 'int'],
       ['start', 'start', 'text'],
       ['end', 'end', 'text'],
       ['core_h', 'core', 'num'],
@@ -548,7 +551,8 @@ function sanitize_(entity, rec) {
   }
   if (entity === 'sleep') {
     if (!out.wakeDate || out.id !== 's:' + out.wakeDate) ok = false;
-    else if (!out.deleted && !(out.hours > 0 && out.hours <= 24)) ok = false;
+    else if (!out.deleted && !((out.hours > 0 && out.hours <= 24) || (out.total > 0 && out.total <= 24))) ok = false;
+    else if (out.total != null && out.total > 24) ok = false;
   }
   return ok ? out : null;
 }
