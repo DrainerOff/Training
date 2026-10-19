@@ -87,7 +87,7 @@ test('update from 3f386f8 (on the phone) to the release from main: data, records
     await booted(page);
     expect(await page.evaluate(() => [window.__boot?.build, window.__trainer?.build])).toEqual(['main100', 'main100']);
     await expect(page.locator('.diag')).toHaveCount(0);
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 3 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 5 }]);
     expect(await page.evaluate(() => caches.keys())).toEqual(['trainer-main100']);
     expect(await snapshot(page)).toEqual(before);
 

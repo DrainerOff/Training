@@ -4,6 +4,7 @@ import { app } from './core.js';
 import { buildExposures } from '../lib/plateau.js';
 import { allOptions } from '../lib/program.js';
 import { performances, buildRecordBook } from '../lib/records.js';
+import { dailyWeights } from '../lib/bodydata.js';
 
 let cache = { v: -1 };
 
@@ -20,13 +21,15 @@ export function derived() {
   return cache;
 }
 
+// Latest day's weight: weigh-ins of that day (median) or, for a day without any, the check-in.
+let weightCache = { v: -1 };
 export function latestBodyweight() {
-  let best = null;
-  for (const m of app.store.state.metrics.values()) {
-    if (m.deleted || !m.bodyweight) continue;
-    if (!best || m.date > best.date) best = m;
+  const st = app.store.state;
+  if (weightCache.v !== st.version) {
+    const { days } = dailyWeights(st.body.values(), st.metrics.values());
+    weightCache = { v: st.version, w: days.length ? days[days.length - 1].bodyweight : null };
   }
-  return best?.bodyweight ?? null;
+  return weightCache.w;
 }
 
 // Personal records: workout sets + manual entries → one book per exercise variant.

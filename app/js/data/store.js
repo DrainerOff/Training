@@ -6,8 +6,11 @@
 import { uid, isoDate } from '../lib/util.js';
 import { normalizeProgram, starterProgram, makeOption, CATEGORY } from '../lib/program.js';
 import { itemsForDay } from '../lib/planner.js';
+import { KINDS, bodyId, parseTime } from '../lib/bodydata.js';
+import { MODES, addDays } from '../lib/phase.js';
 
-export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises'];
+export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
+const MAX_BODY_IMPORTS = 30;
 const DOUBLE_TAP_MS = 1500;
 const MAX_CORRECTIONS = 50;
 export const SETUP_MAX = 300;
@@ -21,6 +24,9 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     metrics: new Map(),
     records: new Map(), // manual personal records; automatic ones are derived from sets
     exercises: new Map(), // per-variant settings, id `x:<seriesKey>`
+    body: new Map(), // one real measurement per record (bodydata.js)
+    sleep: new Map(), // main sleep per wake date, id `s:<wakeDate>`
+    phases: new Map(), // bulk / cut / maintenance periods (lib/phase.js)
     outbox: new Map(),
     kv: {},
     version: 0,
@@ -126,14 +132,17 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   }
 
   async function load() {
-    const [sessions, sets, metrics, records, exercises, outbox, kv] = await Promise.all(
-      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
+    const [sessions, sets, metrics, records, exercises, body, sleep, phases, outbox, kv] = await Promise.all(
+      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
     for (const r of sets) putRecord('sets', r);
     for (const r of metrics) state.metrics.set(r.id, r);
     for (const r of records) state.records.set(r.id, r);
     for (const r of exercises) state.exercises.set(r.id, r);
+    for (const r of body) state.body.set(r.id, r);
+    for (const r of sleep) state.sleep.set(r.id, r);
+    for (const r of phases) state.phases.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
     // The starter program has updatedAt 0 and is never pushed: a fresh device must not
@@ -443,6 +452,123 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return rec;
   }
 
+  // --- body measurements and sleep -----------------------------------------------------------
+  // Stable ids (bodydata.js). An edit keeps the id and the measured value (`origValue`), so a
+  // re-import recognises the row and leaves the correction alone; deletion is a flag.
+
+  async function addBody({ kind, value, measuredAt, note = '', source = 'вручную' }) {
+    const t = parseTime(measuredAt);
+    if (!KINDS[kind] || !t) throw new Error('Не указаны замер или время');
+    if (!(value >= KINDS[kind].min && value <= KINDS[kind].max)) throw new Error(`${KINDS[kind].label}: значение вне диапазона ${KINDS[kind].min}–${KINDS[kind].max}`);
+    const family = 'manual';
+    let n = 1;
+    let id = bodyId({ kind, family, utc: t.utc, precision: t.precision, value });
+    while (state.body.get(id) && !state.body.get(id).deleted) id = bodyId({ kind, family, utc: t.utc, precision: t.precision, value }, ++n);
+    const prev = state.body.get(id);
+    const rec = {
+      id,
+      kind,
+      value,
+      origValue: value,
+      unit: KINDS[kind].unit,
+      measuredAt: t.local,
+      date: t.date,
+      source,
+      family,
+      via: 'manual',
+      srcId: '',
+      batch: '',
+      excluded: null,
+      edited: false,
+      note: String(note || '').slice(0, 300),
+      updatedAt: stamp(prev),
+      deleted: false,
+    };
+    await save('body', [rec]);
+    return rec;
+  }
+
+  async function editBody(id, patch) {
+    const prev = state.body.get(id);
+    if (!prev) return null;
+    const next = { ...prev, ...patch, updatedAt: stamp(prev) };
+    if ('value' in patch) {
+      const k = KINDS[prev.kind];
+      if (!(patch.value >= k.min && patch.value <= k.max)) throw new Error(`${k.label}: значение вне диапазона ${k.min}–${k.max}`);
+      next.edited = next.edited || patch.value !== prev.value;
+    }
+    await save('body', [next]);
+    return next;
+  }
+
+  const setDeleted = (entity) => async (id, deleted = true) => {
+    const prev = state[entity].get(id);
+    if (!prev || !!prev.deleted === deleted) return;
+    await save(entity, [{ ...prev, deleted, ...(deleted ? {} : { via: prev.via === 'undone' ? 'csv' : prev.via }), updatedAt: stamp(prev) }]);
+  };
+
+  async function editSleep(id, patch) {
+    const prev = state.sleep.get(id);
+    if (!prev) return null;
+    const next = { ...prev, ...patch, edited: true, updatedAt: stamp(prev) };
+    await save('sleep', [next]);
+    return next;
+  }
+
+  // --- bulk / cut / maintenance phases -------------------------------------------------------
+  // One phase runs at a time: a new one ends the running one the day before it starts.
+  async function savePhase({ id = null, mode, start, end = null, targetPct, note = '' }) {
+    if (!MODES[mode]) throw new Error('Не выбран режим');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start || '')) throw new Error('Не указано начало');
+    if (end && end < start) throw new Error('Конец раньше начала');
+    if (!(Math.abs(targetPct) <= 2)) throw new Error('Темп — от −2 до +2 % массы в неделю');
+    const prev = id ? state.phases.get(id) : null;
+    const rec = { id: prev?.id || uid('ph'), mode, start, end: end || null, targetPct, note: String(note || '').slice(0, 300), updatedAt: stamp(prev), deleted: false };
+    const out = [rec];
+    if (!prev) {
+      for (const p of state.phases.values()) {
+        if (p.deleted || p.start >= start || (p.end && p.end < start)) continue;
+        out.push({ ...p, end: addDays(start, -1), updatedAt: stamp(p) });
+      }
+    }
+    await save('phases', out);
+    return rec;
+  }
+
+  // Writes the records of an import plan (bodydata.planImport) in one transaction, with an entry
+  // in kv `bodyImports` so the whole import can be undone.
+  async function importBody(plan, { batch, file = '', extra = [] } = {}) {
+    const recs = [...plan.add, ...extra];
+    const body = [];
+    const sleep = [];
+    for (const r of recs) {
+      const entity = r.wakeDate ? 'sleep' : 'body';
+      const rec = { ...r, batch, via: 'csv', updatedAt: stamp(state[entity].get(r.id)) };
+      (entity === 'sleep' ? sleep : body).push(rec);
+    }
+    const entry = { batch, at: now(), format: plan.format, file: String(file).slice(0, 80), body: body.length, sleep: sleep.length, undone: false };
+    await saveAll(
+      [
+        ['body', body],
+        ['sleep', sleep],
+      ],
+      { bodyImports: [...(state.kv.bodyImports || []), entry].slice(-MAX_BODY_IMPORTS) },
+    );
+    return entry;
+  }
+
+  // Undo of a whole import: its rows are deleted (on every device), except those edited since.
+  // They are marked via `undone`, so importing the same file again brings them back.
+  async function undoImport(batch) {
+    const groups = ['body', 'sleep'].map((entity) => [
+      entity,
+      [...state[entity].values()].filter((r) => r.batch === batch && !r.deleted && !r.edited).map((r) => ({ ...r, deleted: true, via: 'undone', updatedAt: stamp(r) })),
+    ]);
+    const imports = (state.kv.bodyImports || []).map((e) => (e.batch === batch ? { ...e, undone: true } : e));
+    await saveAll(groups, { bodyImports: imports });
+    return groups.reduce((n, [, rs]) => n + rs.length, 0);
+  }
+
   // --- program -------------------------------------------------------------------------
 
   async function saveProgram(program) {
@@ -545,6 +671,9 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       metrics: [...state.metrics.values()],
       records: [...state.records.values()],
       exercises: [...state.exercises.values()],
+      body: [...state.body.values()],
+      sleep: [...state.sleep.values()],
+      phases: [...state.phases.values()],
     };
   }
 
@@ -661,6 +790,18 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     restoreRecord,
     setupOf,
     saveSetup,
+    addBody,
+    editBody,
+    deleteBody: (id) => setDeleted('body')(id, true),
+    restoreBody: (id) => setDeleted('body')(id, false),
+    editSleep,
+    deleteSleep: (id) => setDeleted('sleep')(id, true),
+    restoreSleep: (id) => setDeleted('sleep')(id, false),
+    savePhase,
+    deletePhase: (id) => setDeleted('phases')(id, true),
+    restorePhase: (id) => setDeleted('phases')(id, false),
+    importBody,
+    undoImport,
     saveProgram,
     importParsedSessions,
     exportAll,
