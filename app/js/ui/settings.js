@@ -1,6 +1,6 @@
 // Settings, program editor and the text importers.
 
-import { html, useState, app, Icon, Sheet, openSheet, Seg, Toggle, confirmSheet } from './core.js';
+import { html, useState, useRef, app, Icon, Sheet, openSheet, Seg, Toggle, confirmSheet } from './core.js';
 import {
   CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeSlot, optionsFromNames, parseProgramText, programToText, parseOverride,
   fmtOverride, targetFor, fmtTarget, reuseKeys,
@@ -237,7 +237,7 @@ export function ProgramEditor() {
   };
   // Leaving with unsaved changes asks first; «Сохранить» stays at the top while there are any.
   const leave = async () => {
-    if (dirty && !(await confirmSheet({ title: 'Выйти без сохранения программы?', text: 'Изменения программы не сохранятся.', okLabel: 'Выйти', cancelLabel: 'Остаться', danger: true }))) return;
+    if (dirty && !(await confirmSheet({ title: 'Выйти без сохранения программы?', text: 'Изменения программы не сохранятся. Настройки тренажёра, сохранённые по «Готово», останутся.', okLabel: 'Выйти', cancelLabel: 'Остаться', danger: true }))) return;
     app.ui.back();
   };
   const saveTop = dirty ? html`<button type="button" class="btn btn--primary topbar__action" onClick=${save}>Сохранить</button>` : null;
@@ -302,19 +302,36 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
     note: slot?.note || '',
   }));
   const [v, setV] = useState(start);
-  const up = (p) => setV((x) => ({ ...x, ...p }));
+  const [typed, setTyped] = useState({}); // series key -> settings typed here
+  const optionsFor = (x) => (x.name.trim() ? optionsFromNames([x.name.trim(), ...x.alts.split('\n').map((n) => n.trim()).filter(Boolean)], slot?.options || []) : []);
+  // Renaming a variant gives it a new key: settings typed for it here move along with it.
+  const up = (p) => {
+    const before = optionsFor(v);
+    const after = optionsFor({ ...v, ...p });
+    setTyped((t) => {
+      const n = { ...t };
+      after.forEach((o, i) => {
+        const was = before[i]?.key;
+        if (was && was !== o.key && was in t && !(o.key in t)) n[o.key] = t[was];
+      });
+      return n;
+    });
+    setV((x) => ({ ...x, ...p }));
+  };
   // The variants as they will be saved (same keys as on «Готово»), each with its settings
   // (App_Exercises by series key — the same records the workout's «Настройки» line edits).
-  const names = [v.name.trim(), ...v.alts.split('\n').map((x) => x.trim()).filter(Boolean)];
-  const options = v.name.trim() ? optionsFromNames(names, slot?.options || []) : [];
-  const [typed, setTyped] = useState({}); // series key -> settings typed here
+  const options = optionsFor(v);
   const setupText = (key) => (key in typed ? typed[key] : app.store.setupOf(key));
   const setupsChanged = options.filter((o) => o.key in typed && typed[o.key].trim() !== app.store.setupOf(o.key));
   const dirty = JSON.stringify(v) !== JSON.stringify(start) || setupsChanged.length > 0;
+  const busy = useRef(false); // a double tap on «Готово» must not add the exercise twice
   const save = async () => {
+    if (busy.current) return;
+    busy.current = true;
     try {
       for (const o of setupsChanged) await app.store.saveSetup(o.key, o.name, typed[o.key]);
     } catch (err) {
+      busy.current = false;
       app.ui.toast(`Не удалось сохранить настройки: ${err.message}`);
       return;
     }

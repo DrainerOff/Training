@@ -65,40 +65,46 @@ function openEntry(date) {
   openSheet((close) => html`<${EntrySheet} date=${date} onClose=${close} />`);
 }
 
-function EntrySheet({ date, onClose }) {
-  const [d, setD] = useState(date);
-  return html`<${Sheet} title="Самочувствие и вес" onClose=${onClose}>
-    <div class="sheet__section">
-      <div class="sheet__label">Дата</div>
-      <input class="input" type="date" value=${d} max=${isoDate()} onInput=${(e) => setD(e.currentTarget.value)} />
-    </div>
-    ${d ? html`<${EntryForm} key=${d} date=${d} onClose=${onClose} />` : null}
-  <//>`;
+// The form always shows (and saves/deletes) the record of the chosen date.
+function recordOf(date) {
+  const prev = date && app.store.state.metrics.get(`m${date}`);
+  return prev && !prev.deleted ? prev : null;
+}
+function valuesOf(live) {
+  return { recovery: live?.recovery ?? null, sleep: live?.sleep ?? null, bodyweight: live?.bodyweight ?? null, note: live?.note || '' };
 }
 
-// Re-mounted per date: the form always shows (and saves/deletes) the record of the chosen date.
-function EntryForm({ date, onClose }) {
-  const prev = app.store.state.metrics.get(`m${date}`);
-  const live = prev && !prev.deleted ? prev : null;
-  const [v, setV] = useState({
-    recovery: live?.recovery ?? null,
-    sleep: live?.sleep ?? null,
-    bodyweight: live?.bodyweight ?? null,
-    note: live?.note || '',
-  });
+function EntrySheet({ date, onClose }) {
+  const [d, setD] = useState(date);
+  const [start, setStart] = useState(() => valuesOf(recordOf(date)));
+  const [v, setV] = useState(start);
+  const live = recordOf(d);
+  const pick = (day) => {
+    const s = valuesOf(recordOf(day));
+    setD(day);
+    setStart(s);
+    setV(s);
+  };
   const empty = v.recovery == null && v.sleep == null && v.bodyweight == null && !v.note;
-  return html`
-    <${MetricFields} v=${v} setV=${setV} />
+  const save = async () => {
+    await app.store.saveMetric(d, v);
+    onClose();
+  };
+  const footer = html`
+    ${live ? html`<button type="button" class="btn btn--danger" onClick=${async () => { await app.store.deleteMetric(live.id); onClose(); }}>Удалить</button>` : null}
+    <button type="button" class="btn btn--primary" disabled=${!d || empty} onClick=${save}>Сохранить</button>`;
+  return html`<${Sheet} title="Самочувствие и вес" onClose=${onClose} footer=${footer} dirty=${JSON.stringify(v) !== JSON.stringify(start)}>
     <div class="sheet__section">
-      <input class="input" placeholder="Заметка" value=${v.note} onInput=${(e) => setV({ ...v, note: e.currentTarget.value })} />
+      <div class="sheet__label">Дата</div>
+      <input class="input" type="date" value=${d} max=${isoDate()} onInput=${(e) => pick(e.currentTarget.value)} />
     </div>
-    <div class="btn-row">
-      ${live ? html`<button type="button" class="btn btn--danger" onClick=${async () => { await app.store.deleteMetric(live.id); onClose(); }}>Удалить</button>` : null}
-      <button type="button" class="btn btn--primary" disabled=${empty} onClick=${async () => {
-        await app.store.saveMetric(date, v);
-        onClose();
-      }}>Сохранить</button>
-    </div>`;
+    ${d
+      ? html`<${MetricFields} v=${v} setV=${setV} />
+          <div class="sheet__section">
+            <input class="input" placeholder="Заметка" aria-label="Заметка" value=${v.note} onInput=${(e) => setV({ ...v, note: e.currentTarget.value })} />
+          </div>`
+      : null}
+  <//>`;
 }
 
 const W = 340;

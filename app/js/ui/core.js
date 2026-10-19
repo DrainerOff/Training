@@ -145,7 +145,9 @@ export function Sheet({ title, children, onClose, footer = null, dirty = false }
     }
     st.onClose();
   };
-  useEffect(() => {
+  // A layout effect: listening from the moment the sheet is in the page, so an Escape that comes
+  // right after a confirmation opened is not lost between the two sheets.
+  useLayoutEffect(() => {
     const prev = document.activeElement;
     ref.current?.focus();
     // Escape closes only the sheet on top (a confirmation over a form, a keypad over a sheet).

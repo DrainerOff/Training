@@ -36,6 +36,7 @@ function App() {
       return id;
     },
     close(id) {
+      sheetClosedAt = performance.now();
       setSheets((s) => (id ? s.filter((x) => x.id !== id) : s.slice(0, -1)));
     },
     toast(text, { action = null, ms = 5000 } = {}) {
@@ -113,7 +114,7 @@ function App() {
       : null}
     ${st.storageError ? html`<div class="notice notice--caution" style="margin:8px 16px 0"><h3>Ошибка сохранения</h3><p>${st.storageError}</p></div>` : null}
     ${screen}
-    ${workout
+    ${workout || view?.type === 'program' // the editor is left only by «Назад», which guards unsaved changes
       ? null
       : html`<nav class="tabbar" aria-label="Разделы">
           ${TABS.map(
@@ -143,6 +144,37 @@ export function mount(el, { store, sync, version, storageKind }) {
   render(html`<${App} />`, el);
   pinDocument();
   trackViewport();
+  ignoreTapsThroughClosedSheets();
+}
+
+// A double tap on a sheet's bottom button («Сохранить» of a set, of a comment…): the first tap
+// saves and closes the sheet, the second lands on the dock's «Записать» right under it and would
+// log a set nobody meant. A tap on the dock at that spot right after such a sheet closed is that
+// second tap and is dropped. Nothing else is blocked (a keypad's «Готово» then «Записать» is a
+// normal sequence, and so is «Выбрать» then «Начать тренировку»).
+let sheetClosedAt = -Infinity;
+let footerTap = null;
+function ignoreTapsThroughClosedSheets() {
+  document.addEventListener(
+    'click',
+    (e) => {
+      const t = e.target;
+      if (t.closest?.('.sheet')) {
+        footerTap = t.closest('.sheet__foot') ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+        return;
+      }
+      if (!footerTap) return;
+      const tap = footerTap;
+      footerTap = null; // only the very next tap can be the second one of a double tap
+      if (!t.closest?.('.dock')) return;
+      const closedByIt = sheetClosedAt >= tap.at && performance.now() - sheetClosedAt < 350;
+      if (closedByIt && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 40) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    },
+    true,
+  );
 }
 
 // iOS, notably in a home-screen app, can leave the document scrolled after the keyboard closes:

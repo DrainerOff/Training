@@ -176,6 +176,7 @@ test('variant settings in the program editor: one per variant, the same as in th
     await swap.getByRole('button', { name: new RegExp(DUMBBELLS) }).click();
     await expect(swap).toHaveCount(0);
     await expect(panel.locator('.setup')).toHaveText('Настройки: скамья 30°');
+    await page.waitForTimeout(500); // a new tap, not the second tap of the choice above
     await panel.locator('.setup').click();
     const quick = page.getByRole('dialog', { name: `Настройки: ${DUMBBELLS}` });
     await quick.getByLabel('Настройки тренажёра').fill('скамья 45°');
@@ -239,5 +240,85 @@ test('the same pinned header and footer in the other long sheets (320 px), with 
   await page.getByRole('group', { name: 'Раздел' }).getByRole('button', { name: 'Рекорды' }).click();
   await page.getByRole('button', { name: 'Добавить рекорд' }).click();
   await pinned(page.getByRole('dialog', { name: 'Новый рекорд' }), 'Выберите упражнение');
+  await context.close();
+});
+
+test('double taps: «Готово» adds a new exercise once and stays in the editor; «Сохранить» on a set does not log another set', async ({ browser }) => {
+  const { context, page } = await phone(browser, SCREENS[0]);
+  await editor(page);
+  await expect(page.locator('.tabbar')).toHaveCount(0); // the editor is left only by «Назад»
+  const before = await page.locator('.slot-edit').count();
+  await page.getByRole('button', { name: 'Добавить упражнение' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Новое упражнение' });
+  await settled(sheet);
+  await sheet.locator('.sheet__body input').first().fill('Жим в Смите');
+  await sheet.getByLabel('Настройки: Жим в Смите').fill('скамья 3');
+  const done = await sheet.getByRole('button', { name: 'Готово' }).boundingBox();
+  await page.mouse.click(done.x + done.width / 2, done.y + done.height / 2);
+  await page.waitForTimeout(80);
+  await page.mouse.click(done.x + done.width / 2, done.y + done.height / 2);
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('.slot-edit')).toHaveCount(before + 1);
+  await expect(page.getByRole('heading', { name: 'Программа' })).toBeVisible();
+
+  // In a workout: the second tap of «Сохранить» would land on «Записать».
+  await page.getByRole('button', { name: 'Назад' }).click();
+  await page.getByRole('dialog', { name: 'Выйти без сохранения программы?' }).getByRole('button', { name: 'Выйти' }).click();
+  await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 2, day: 1 }));
+  await page.evaluate(() => import('./js/ui/core.js').then(({ app }) => app.ui.go({ tab: 'today', view: null })));
+  await logButton(page).click();
+  await page.locator('.panel').getByRole('button', { name: /^Подход 1: .* Изменить$/ }).click();
+  const edit = page.getByRole('dialog', { name: /^Подход 1:/ });
+  await settled(edit);
+  await edit.getByRole('button', { name: 'Увеличить: Повторения' }).click();
+  const save = await edit.locator('.sheet__foot').getByRole('button', { name: 'Сохранить' }).boundingBox();
+  await page.mouse.click(save.x + save.width / 2, save.y + save.height / 2);
+  await page.waitForTimeout(120);
+  await page.mouse.click(save.x + save.width / 2, save.y + save.height / 2);
+  await page.waitForTimeout(600);
+  const sets = await page.evaluate(() => {
+    const { store } = window.__trainer;
+    const s = store.liveSessions().find((x) => x.status === 'active');
+    return store.setsOf(s.id).map((x) => x.reps);
+  });
+  expect(sets).toEqual([7]);
+  // A tap elsewhere right after is not swallowed.
+  await page.waitForTimeout(500);
+  await logButton(page).click();
+  await expect.poll(() => page.evaluate(() => {
+    const { store } = window.__trainer;
+    return store.setsOf(store.liveSessions().find((x) => x.status === 'active').id).length;
+  })).toBe(2);
+  await context.close();
+});
+
+test('settings typed for a variant follow it when it is renamed; text fields are 16 px (no iOS zoom)', async ({ browser }) => {
+  const { context, page } = await phone(browser, SCREENS[0]);
+  await editor(page);
+  await slot(page, HAMMER).click();
+  const sheet = exerciseSheet(page);
+  await sheet.getByLabel(`Настройки: ${DUMBBELLS}`).fill('скамья 30°');
+  const alts = sheet.locator('.sheet__body textarea').first();
+  await alts.fill('Наклонный жим: Гантели - наклон 30°');
+  await expect(sheet.getByLabel('Настройки: Наклонный жим: Гантели - наклон 30°')).toHaveValue('скамья 30°');
+  for (const f of await sheet.locator('textarea, input').all()) {
+    expect(parseFloat(await f.evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+  }
+  await context.close();
+});
+
+test('«Самочувствие и вес» (Тело): × with changes asks; «Сохранить» is pinned at the bottom', async ({ browser }) => {
+  const { context, page } = await phone(browser, SCREENS[0]);
+  await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
+  await page.getByRole('button', { name: /Записать/ }).first().click();
+  const sheet = page.getByRole('dialog', { name: 'Самочувствие и вес' });
+  await settled(sheet);
+  await expect(sheet.locator('.sheet__foot').getByRole('button', { name: 'Сохранить' })).toBeVisible();
+  await sheet.getByLabel('Заметка').fill('устал');
+  await sheet.getByRole('button', { name: 'Закрыть' }).click();
+  await expect(confirmDrop(page)).toBeVisible();
+  await page.keyboard.press('Escape'); // right after it appears: closes only the question
+  await expect(confirmDrop(page)).toHaveCount(0);
+  await expect(sheet.getByLabel('Заметка')).toHaveValue('устал');
   await context.close();
 });
