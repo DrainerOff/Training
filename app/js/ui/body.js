@@ -46,7 +46,7 @@ export function Body() {
         <div class="stat__unit">кг</div>
       </div>
       <div class="stat">
-        <div class="stat__label">Темп</div>
+        <div class="stat__label">Темп, 4 нед.</div>
         <div class="stat__value">${trend?.perWeek != null ? `${trend.perWeek >= 0 ? '+' : '−'}${fmtNum(Math.abs(trend.perWeek), 2)}` : '–'}</div>
         <div class="stat__unit">кг в неделю</div>
       </div>

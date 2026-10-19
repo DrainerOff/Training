@@ -109,9 +109,13 @@ function PhaseSheet({ id, onClose }) {
     }
   };
   const finish = async () => {
-    await app.store.savePhase({ ...prev, end: today });
-    app.ui.toast('Режим завершён');
-    onClose();
+    try {
+      await app.store.savePhase({ ...prev, end: today });
+      app.ui.toast('Режим завершён');
+      onClose();
+    } catch (err) {
+      fail(err);
+    }
   };
   const remove = async () => {
     const ok = await confirmSheet({ title: 'Удалить режим?', text: 'Взвешивания и тренировки останутся, удалится только сам период и цель.', okLabel: 'Удалить', danger: true });
