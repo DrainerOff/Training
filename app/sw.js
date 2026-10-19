@@ -19,6 +19,7 @@ const SHELL = [
   './js/lib/plateau.js',
   './js/lib/records.js',
   './js/lib/textimport.js',
+  './js/lib/bodydata.js',
   './js/data/db.js',
   './js/data/store.js',
   './js/data/sync.js',
