@@ -190,3 +190,15 @@ test('the app on the phone today (v1.0.2) keeps syncing workouts with an API 4 s
   assert.equal(rows(gas, 'App_Metrics').length, 1);
   assert.equal(store.state.body, undefined, 'v1.0.2 ignores what it does not know');
 });
+
+test('keys are shown in the sheet dialog only, never written to the execution log', () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const key = gas.call('showIngestKey');
+  const next = gas.call('rotateIngestKey');
+  const app = gas.call('rotateToken');
+  gas.call('showToken');
+  const log = gas.logs.join('\n');
+  for (const secret of [token, key, next, app]) assert.ok(!log.includes(secret));
+  assert.match(log, /не записывается в журнал/);
+});

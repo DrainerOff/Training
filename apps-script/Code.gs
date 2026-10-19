@@ -1125,7 +1125,7 @@ function getOrCreateToken_() {
 function rotateToken() {
   var token = newToken_();
   PropertiesService.getScriptProperties().setProperty('API_TOKEN', token);
-  notify_('Новый ключ доступа (старый больше не работает):\n' + token + '\n\nВставьте его в настройки приложения на своих устройствах.');
+  notify_('Новый ключ доступа (старый больше не работает):\n' + token + '\n\nВставьте его в настройки приложения на своих устройствах.', true);
   return token;
 }
 
@@ -1139,7 +1139,7 @@ function setup() {
     'Дальше: Развернуть → Новое развертывание → Веб-приложение.\n' +
     'Выполнять от имени: «Меня». У кого есть доступ: «Все».\n' +
     'Скопируйте URL веб-приложения (оканчивается на /exec) в настройки приложения.';
-  notify_(msg);
+  notify_(msg, true);
   return token;
 }
 
@@ -1161,27 +1161,30 @@ function showIngestKey() {
     key = newToken_();
     props.setProperty('INGEST_KEY', key);
   }
-  notify_('Ключ для «Команд» (только добавляет вес, талию и сон, ничего не читает):\n' + key);
+  notify_('Ключ для «Команд» (только добавляет вес, талию и сон, ничего не читает):\n' + key, true);
   return key;
 }
 
 function rotateIngestKey() {
   var key = newToken_();
   PropertiesService.getScriptProperties().setProperty('INGEST_KEY', key);
-  notify_('Новый ключ для «Команд» (старый больше не работает):\n' + key + '\n\nВставьте его в команду на iPhone.');
+  notify_('Новый ключ для «Команд» (старый больше не работает):\n' + key + '\n\nВставьте его в команду на iPhone.', true);
   return key;
 }
 
 function showToken() {
-  notify_('Ключ доступа:\n' + getOrCreateToken_());
+  notify_('Ключ доступа:\n' + getOrCreateToken_(), true);
 }
 
-function notify_(msg) {
-  Logger.log(msg);
+// A message with a key goes only to the dialog in the sheet, never to the execution log (Apps Script
+// keeps that log in the «Выполнения» history).
+function notify_(msg, secret) {
+  if (!secret) Logger.log(msg);
   try {
     SpreadsheetApp.getUi().alert(msg);
   } catch (e) {
-    // Run from the editor: the message is in the execution log.
+    // Run from the editor: a plain message is in the execution log, a key is not.
+    if (secret) Logger.log('Ключ не записывается в журнал. Откройте таблицу в браузере на компьютере и выберите этот пункт в меню «Тренировки».');
   }
 }
 
