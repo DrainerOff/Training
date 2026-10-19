@@ -13,7 +13,9 @@
 // 2: manual personal records (App_Records); the response's `ack` lists every entity handled,
 // so a client never treats records as saved by a server that doesn't know them.
 // 3: per-variant exercise settings (App_Exercises).
-var API_VERSION = 3;
+// 4: body measurements (App_Body, one real measurement per row) and main sleep per wake date
+// (App_Sleep). Old clients never send them and never receive them.
+var API_VERSION = 4;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -111,8 +113,63 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  // One real measurement per row: a weigh-in, a waist, an arm… measured_at keeps the clock and
+  // offset of the place it was taken. excluded: empty = the app decides, TRUE/FALSE = the owner did.
+  body: {
+    sheet: 'App_Body',
+    cols: [
+      ['date', 'date', 'date'],
+      ['measured_at', 'measuredAt', 'text'],
+      ['kind', 'kind', 'key'],
+      ['value', 'value', 'num'],
+      ['unit', 'unit', 'text'],
+      ['source', 'source', 'text'],
+      ['note', 'note', 'text'],
+      ['excluded', 'excluded', 'tri'],
+      ['edited', 'edited', 'bool'],
+      ['orig_value', 'origValue', 'num'],
+      ['family', 'family', 'key'],
+      ['via', 'via', 'key'],
+      ['src_id', 'srcId', 'key'],
+      ['batch', 'batch', 'key'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
+  // Main sleep of the night that ended on wake_date (Apple Watch stages), hours by stage.
+  sleep: {
+    sheet: 'App_Sleep',
+    cols: [
+      ['wake_date', 'wakeDate', 'date'],
+      ['sleep_h', 'hours', 'num'],
+      ['start', 'start', 'text'],
+      ['end', 'end', 'text'],
+      ['core_h', 'core', 'num'],
+      ['deep_h', 'deep', 'num'],
+      ['rem_h', 'rem', 'num'],
+      ['unspecified_h', 'unspec', 'num'],
+      ['segments', 'segments', 'int'],
+      ['source', 'source', 'text'],
+      ['note', 'note', 'text'],
+      ['edited', 'edited', 'bool'],
+      ['via', 'via', 'key'],
+      ['batch', 'batch', 'key'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
 };
-var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises'];
+var BODY_KINDS = {
+  weight: [20, 300], fat: [2, 70], waist: [10, 250], chest: [10, 250], shoulders: [10, 250], neck: [10, 250],
+  arm_l: [10, 250], arm_r: [10, 250], hips: [10, 250], thigh_l: [10, 250], thigh_r: [10, 250],
+  calf_l: [10, 250], calf_r: [10, 250], head: [10, 250],
+};
+var STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?[+-]\d{2}:\d{2}$/;
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -378,6 +435,7 @@ function toCell_(v, type) {
   if (v === null || v === undefined || v === '') return type === 'bool' ? false : '';
   switch (type) {
     case 'bool':
+    case 'tri':
       return !!v;
     case 'int':
     case 'num':
@@ -412,6 +470,9 @@ function fromCell_(v, type) {
   }
   switch (type) {
     case 'bool':
+      return v === true || v === 'TRUE' || v === 'true' || v === 1;
+    case 'tri':
+      if (v === '' || v === null) return null;
       return v === true || v === 'TRUE' || v === 'true' || v === 1;
     case 'int':
     case 'num':
@@ -460,7 +521,7 @@ function sanitize_(entity, rec) {
       var n = Number(v);
       if (!isFinite(n) || n < 0 || (t !== 'ms' && n > 100000)) ok = false;
       out[f] = t === 'int' ? Math.round(n) : n;
-    } else if (t === 'bool') {
+    } else if (t === 'bool' || t === 'tri') {
       out[f] = !!v;
     } else if (t === 'date') {
       if (!DATE_RE.test(String(v))) ok = false;
@@ -479,6 +540,16 @@ function sanitize_(entity, rec) {
   // A record without what makes it a record is refused (and stays queued on the phone).
   if (entity === 'records' && (!out.date || !out.seriesKey || !(out.reps >= 1) || out.weight == null)) ok = false;
   if (entity === 'exercises' && (!out.seriesKey || out.id !== 'x:' + out.seriesKey)) ok = false;
+  if (entity === 'body') {
+    var range = BODY_KINDS[out.kind];
+    if (!range || out.id.indexOf('b:' + out.kind + ':') !== 0 || !out.date || !STAMP_RE.test(out.measuredAt || '')) ok = false;
+    else if (out.measuredAt.slice(0, 10) !== out.date) ok = false;
+    else if (!out.deleted && !(out.value >= range[0] && out.value <= range[1])) ok = false;
+  }
+  if (entity === 'sleep') {
+    if (!out.wakeDate || out.id !== 's:' + out.wakeDate) ok = false;
+    else if (!out.deleted && !(out.hours > 0 && out.hours <= 24)) ok = false;
+  }
   return ok ? out : null;
 }
 
@@ -700,7 +771,7 @@ function rebuildSummary() {
 
 // ---------------------------------------------------------------------------- manual edits
 
-// Simple trigger: if a row of App_Sets / App_Sessions / App_Metrics / App_Records / App_Exercises is edited by hand,
+// Simple trigger: if a row of an App_* data sheet (App_Sets, App_Body, …) is edited by hand,
 // bump its version so the app pulls the correction on the next sync.
 function onEdit(e) {
   if (!e || !e.range) return;
@@ -755,6 +826,7 @@ function onOpen() {
     .addItem('Сменить ключ доступа (если телефон потерян)', 'rotateToken')
     .addItem('Обновить сводку', 'rebuildSummary')
     .addItem('Описать старые листы (для переноса)', 'describeLegacySheets')
+    .addItem('Резервная копия таблицы', 'backupSpreadsheet')
     .addToUi();
 }
 
@@ -793,6 +865,16 @@ function setup() {
     'Скопируйте URL веб-приложения (оканчивается на /exec) в настройки приложения.';
   notify_(msg);
   return token;
+}
+
+// A full copy of the spreadsheet (every tab, old ones included) next to it in Google Drive.
+// Run it before anything that changes many rows; restoring = opening the copy.
+function backupSpreadsheet() {
+  var ss = ss_();
+  var stamp = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
+  var copy = ss.copy(ss.getName() + ' — резервная копия ' + stamp);
+  notify_('Резервная копия создана:\n' + copy.getName() + '\n' + copy.getUrl());
+  return copy.getId();
 }
 
 function showToken() {

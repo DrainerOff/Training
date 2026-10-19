@@ -128,6 +128,13 @@ export function createGas({ legacy = {}, timeZone = 'Europe/Moscow', code = CODE
       sheets.splice(index, 0, sh);
       return sh;
     },
+    copies: [],
+    copy(name) {
+      const snapshot = sheets.map((sh) => ({ name: sh.name, rows: sh.rows().map((r) => r.slice()) }));
+      const id = `copy-${spreadsheet.copies.length + 1}`;
+      spreadsheet.copies.push({ name, id, sheets: snapshot });
+      return { getName: () => name, getId: () => id, getUrl: () => `https://docs.google.com/spreadsheets/d/${id}` };
+    },
   };
 
   const props = new Map();

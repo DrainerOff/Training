@@ -270,6 +270,8 @@ export function planImport(parsed, { body = new Map(), sleep = new Map() } = {},
   const seen = new Map(); // id base → count, within this file
   const fresh = new Map();
 
+  // Rows of an import the owner undid come back on the next import; rows deleted one by one don't.
+  const revivable = (prev) => prev.deleted && prev.via === 'undone';
   const known = (prev) => {
     if (prev.deleted) plan.deleted++;
     else if (prev.edited) plan.kept++;
@@ -285,7 +287,7 @@ export function planImport(parsed, { body = new Map(), sleep = new Map() } = {},
       }
       seen.set(id, 1);
       const prev = sleep.get(id);
-      if (prev) {
+      if (prev && !revivable(prev)) {
         known(prev);
         continue;
       }
@@ -323,19 +325,19 @@ export function planImport(parsed, { body = new Map(), sleep = new Map() } = {},
     }
     const id = bodyId({ kind: it.kind, family: it.family, utc: it.time.utc, precision: it.time.precision, value: it.value }, n);
     const prev = body.get(id) || (n === 1 ? byMatch.get(matchKey(it.kind, it.family, it.time.utc, it.value)) : null);
-    if (prev) {
+    if (prev && !revivable(prev)) {
       known(prev);
       continue;
     }
     // Same quantity within 3 minutes, a value within 0.1, but not provably the same measurement
     // (another source, or a slightly different reading): left out unless the owner includes it.
-    const near = live.find((r) => {
+    const near = prev ? null : live.find((r) => {
       if (r.kind !== it.kind || Math.abs(r.value - it.value) > 0.1 + 1e-9) return false;
       const t = parseTime(r.measuredAt);
       return t && Math.abs(t.utc - it.time.utc) <= 3 * 60000;
     });
     const rec = {
-      id,
+      id: prev ? prev.id : id,
       kind: it.kind,
       value: it.value,
       origValue: it.value,
