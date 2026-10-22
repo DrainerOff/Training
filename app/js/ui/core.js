@@ -58,6 +58,10 @@ const ICONS = {
   flag: 'M5 21V4h11l-2 4 2 4H5',
   note: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
   tune: 'M4 7h9M17 7h3M15 4v6M4 17h3M11 17h9M9 14v6',
+  scale: 'M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8.5 10a3.5 3.5 0 0 1 7 0M12 10l1.5-2',
+  ruler: 'M3.5 15.5l12-12 5 5-12 12zM7.5 11.5l2 2M10.5 8.5l2 2M13.5 5.5l2 2',
+  moon: 'M20 14.5A8.5 8.5 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z',
+  pulse: 'M3 12h4l2.5-5 4.5 10 2.5-5H21',
 };
 
 export function Icon({ name, label = null }) {
@@ -69,9 +73,12 @@ export function Icon({ name, label = null }) {
 
 // ---------------------------------------------------------------- small components
 
-export function Plate({ week, size = 'chip' }) {
-  const label = `Неделя ${week}`;
-  return html`<span class=${`plate plate--${size} plate--w${week}`} role="img" aria-label=${label}><span>${week}</span></span>`;
+// The week of the 3-week cycle as three segments, the current one in its plate colour (green
+// light week, blue 8–10, red 6–8): «вторая из трёх» reads at a glance, a lone digit does not.
+export function WeekMark({ week, size = 'sm' }) {
+  return html`<span class=${`weekmark weekmark--${size} weekmark--w${week}`} role="img" aria-label=${`Неделя ${week} из 3`}>
+    ${[1, 2, 3].map((w) => html`<i class=${w === week ? 'on' : ''}></i>`)}
+  </span>`;
 }
 
 export function fmtWeight(w, category) {
@@ -240,7 +247,7 @@ export function Stepper({ value, step, min = 0, start = null, onChange, onTap, l
   const base = (d) => (value == null && start != null ? start : (value ?? 0) + d);
   return html`<div class="stepper">
     <button type="button" aria-label=${'Уменьшить: ' + label} onClick=${() => set(base(-step))}>−</button>
-    <button type="button" class=${'stepper__value' + (value == null ? ' stepper__value--empty' : suggested ? ' stepper__value--suggested' : '')}
+    <button type="button" class=${'stepper__value' + (value == null ? ' stepper__value--empty' : suggested ? ' stepper__value--suggested' : '') + (String(shown).length >= 5 ? ' stepper__value--long' : '')}
       aria-label=${label + ': ' + shown + '. Нажмите, чтобы ввести'} onClick=${onTap}>${shown}</button>
     <button type="button" aria-label=${'Увеличить: ' + label} onClick=${() => set(base(step))}>+</button>
   </div>`;

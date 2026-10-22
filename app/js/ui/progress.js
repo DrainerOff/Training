@@ -1,6 +1,6 @@
 // Progress: what needs attention, then per-exercise history with every working set.
 
-import { html, useState, app, Icon, Plate, Seg, fmtWeight, SetText, local } from './core.js';
+import { html, useState, app, Icon, WeekMark, Seg, fmtWeight, SetText, local } from './core.js';
 import { RecordsOverview, openRecordSheet } from './records.js';
 import { derived, latestBodyweight } from './derive.js';
 import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
@@ -25,7 +25,7 @@ export function ProgressList() {
     options=${[{ value: 'progress', label: 'Прогресс' }, { value: 'records', label: 'Рекорды' }]} />`;
   if (mode === 'records') {
     return html`<main class="screen">
-      <header class="topbar"><h1>Рекорды</h1>
+      <header class="topbar topbar--large"><h1>Рекорды</h1>
         <button type="button" class="icon-btn icon-btn--accent" aria-label="Добавить рекорд" onClick=${() => openRecordSheet({})}><${Icon} name="plus" /></button>
       </header>
       ${switcher}
@@ -45,7 +45,8 @@ function ProgressPane({ switcher }) {
   const item = (r) => {
     const last = r.result.counted[r.result.counted.length - 1];
     const d = last?.cmp ? describeComparison({ ...last.cmp, verdict: last.effective }) : null;
-    return html`<li><button type="button" class="row" onClick=${() => open(r.key)}>
+    return html`<li><button type="button" class="row row--spark" onClick=${() => open(r.key)}>
+      <${Spark} exposures=${series.get(r.key) || []} category=${categories.get(r.key)} tone=${STATUS[r.status].tone} />
       <span class="row__title">${r.name}</span>
       <${StatusLabel} status=${r.status} />
       <span class="row__sub">${d
@@ -53,9 +54,10 @@ function ProgressPane({ switcher }) {
         : `${r.sessions} ${r.sessions === 1 ? 'тренировка' : 'тренировки'}, последняя ${fmtDay(r.last.date)}`}</span>
     </button></li>`;
   };
+  const count = (st) => rows.filter((r) => r.status === st).length;
 
   return html`<main class="screen">
-    <header class="topbar"><h1>Прогресс</h1></header>
+    <header class="topbar topbar--large"><h1>Прогресс</h1></header>
     ${switcher}
     <div style="margin-top:12px"></div>
     ${rows.length === 0
@@ -64,6 +66,11 @@ function ProgressPane({ switcher }) {
           <p>После первой тренировки здесь появится история упражнений, а когда неделя цикла повторится — сравнение с ней.</p>
         </div>`
       : html`
+        <section class="scoreboard" aria-label="Сводка">
+          <div><div class="scoreboard__label">Растут</div><span class="num scoreboard__value scoreboard__value--good">${count('progress')}<small aria-hidden="true"> ▲</small></span></div>
+          <div><div class="scoreboard__label">Внимание</div><span class="num scoreboard__value">${attention.length}</span></div>
+          <div><div class="scoreboard__label">Мало данных</div><span class="num scoreboard__value scoreboard__value--muted">${count('insufficient')}</span></div>
+        </section>
         <p class="muted" style="font-size:14px">Сравниваются одинаковые недели цикла: вторая со второй, третья с третьей. Все рабочие подходы, с учётом RIR, боли и техники. Лёгкая неделя в оценку не входит.</p>
         ${attention.length ? html`<h2 class="section-title">Требует внимания</h2><ul class="rows">${attention.map(item)}</ul>` : null}
         ${rest.length ? html`<h2 class="section-title">${attention.length ? 'Остальные' : 'Упражнения'}</h2><ul class="rows">${rest.map(item)}</ul>` : null}
@@ -98,7 +105,7 @@ export function ExerciseDetail({ seriesKey }) {
     <${Seg} label="Фаза" value=${filter} onChange=${setFilter}
       options=${[
         { value: 'heavy', label: 'Тяжёлые' },
-        ...[2, 3, 1].filter((w) => weeksIn.has(w)).map((w) => ({ value: w, label: html`<${Plate} week=${w} size="sm" /> неделя` })),
+        ...[2, 3, 1].filter((w) => weeksIn.has(w)).map((w) => ({ value: w, label: html`<${WeekMark} week=${w} /> ${w === 1 ? 'лёгкая' : `неделя ${w}`}` })),
       ]} />
 
     <div style="margin:12px 0 4px">
@@ -112,9 +119,9 @@ export function ExerciseDetail({ seriesKey }) {
       const d = c?.cmp ? describeComparison({ ...c.cmp, verdict: c.effective || c.cmp.verdict }) : null;
       return html`<div class="expo">
         <div class="expo__head">
-          <${Plate} week=${e.week} size="sm" />
+          <${WeekMark} week=${e.week} />
           <button type="button" class="expo__date link" style="padding:0" onClick=${() => app.ui.go({ view: { type: 'session', id: e.sessionId } })}>${fmtDay(e.date)}</button>
-          <span class="muted">цикл ${e.cycle}, день ${e.day}${e.active ? ', в процессе' : ''}</span>
+          <span class="muted">цикл ${e.cycle}, неделя ${e.week}, день ${e.day}${e.active ? ', в процессе' : ''}</span>
         </div>
         <div class="expo__sets">
           ${e.sets.map((s) => html`<${SetText} set=${s} category=${category} />`)}
@@ -128,6 +135,34 @@ export function ExerciseDetail({ seriesKey }) {
       </div>`;
     })}
   </main>`;
+}
+
+// ---------------------------------------------------------------- sparkline
+
+// The trend of the last heavy-week workouts in a row of the list: the best set of each workout.
+// Bodyweight pull-ups follow the reps. Fewer than two workouts: a dashed stub, no line.
+function Spark({ exposures, category, tone }) {
+  const heavy = exposures.filter((e) => !e.active && e.week !== 1 && e.sets.length).slice(-6);
+  const byReps = category === 'pullup' && !heavy.some((e) => e.sets.some((s) => s.weight > 0));
+  const vals = heavy.map((e) => Math.max(...e.sets.map((s) => (byReps ? s.reps || 0 : value(s, category)))));
+  const w = 44;
+  const h = 28;
+  const color = tone === 'good' ? 'var(--accent-text)' : tone === 'muted' ? 'var(--ghost)' : 'var(--iron)';
+  if (vals.length < 2) {
+    return html`<svg class="spark" width=${w} height=${h} viewBox=${`0 0 ${w} ${h}`} aria-hidden="true">
+      <line x1="2" x2=${w - 9} y1=${h / 2} y2=${h / 2} stroke="var(--hairline)" stroke-width="2" stroke-dasharray="3 4" />
+      <circle cx=${w - 4} cy=${h / 2} r="3.5" fill=${color} />
+    </svg>`;
+  }
+  const lo = Math.min(...vals);
+  const span = Math.max(...vals) - lo || 1;
+  const x = (i) => 3 + (i * (w - 7)) / (vals.length - 1);
+  const y = (v) => (vals.every((u) => u === vals[0]) ? h / 2 : h - 4 - ((v - lo) / span) * (h - 8));
+  const d = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  return html`<svg class="spark" width=${w} height=${h} viewBox=${`0 0 ${w} ${h}`} aria-hidden="true">
+    <path d=${d} fill="none" stroke=${color} stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx=${x(vals.length - 1)} cy=${y(vals[vals.length - 1])} r="3.5" fill=${color} />
+  </svg>`;
 }
 
 // ---------------------------------------------------------------- chart

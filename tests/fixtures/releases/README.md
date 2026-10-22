@@ -2,7 +2,8 @@
 
 Each folder is the app exactly as GitHub Pages served it for that build (`git archive <sha> app`,
 `__BUILD__` stamped like CI does). Fonts and icons are left out; the test server takes them
-from `app/`.
+from `app/`, and the fonts these releases used (Alumni Sans, Golos Text; v1.2 uses the system
+font) from `shared/fonts/`.
 
 * `ea0febc/` — the first public release: no boot.js, hangs on «Загрузка…» when IndexedDB stalls;
 * `7705635/` — with boot.js, but `js/lib/analytics.js` is refused by Safari content blockers

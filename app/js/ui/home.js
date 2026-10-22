@@ -1,9 +1,9 @@
 // "Today" when no workout is running: what's next, what was done last time, one big Start.
 
-import { html, useState, app, Icon, Plate, Sheet, openSheet, SyncBadge, fmtWeight } from './core.js';
+import { html, useState, app, Icon, Sheet, openSheet, SyncBadge, fmtWeight } from './core.js';
 import { derived } from './derive.js';
 import { nextWorkout, findSameSlotSession, itemsForDay, itemTarget } from '../lib/planner.js';
-import { PHASE, phaseSummary, fmtTarget } from '../lib/program.js';
+import { PHASE, phaseSummary, fmtTarget, fmtRange } from '../lib/program.js';
 import { previousExposures } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayWeekday, plural } from '../lib/util.js';
 import { CycleWeekDay } from './workout.js';
@@ -49,12 +49,10 @@ export function Home({ syncStatus }) {
       : null}
 
     <section class="next" aria-label="Следующая тренировка">
-      <${Plate} week=${plan.week} size="hero" />
-      <div>
-        <div class="next__date">${pick ? 'Выбрано вручную' : 'Следующая по плану'}</div>
-        <h2 class="next__title">День ${plan.day}</h2>
-        <div class="next__meta">Цикл ${plan.cycle}. ${PHASE[plan.week].title}: ${phaseSummary(plan.week)}</div>
-      </div>
+      <div class="next__date">${pick ? 'Выбрано вручную' : 'Следующая по плану'}</div>
+      <h2 class="next__title">День ${plan.day}</h2>
+      <div class="next__meta">Цикл ${plan.cycle}. ${PHASE[plan.week].title}: ${phaseSummary(plan.week)}</div>
+      <${CycleMap} plan=${plan} days=${days} sessions=${sessions} />
     </section>
 
     ${dup ? html`<p class="warn-line" style="margin:-8px 0 12px">Такая тренировка уже записана: ${fmtDay(dup.date)}. Проверьте день и неделю.</p>` : null}
@@ -89,6 +87,23 @@ export function Home({ syncStatus }) {
       <button type="button" class="btn btn--primary btn--block btn--big" onClick=${() => start()}>Начать тренировку</button>
     </div>
   </main>`;
+}
+
+// Where the next workout sits in the cycle: three weeks (light, 8–10, 6–8), a pip per day.
+// Filled pips are workouts done in this cycle, the amber one is the next; a missed day stays empty.
+function CycleMap({ plan, days, sessions }) {
+  const done = new Set(sessions.filter((s) => !s.deleted && s.status === 'done' && s.cycle === plan.cycle).map((s) => `${s.week}:${s.day}`));
+  const count = [1, 2, 3].reduce((n, w) => n + days.filter((d) => done.has(`${w}:${d}`)).length, 0);
+  const label = `Цикл ${plan.cycle}: неделя ${plan.week} из 3, день ${days.indexOf(plan.day) + 1} из ${days.length}. В этом цикле выполнено тренировок: ${count} из ${days.length * 3}.`;
+  return html`<div class="cycle" role="img" aria-label=${label}>
+    ${[1, 2, 3].map((w) => html`<div class=${`cycle__week cycle__week--w${w}` + (w === plan.week ? ' cycle__week--now' : '')}>
+      <div class="cycle__name">Неделя ${w}</div>
+      <div class="cycle__what">${w === 1 ? 'лёгкая' : `${fmtRange(PHASE[w].reps)} повт.`}</div>
+      <div class="cycle__days">
+        ${days.map((d) => html`<i class=${done.has(`${w}:${d}`) ? 'done' : w === plan.week && d === plan.day ? 'next' : ''}></i>`)}
+      </div>
+    </div>`)}
+  </div>`;
 }
 
 // Shown once after the bundled import from the old Google Sheet: what came in, what was skipped.

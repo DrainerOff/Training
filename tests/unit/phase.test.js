@@ -1,7 +1,7 @@
 // Bulk / cut / maintenance analytics (lib/phase.js). Synthetic data only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MODES, addDays, phaseOn, rateOf, weeklyWeights, rateStatus, waistVsWeight, strengthOver, phaseReport } from '../../app/js/lib/phase.js';
+import { MODES, addDays, phaseOn, rateOf, weeklyWeights, rateStatus, targetBand, waistVsWeight, strengthOver, phaseReport } from '../../app/js/lib/phase.js';
 import { createStore } from '../../app/js/data/store.js';
 import { memoryAdapter } from '../../app/js/data/db.js';
 
@@ -23,6 +23,10 @@ test('rate: a steady +0.2 kg a week at 80 kg is +0.25 % a week; too few days is 
 });
 
 test('rate against the target', () => {
+  // The corridor the gauge on «Тело» draws is the same band the status uses.
+  assert.equal(targetBand(0.25), 0.1);
+  assert.equal(targetBand(-0.5), 0.2);
+  assert.equal(targetBand(0), 0.1);
   assert.equal(rateStatus(0.3, 0.25), 'on');
   assert.equal(rateStatus(0.6, 0.25), 'fast');
   assert.equal(rateStatus(0.05, 0.25), 'slow');

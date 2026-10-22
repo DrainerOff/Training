@@ -294,24 +294,29 @@ async function syncFirst() {
   return st?.state === 'idle';
 }
 
+// A file picked in any «Загрузить из файла» control: parse, compare with the sheet, preview.
+// `picked` runs once a file is chosen (the «+» menu closes itself there).
+export async function importFile(e, picked = null) {
+  const input = e.currentTarget; // currentTarget is null after the first await
+  const f = input.files?.[0];
+  input.value = '';
+  if (!f) return;
+  picked?.();
+  if (f.size > 20 * 1024 * 1024) return app.ui.toast('Файл больше 20 МБ — это не экспорт замеров');
+  try {
+    const parsed = parseFile(await f.text());
+    if (!parsed.format) return app.ui.toast(parsed.errors[0]?.reason || 'Формат файла не распознан');
+    const synced = await syncFirst();
+    const st = app.store.state;
+    const plan = planImport(parsed, { body: st.body, sleep: st.sleep });
+    openSheet((close) => html`<${ImportSheet} plan=${plan} file=${f.name} synced=${synced} onClose=${close} />`);
+  } catch (err) {
+    fail(err);
+  }
+}
+
 export function ImportButton() {
-  const pick = async (e) => {
-    const input = e.currentTarget; // currentTarget is null after the first await
-    const f = input.files?.[0];
-    input.value = '';
-    if (!f) return;
-    if (f.size > 20 * 1024 * 1024) return app.ui.toast('Файл больше 20 МБ — это не экспорт замеров');
-    try {
-      const parsed = parseFile(await f.text());
-      if (!parsed.format) return app.ui.toast(parsed.errors[0]?.reason || 'Формат файла не распознан');
-      const synced = await syncFirst();
-      const st = app.store.state;
-      const plan = planImport(parsed, { body: st.body, sleep: st.sleep });
-      openSheet((close) => html`<${ImportSheet} plan=${plan} file=${f.name} synced=${synced} onClose=${close} />`);
-    } catch (err) {
-      fail(err);
-    }
-  };
+  const pick = (e) => importFile(e);
   return html`<label class="btn btn--block body-import">
     Загрузить из файла (CSV)
     <input type="file" accept=".csv,text/csv,text/plain" class="sr-only" onChange=${pick} />
