@@ -17,7 +17,7 @@ export function History({ syncStatus }) {
   const cycles = [...groups.keys()].sort((a, b) => b - a);
 
   return html`<main class="screen">
-    <header class="topbar">
+    <header class="topbar topbar--large">
       <h1>История</h1>
       <${SyncBadge} status=${syncStatus} onClick=${() => app.ui.go({ view: { type: 'settings' } })} />
     </header>

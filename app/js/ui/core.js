@@ -240,7 +240,7 @@ export function Stepper({ value, step, min = 0, start = null, onChange, onTap, l
   const base = (d) => (value == null && start != null ? start : (value ?? 0) + d);
   return html`<div class="stepper">
     <button type="button" aria-label=${'Уменьшить: ' + label} onClick=${() => set(base(-step))}>−</button>
-    <button type="button" class=${'stepper__value' + (value == null ? ' stepper__value--empty' : suggested ? ' stepper__value--suggested' : '')}
+    <button type="button" class=${'stepper__value' + (value == null ? ' stepper__value--empty' : suggested ? ' stepper__value--suggested' : '') + (String(shown).length >= 5 ? ' stepper__value--long' : '')}
       aria-label=${label + ': ' + shown + '. Нажмите, чтобы ввести'} onClick=${onTap}>${shown}</button>
     <button type="button" aria-label=${'Увеличить: ' + label} onClick=${() => set(base(step))}>+</button>
   </div>`;

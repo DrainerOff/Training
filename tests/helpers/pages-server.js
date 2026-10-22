@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const APP = path.join(ROOT, 'app');
 export const RELEASES = path.join(ROOT, 'tests/fixtures/releases');
+// Files the old releases load but the current app no longer has (the v1.0–v1.1 fonts).
+const SHARED = path.join(RELEASES, 'shared');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -51,9 +53,10 @@ export async function startPages({ base = '/Training/' } = {}) {
       res.writeHead(override.status || 200, headers).end(override.body);
       return;
     }
-    // Files the release fixture leaves out (fonts, icons) come from the current app.
+    // Files the release fixture leaves out (fonts, icons) come from the current app, or, if the
+    // current app has dropped them, from the shared fixtures.
     let file = null;
-    for (const dir of [release.root, APP]) {
+    for (const dir of [release.root, APP, SHARED]) {
       const candidate = path.normalize(path.join(dir, rel));
       if (candidate.startsWith(dir) && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
         file = candidate;

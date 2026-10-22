@@ -25,7 +25,7 @@ export function ProgressList() {
     options=${[{ value: 'progress', label: 'Прогресс' }, { value: 'records', label: 'Рекорды' }]} />`;
   if (mode === 'records') {
     return html`<main class="screen">
-      <header class="topbar"><h1>Рекорды</h1>
+      <header class="topbar topbar--large"><h1>Рекорды</h1>
         <button type="button" class="icon-btn icon-btn--accent" aria-label="Добавить рекорд" onClick=${() => openRecordSheet({})}><${Icon} name="plus" /></button>
       </header>
       ${switcher}
@@ -55,7 +55,7 @@ function ProgressPane({ switcher }) {
   };
 
   return html`<main class="screen">
-    <header class="topbar"><h1>Прогресс</h1></header>
+    <header class="topbar topbar--large"><h1>Прогресс</h1></header>
     ${switcher}
     <div style="margin-top:12px"></div>
     ${rows.length === 0
