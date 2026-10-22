@@ -111,17 +111,35 @@ await shot('30-body', { full: true });
 await tryClick(p.locator('.phase').getByRole('button', { name: 'Изменить' }));
 await shot('31-sheet-phase');
 await closeSheet();
-if (await tryClick(p.getByRole('button', { name: 'Добавить замер' }))) {
+const addMenu = p.getByRole('button', { name: /Добавить: / });
+const before = !(await addMenu.count());
+if (before) {
+  // v1.1: two buttons on the screen.
+  if (await tryClick(p.getByRole('button', { name: 'Добавить замер' }))) {
+    await shot('32-sheet-addbody');
+    await closeSheet();
+  }
+  if (await tryClick(p.getByRole('button', { name: 'Записать самочувствие' }))) {
+    await shot('33-sheet-wellbeing');
+    await closeSheet();
+  }
+} else {
+  await addMenu.click();
+  await shot('34-add-menu');
+  await p.getByRole('dialog').getByRole('button', { name: /Добавить замер/ }).click();
   await shot('32-sheet-addbody');
   await closeSheet();
-}
-if (await tryClick(p.getByRole('button', { name: 'Записать самочувствие' }))) {
+  await addMenu.click();
+  await p.getByRole('dialog').getByRole('button', { name: /Записать самочувствие/ }).click();
   await shot('33-sheet-wellbeing');
   await closeSheet();
+  await tryClick(p.locator('.row', { hasText: 'Взвешивания' }));
+  await shot('35-sheet-weighins');
+  await closeSheet();
+  await tryClick(p.locator('.tile', { hasText: 'Силовые' }));
+  await shot('36-sheet-strength');
+  await closeSheet();
 }
-await tryClick(p.getByRole('button', { name: /Добавить: / }));
-await shot('34-add-menu');
-await closeSheet();
 
 await tab('Тренировка');
 await tryClick(p.getByRole('button', { name: 'Настройки' }));

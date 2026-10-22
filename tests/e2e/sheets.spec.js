@@ -310,7 +310,8 @@ test('settings typed for a variant follow it when it is renamed; text fields are
 test('«Самочувствие и вес» (Тело): × with changes asks; «Сохранить» is pinned at the bottom', async ({ browser }) => {
   const { context, page } = await phone(browser, SCREENS[0]);
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
-  await page.getByRole('button', { name: /Записать/ }).first().click();
+  await page.getByRole('button', { name: 'Добавить: самочувствие, замер или файл' }).click();
+  await page.getByRole('dialog', { name: 'Добавить' }).getByRole('button', { name: /Записать самочувствие/ }).click();
   const sheet = page.getByRole('dialog', { name: 'Самочувствие и вес' });
   await settled(sheet);
   await expect(sheet.locator('.sheet__foot').getByRole('button', { name: 'Сохранить' })).toBeVisible();

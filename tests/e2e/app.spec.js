@@ -146,6 +146,7 @@ test('progress compares the same week of the cycle and keeps alternatives apart'
   await seedHistory(page);
   await page.getByRole('button', { name: 'Прогресс' }).click();
   const row = (name) => page.locator('.row').filter({ hasText: name }).first();
+  await expect(page.locator('.scoreboard')).toHaveText(/Растут\s*2.*Внимание\s*1.*Мало данных\s*2/);
   await expect(row('Жим штанги под наклоном')).toContainText('Прогресс');
   await expect(row('Жим штанги под наклоном')).toContainText('+2 повторения при том же весе');
   await expect(row('Сгибание ног лёжа')).toContainText('Разовая просадка');

@@ -58,6 +58,10 @@ const ICONS = {
   flag: 'M5 21V4h11l-2 4 2 4H5',
   note: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
   tune: 'M4 7h9M17 7h3M15 4v6M4 17h3M11 17h9M9 14v6',
+  scale: 'M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8.5 10a3.5 3.5 0 0 1 7 0M12 10l1.5-2',
+  ruler: 'M3.5 15.5l12-12 5 5-12 12zM7.5 11.5l2 2M10.5 8.5l2 2M13.5 5.5l2 2',
+  moon: 'M20 14.5A8.5 8.5 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z',
+  pulse: 'M3 12h4l2.5-5 4.5 10 2.5-5H21',
 };
 
 export function Icon({ name, label = null }) {

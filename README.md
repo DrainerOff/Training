@@ -10,6 +10,7 @@
 <img src="docs/screens/workout.png" width="190" alt="Запись подхода">
 <img src="docs/screens/progress-list.png" width="190" alt="Прогресс">
 <img src="docs/screens/progress.png" width="190" alt="История упражнения">
+<img src="docs/screens/body.png" width="190" alt="Тело: режим, темп и вес">
 </p>
 
 <sub>На скриншотах — тестовые данные из `tests/fixtures`.</sub>

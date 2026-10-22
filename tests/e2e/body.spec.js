@@ -40,8 +40,19 @@ async function open(page) {
   await ready(page);
   await page.getByRole('button', { name: 'Понятно' }).click();
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
-  await expect(page.getByRole('heading', { name: 'Тело и восстановление' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Тело', exact: true })).toBeVisible();
 }
+
+// Raw data sits behind the «Данные» rows; the «+» opens the menu of what can be added.
+async function weighIns(page) {
+  await page.locator('main .row', { hasText: 'Взвешивания' }).click();
+  return page.getByRole('dialog', { name: 'Вес' });
+}
+async function addMenu(page, item) {
+  await page.getByRole('button', { name: 'Добавить: самочувствие, замер или файл' }).click();
+  await page.getByRole('dialog', { name: 'Добавить' }).getByRole('button', { name: item }).click();
+}
+const waistTile = (page) => page.locator('.tile', { hasText: 'Талия' });
 
 async function upload(page, name, text) {
   await page.locator('.body-import input[type=file]').setInputFiles({ name, mimeType: 'text/csv', buffer: Buffer.from(text, 'utf8') });
@@ -67,9 +78,10 @@ test('import with a preview; re-import adds nothing; undo removes the whole impo
   expect(await live(page, 'body')).toBe(6);
 
   // The 94 kg weigh-in is flagged, not deleted, and stays out of the average.
-  const odd = page.locator('main .row', { hasText: '94 кг' });
-  await expect(odd).toContainText('под вопросом');
-  await expect(page.locator('.stat').first()).not.toContainText('–');
+  let list = await weighIns(page);
+  await expect(list.locator('.row', { hasText: '94 кг' })).toContainText('под вопросом');
+  await list.getByRole('button', { name: 'Закрыть' }).click();
+  await expect(page.locator('.weight-card')).toContainText('за 4 недели');
 
   sheet = await upload(page, 'weight.csv', WEIGHT);
   await expect(sheet.getByRole('listitem').filter({ hasText: 'Уже есть' })).toContainText('6');
@@ -79,7 +91,8 @@ test('import with a preview; re-import adds nothing; undo removes the whole impo
   sheet = await upload(page, 'fitdays.csv', FITDAYS);
   await expect(sheet).toContainText('Замеры Fitdays+');
   await sheet.getByRole('button', { name: 'Загрузить 2' }).click();
-  await expect(page.locator('main .row', { hasText: 'Талия' })).toContainText('84,5 см');
+  await expect(waistTile(page)).toContainText('84,5');
+  await expect(page.locator('main .row', { hasText: 'Обхваты' })).toContainText('талия 84,5');
 
   sheet = await upload(page, 'sleep.csv', SLEEP);
   await sheet.getByRole('button', { name: 'Загрузить 2' }).click();
@@ -99,23 +112,26 @@ test('import with a preview; re-import adds nothing; undo removes the whole impo
 
 test('manual measurement, a correction and a deletion survive a re-import, a relaunch and offline', async ({ page, context }) => {
   await open(page);
-  await page.getByRole('button', { name: 'Добавить замер' }).click();
+  await addMenu(page, 'Добавить замер');
   let sheet = page.getByRole('dialog', { name: 'Новый замер' });
   await sheet.getByLabel('Что измерили').selectOption('waist');
   await sheet.getByLabel(/Значение/).fill('85,5');
   await sheet.getByLabel('Дата').fill('2026-10-10');
   await sheet.getByLabel('Время').fill('08:00');
   await sheet.getByRole('button', { name: 'Сохранить' }).click();
-  await expect(page.locator('main .row', { hasText: 'Талия' })).toContainText('85,5 см');
+  await expect(waistTile(page)).toContainText('85,5');
 
   sheet = await upload(page, 'weight.csv', WEIGHT);
   await sheet.getByRole('button', { name: 'Загрузить 6' }).click();
-  await page.locator('main .row', { hasText: '79,85 кг' }).click();
-  sheet = page.getByRole('dialog', { name: 'Вес' });
+  let list = await weighIns(page);
+  await list.locator('.row', { hasText: '79,85 кг' }).click();
+  sheet = page.getByRole('dialog', { name: 'Вес' }).last();
   await sheet.getByLabel(/Значение/).fill('79,5');
   await sheet.getByRole('button', { name: 'Сохранить' }).click();
-  await page.locator('main .row', { hasText: '80,3 кг' }).click();
-  await page.getByRole('dialog', { name: 'Вес' }).getByRole('button', { name: 'Удалить' }).click();
+  await list.locator('.row', { hasText: '80,3 кг' }).click();
+  await page.getByRole('dialog', { name: 'Вес' }).last().getByRole('button', { name: 'Удалить' }).click();
+  await expect(list.locator('.row', { hasText: '80,3 кг' })).toContainText('удалён');
+  await list.getByRole('button', { name: 'Закрыть' }).click();
 
   sheet = await upload(page, 'weight.csv', WEIGHT);
   await expect(sheet.getByRole('listitem').filter({ hasText: 'Исправлены вручную' })).toContainText('1');
@@ -126,9 +142,10 @@ test('manual measurement, a correction and a deletion survive a re-import, a rel
   await page.reload();
   await ready(page);
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
-  await expect(page.locator('main .row', { hasText: '79,5 кг' })).toContainText('исправлено');
-  await expect(page.locator('main .row', { hasText: '80,3 кг' })).toHaveCount(0);
-  await expect(page.locator('main .row', { hasText: 'Талия' })).toContainText('85,5 см');
+  await expect(waistTile(page)).toContainText('85,5');
+  list = await weighIns(page);
+  await expect(list.locator('.row', { hasText: '79,5 кг' })).toContainText('исправлено');
+  await expect(list.locator('.row', { hasText: '80,3 кг' })).toContainText('удалён');
   await context.setOffline(false);
 });
 
@@ -248,7 +265,7 @@ test('smallest iPhone: the tab and the import preview fit without sideways scrol
   const go = await sheet.getByRole('button', { name: 'Загрузить 2' }).boundingBox();
   expect(go.y + go.height).toBeLessThanOrEqual(568.5);
   await sheet.getByRole('button', { name: 'Загрузить 2' }).click();
-  await page.getByRole('button', { name: 'Добавить замер' }).click();
+  await addMenu(page, 'Добавить замер');
   const add = page.getByRole('dialog', { name: 'Новый замер' });
   await page.waitForTimeout(350);
   const save = await add.getByRole('button', { name: 'Сохранить' }).boundingBox();
@@ -308,7 +325,7 @@ test('bulk phase: set it, an honest «данных недостаточно», t
   await expect(sheet).toHaveCount(0);
   await expect(card).toContainText('Набор');
   await expect(card).toContainText('Темп веса: данных недостаточно');
-  await expect(card).toContainText('Талия: нужны 2 замера');
+  await expect(waistTile(page)).toContainText('нужны 2 замера');
 
   // Synthetic weigh-ins: +0.2 kg a week from 80 kg, every day of the phase.
   await page.evaluate(async (from) => {
@@ -322,9 +339,10 @@ test('bulk phase: set it, an honest «данных недостаточно», t
   }, start);
   await expect(card).toContainText('в пределах цели');
   await expect(card).toContainText('По 28 дням со взвешиванием');
-  await card.getByText('Средний вес по неделям').click();
+  await expect(page.locator('.gauge')).toHaveAttribute('aria-label', /коридор цели от \+0,15 до \+0,35/);
+  await page.getByText('Средний вес по неделям').click();
   // Full weeks have an average; the week in progress may show only how many weigh-ins it has.
-  expect(await card.locator('.phase__weeks li', { hasText: 'кг' }).count()).toBeGreaterThanOrEqual(3);
+  expect(await page.locator('.phase__weeks li', { hasText: 'кг' }).count()).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   // Survives a relaunch.

@@ -65,9 +65,12 @@ export function weeklyWeights(days, { from, to }) {
   });
 }
 
-// Where the rate stands against the target. The band is ±40 % of the target, at least ±0.1 % a week.
+// The corridor around the target: ±40 % of the target, at least ±0.1 % a week.
+export const targetBand = (target) => Math.max(0.1, Math.abs(target) * 0.4);
+
+// Where the rate stands against the target.
 export function rateStatus(pct, target) {
-  const band = Math.max(0.1, Math.abs(target) * 0.4);
+  const band = targetBand(target);
   if (Math.abs(pct - target) <= band) return 'on';
   if (target === 0) return pct > 0 ? 'up' : 'down';
   if (Math.sign(pct) !== Math.sign(target) && Math.abs(pct) > 0.1) return 'reverse';
