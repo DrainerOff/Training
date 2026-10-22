@@ -46,7 +46,7 @@ async function open(page) {
 // Raw data sits behind the «Данные» rows; the «+» opens the menu of what can be added.
 async function weighIns(page) {
   await page.locator('main .row', { hasText: 'Взвешивания' }).click();
-  return page.getByRole('dialog', { name: 'Вес' });
+  return page.getByRole('dialog', { name: 'Вес' }).first(); // a weigh-in opens over it, also named «Вес»
 }
 async function addMenu(page, item) {
   await page.getByRole('button', { name: 'Добавить: самочувствие, замер или файл' }).click();
@@ -131,6 +131,7 @@ test('manual measurement, a correction and a deletion survive a re-import, a rel
   await list.locator('.row', { hasText: '80,3 кг' }).click();
   await page.getByRole('dialog', { name: 'Вес' }).last().getByRole('button', { name: 'Удалить' }).click();
   await expect(list.locator('.row', { hasText: '80,3 кг' })).toContainText('удалён');
+  await expect(page.getByRole('dialog', { name: 'Вес' })).toHaveCount(1); // the record sheet has slid away
   await list.getByRole('button', { name: 'Закрыть' }).click();
 
   sheet = await upload(page, 'weight.csv', WEIGHT);
