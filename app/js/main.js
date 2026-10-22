@@ -10,7 +10,7 @@ import { app } from './ui/core.js';
 import { applyTheme } from './ui/settings.js';
 import { applyLegacyImport } from './data/legacy-import.js';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 // Replaced with the commit hash on deploy (same as in sw.js) — shown in Settings.
 export const BUILD = '__BUILD__';
 
