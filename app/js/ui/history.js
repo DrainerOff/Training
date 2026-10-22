@@ -1,7 +1,7 @@
 // Workout history: the last 8 weeks at a glance, then workouts grouped by month and cycle.
 // Tapping a workout opens it for viewing and editing.
 
-import { html, app, Plate, SyncBadge } from './core.js';
+import { html, app, WeekMark, SyncBadge } from './core.js';
 import { derived, recordsDerived } from './derive.js';
 import { fmtDayShort, fmtNum, isoDate, parseISODate, plural } from '../lib/util.js';
 
@@ -54,9 +54,9 @@ export function History({ syncStatus }) {
                 const d = parseISODate(s.date);
                 return html`<li><button type="button" class="row row--day" onClick=${() => app.ui.go({ view: { type: 'session', id: s.id } })}>
                   <span class="day-num"><span class="num">${d.getDate()}</span><small>${WEEKDAYS[d.getDay()]}</small></span>
-                  <span class="row__lead"><${Plate} week=${s.week} size="sm" /><span class="row__title">День ${s.day}</span></span>
+                  <span class="row__lead"><span class="row__title">День ${s.day}</span><${WeekMark} week=${s.week} /></span>
                   <span class="muted" style="font-size:14px">${s.status === 'done' ? '' : 'в процессе'}</span>
-                  <span class="row__sub">${ex} ${plural(ex, 'упражнение', 'упражнения', 'упражнений')}, ${sets.length} ${plural(sets.length, 'подход', 'подхода', 'подходов')}${rec
+                  <span class="row__sub">неделя ${s.week} · ${ex} ${plural(ex, 'упражнение', 'упражнения', 'упражнений')}, ${sets.length} ${plural(sets.length, 'подход', 'подхода', 'подходов')}${rec
                     ? html` · <span class="row__accent">${rec} ${plural(rec, 'рекорд', 'рекорда', 'рекордов')}</span>`
                     : null}</span>
                 </button></li>`;

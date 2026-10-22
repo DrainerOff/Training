@@ -1,6 +1,6 @@
 // Progress: what needs attention, then per-exercise history with every working set.
 
-import { html, useState, app, Icon, Plate, Seg, fmtWeight, SetText, local } from './core.js';
+import { html, useState, app, Icon, WeekMark, Seg, fmtWeight, SetText, local } from './core.js';
 import { RecordsOverview, openRecordSheet } from './records.js';
 import { derived, latestBodyweight } from './derive.js';
 import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
@@ -105,7 +105,7 @@ export function ExerciseDetail({ seriesKey }) {
     <${Seg} label="Фаза" value=${filter} onChange=${setFilter}
       options=${[
         { value: 'heavy', label: 'Тяжёлые' },
-        ...[2, 3, 1].filter((w) => weeksIn.has(w)).map((w) => ({ value: w, label: html`<${Plate} week=${w} size="sm" /> неделя` })),
+        ...[2, 3, 1].filter((w) => weeksIn.has(w)).map((w) => ({ value: w, label: html`<${WeekMark} week=${w} /> ${w === 1 ? 'лёгкая' : `неделя ${w}`}` })),
       ]} />
 
     <div style="margin:12px 0 4px">
@@ -119,9 +119,9 @@ export function ExerciseDetail({ seriesKey }) {
       const d = c?.cmp ? describeComparison({ ...c.cmp, verdict: c.effective || c.cmp.verdict }) : null;
       return html`<div class="expo">
         <div class="expo__head">
-          <${Plate} week=${e.week} size="sm" />
+          <${WeekMark} week=${e.week} />
           <button type="button" class="expo__date link" style="padding:0" onClick=${() => app.ui.go({ view: { type: 'session', id: e.sessionId } })}>${fmtDay(e.date)}</button>
-          <span class="muted">цикл ${e.cycle}, день ${e.day}${e.active ? ', в процессе' : ''}</span>
+          <span class="muted">цикл ${e.cycle}, неделя ${e.week}, день ${e.day}${e.active ? ', в процессе' : ''}</span>
         </div>
         <div class="expo__sets">
           ${e.sets.map((s) => html`<${SetText} set=${s} category=${category} />`)}

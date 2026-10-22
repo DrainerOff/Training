@@ -31,7 +31,6 @@
   --caution: #e0a10b;
   --good: #8a5a00;
   --bad: #c22436;
-  --on-plate: #ffffff;
   --seg-on: #ffffff;
   --tabbar-bg: rgba(248, 248, 246, 0.94);
   --shadow-raised: 0 1px 0 rgba(11, 13, 15, 0.04), 0 8px 24px -14px rgba(11, 13, 15, 0.22);
@@ -392,68 +391,38 @@ p {
 
 /* ---------------------------------------------------------------- plate */
 
-.plate {
-  --c: var(--plate-1);
-  display: inline-grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--c);
-  color: var(--on-plate);
-  font-family: var(--font-num);
-  font-weight: 800;
-  line-height: 1;
+/* the week of the cycle: three segments, the current one in its plate colour */
+.weekmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex: none;
-  position: relative;
+  vertical-align: middle;
 }
-.plate--w1 {
-  --c: var(--plate-1);
+.weekmark i {
+  width: 7px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--fill-strong);
 }
-.plate--w2 {
-  --c: var(--plate-2);
-}
-.plate--w3 {
-  --c: var(--plate-3);
-}
-.plate--chip {
-  width: 30px;
-  height: 30px;
-  font-size: 16px;
-  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--c) 70%, #000);
-}
-.plate--sm {
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
-}
-.plate--hero {
-  width: 84px;
-  height: 84px;
-  font-size: 46px;
-  box-shadow:
-    inset 0 0 0 5px color-mix(in srgb, var(--c) 72%, #000),
-    inset 0 0 0 6.5px color-mix(in srgb, var(--c) 85%, #fff);
-}
-.plate--hero::after {
-  content: '';
-  position: absolute;
+.weekmark--md i {
   width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--chalk);
-  bottom: 9px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 70%, #000);
+  height: 18px;
+  border-radius: 3px;
 }
-.plate--hero span {
-  transform: translateY(-4px);
+.weekmark--w1 i.on {
+  background: var(--plate-1);
+}
+.weekmark--w2 i.on {
+  background: var(--plate-2);
+}
+.weekmark--w3 i.on {
+  background: var(--plate-3);
 }
 
 /* ---------------------------------------------------------------- home */
 
 .next {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 16px;
-  align-items: center;
   margin: 4px 0 20px;
 }
 .next__title {
@@ -474,6 +443,67 @@ p {
   font-weight: 500;
   color: var(--steel);
   margin-bottom: 4px;
+}
+/* Home: the cycle as three weeks with a pip per day */
+.cycle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.cycle__week {
+  padding-top: 8px;
+  border-top: 3px solid var(--fill-strong);
+}
+.cycle__week--now.cycle__week--w1 {
+  border-top-color: var(--plate-1);
+}
+.cycle__week--now.cycle__week--w2 {
+  border-top-color: var(--plate-2);
+}
+.cycle__week--now.cycle__week--w3 {
+  border-top-color: var(--plate-3);
+}
+.cycle__name {
+  font-size: 12px;
+  color: var(--steel);
+}
+.cycle__what {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--steel);
+  white-space: nowrap;
+}
+.cycle__week--now .cycle__name,
+.cycle__week--now .cycle__what {
+  color: var(--iron);
+}
+.cycle__week--now .cycle__what {
+  font-weight: 800;
+}
+.cycle__days {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cycle__days i {
+  flex: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--fill-strong);
+}
+.cycle__week--w1 .cycle__days i.done {
+  background: var(--plate-1);
+}
+.cycle__week--w2 .cycle__days i.done {
+  background: var(--plate-2);
+}
+.cycle__week--w3 .cycle__days i.done {
+  background: var(--plate-3);
+}
+.cycle__days i.next {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .plan-list {
   list-style: none;

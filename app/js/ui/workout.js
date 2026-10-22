@@ -1,7 +1,7 @@
 // The workout screen — used between sets. Everything the hand needs is in the bottom dock.
 
 import {
-  html, useState, useEffect, app, Icon, Plate, Sheet, openSheet, NumberPad, Stepper, RirPicker, Toggle, Seg,
+  html, useState, useEffect, app, Icon, WeekMark, Sheet, openSheet, NumberPad, Stepper, RirPicker, Toggle, Seg,
   fmtWeight, SyncBadge, useNow, local, confirmSheet,
 } from './core.js';
 import { derived, latestBodyweight, recordsDerived } from './derive.js';
@@ -87,7 +87,7 @@ export function Workout({ session, mode = 'live', syncStatus }) {
     <main class="screen screen--with-dock" style=${`--phase:${phase}`}>
       <header class="topbar wk-head">
         ${live ? null : html`<button type="button" class="icon-btn" onClick=${() => app.ui.back()} aria-label="Назад"><${Icon} name="back" /></button>`}
-        <${Plate} week=${session.week} />
+        <${WeekMark} week=${session.week} size="md" />
         <div class="wk-head__text">
           <div class="wk-head__title">День ${session.day}${session.date !== isoDate() ? `, ${fmtDay(session.date)}` : ''}</div>
         </div>
@@ -636,7 +636,7 @@ export function CycleWeekDay({ value, days, onChange }) {
     <div class="sheet__section">
       <div class="sheet__label">Неделя цикла</div>
       <${Seg} fill label="Неделя цикла" value=${value.week} onChange=${(week) => onChange({ ...value, week })}
-        options=${[1, 2, 3].map((w) => ({ value: w, label: html`<${Plate} week=${w} size="sm" /> ${w === 1 ? 'лёгкая' : PHASE[w].reps.join('–')}` }))} />
+        options=${[1, 2, 3].map((w) => ({ value: w, label: html`<${WeekMark} week=${w} /> ${w === 1 ? 'лёгкая' : PHASE[w].reps.join('–')}` }))} />
     </div>
     <div class="sheet__section">
       <div class="sheet__label">День</div>

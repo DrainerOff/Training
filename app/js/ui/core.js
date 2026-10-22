@@ -73,9 +73,12 @@ export function Icon({ name, label = null }) {
 
 // ---------------------------------------------------------------- small components
 
-export function Plate({ week, size = 'chip' }) {
-  const label = `Неделя ${week}`;
-  return html`<span class=${`plate plate--${size} plate--w${week}`} role="img" aria-label=${label}><span>${week}</span></span>`;
+// The week of the 3-week cycle as three segments, the current one in its plate colour (green
+// light week, blue 8–10, red 6–8): «вторая из трёх» reads at a glance, a lone digit does not.
+export function WeekMark({ week, size = 'sm' }) {
+  return html`<span class=${`weekmark weekmark--${size} weekmark--w${week}`} role="img" aria-label=${`Неделя ${week} из 3`}>
+    ${[1, 2, 3].map((w) => html`<i class=${w === week ? 'on' : ''}></i>`)}
+  </span>`;
 }
 
 export function fmtWeight(w, category) {
