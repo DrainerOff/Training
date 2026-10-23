@@ -4,7 +4,7 @@
 // based on; the tone is informative, never a verdict.
 
 import { html, useState, app, openSheet, Sheet, Seg, Toggle, confirmSheet, copyText, local } from './core.js';
-import { fmtDay, fmtDayWeekday, fmtNum, plural, isoDate } from '../lib/util.js';
+import { fmtDay, fmtDayWeekday, fmtNum, plural, isoDate, keepUnits } from '../lib/util.js';
 import { phaseOn, MODES, addDays } from '../lib/phase.js';
 import {
   FIELDS, LABEL, UNIT, STATUS, SOURCE, DAY_START_HOUR, nutritionId, accountingDate, parseAmount, amountOf, fmtAmount,
@@ -148,7 +148,7 @@ function WeekCard({ week, phase, today }) {
   return html`<section class="notice nutr-week" aria-label="Питание за неделю">
     <h3>Неделя с ${fmtDay(s.from)}${phase && phase.start > s.from ? ` (режим с ${fmtDay(phase.start)})` : ''}</h3>
     <p class="nutr-week__cov">${coverageText(s)}${s.final && s.final < 3 ? ' — для выводов мало дней' : ''}</p>
-    ${s.final ? html`<ul class="nutr-lines">${lines.map((l) => html`<li>${l}</li>`)}</ul>` : html`<p>${lines[0] || 'Итогов дней за эту неделю ещё нет.'}</p>`}
+    ${s.final ? html`<ul class="nutr-lines">${lines.map((l) => html`<li>${keepUnits(l)}</li>`)}</ul>` : html`<p>${lines[0] || 'Итогов дней за эту неделю ещё нет.'}</p>`}
     <div class="btn-row"><button type="button" class="btn" onClick=${() => app.ui.go({ view: { type: 'report' } })}>Отчёт за неделю</button></div>
   </section>`;
 }

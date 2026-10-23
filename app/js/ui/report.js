@@ -5,7 +5,7 @@ import { html, app, Icon, copyText } from './core.js';
 import { derived } from './derive.js';
 import { weeklyReport, reportText } from '../lib/report.js';
 import { dailyWeights, sleepNights } from '../lib/bodydata.js';
-import { fmtDay, isoDate } from '../lib/util.js';
+import { fmtDay, isoDate, keepUnits } from '../lib/util.js';
 
 export function buildReport(today = isoDate()) {
   const st = app.store.state;
@@ -43,7 +43,7 @@ export function Report() {
     <p class="muted report-period">${fmtDay(r.week.from)} — ${fmtDay(r.week.to)}: последняя полная неделя, сравнения — с той же неделей цикла и за 4 недели. Считается на телефоне, без сети.</p>
     ${parts.map(([title, lines]) => html`<section class="notice report-part" aria-label=${title}>
       <h3>${title}</h3>
-      <ul class="nutr-lines">${lines.map((l) => html`<li>${l}</li>`)}</ul>
+      <ul class="nutr-lines">${lines.map((l) => html`<li>${keepUnits(l)}</li>`)}</ul>
     </section>`)}
     <div class="btn-row">
       <button type="button" class="btn btn--primary btn--block" onClick=${() => copyText(reportText(r))}>Скопировать отчёт для ChatGPT</button>

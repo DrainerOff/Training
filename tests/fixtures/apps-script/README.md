@@ -22,3 +22,5 @@ updates to API 5, and that «Команды» keep working with it.
 `bw_share` in `App_Exercises` and without the delivery times of «Команды» in the sync answer).
 `tests/server/v1.3-sync.test.js` checks that the share of body weight stays on the phone until the
 owner updates to API 6 and that the restore check names what that script does not store.
+`tests/server/release-1.3.test.js` installs it on a sheet with v1.2.0 data, updates it to the current
+`Code.gs` and checks that every cell stays and the nutrition sheets are added.

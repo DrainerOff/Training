@@ -127,3 +127,17 @@ test('anything unexpected aborts instead of guessing', () => {
   assert.match(text, /D1-01: подход 3 заполнен не полностью/);
   assert.match(text, /D1-01: подходов 2, а в столбце «Сетов» 3/);
 });
+
+// Published releases are kept as regression fixtures; each carries the synthetic snapshot, not the
+// owner's cells, and the app itself carries none.
+test('no real cells in the repository: every release fixture has the synthetic snapshot; the app has no snapshot', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+  const synthetic = fs.readFileSync(path.join(root, 'tests/fixtures/synthetic/gsheets-snapshot.js'), 'utf8');
+  const releases = path.join(root, 'tests/fixtures/releases');
+  const builds = fs.readdirSync(releases).filter((d) => fs.existsSync(path.join(releases, d, 'js/data/gsheets-snapshot.js')));
+  assert.ok(builds.includes('05f067e') && builds.length >= 5, builds.join(', '));
+  for (const b of builds) assert.equal(fs.readFileSync(path.join(releases, b, 'js/data/gsheets-snapshot.js'), 'utf8'), synthetic, b);
+  assert.equal(fs.existsSync(path.join(root, 'app/js/data/gsheets-snapshot.js')), false);
+});
