@@ -98,12 +98,12 @@ var SCHEMA = {
     cols: [
       ['exercise', 'exercise', 'text'],
       ['setup', 'setup', 'text'],
-      ['bw_share', 'bwShare', 'num'],
       ['series_key', 'seriesKey', 'key'],
       ['id', 'id', 'key'],
       ['updated_at', 'updatedAt', 'ms'],
       ['deleted', 'deleted', 'bool'],
       ['_srv', '_srv', 'ms'],
+      ['bw_share', 'bwShare', 'num'], // API 6; appended, so old and new sheets keep one column order
     ],
   },
   metrics: {

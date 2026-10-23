@@ -2,7 +2,7 @@
 // round-trip. Safe to retry at any point — the server upserts by record id, so a lost
 // response followed by a resend never creates a duplicate set.
 
-export const API_VERSION = 5;
+export const API_VERSION = 6;
 const BATCH = 200;
 // What an Apps Script that predates the `ack` map per entity understood.
 const LEGACY_ENTITIES = ['sessions', 'sets', 'metrics'];
@@ -18,6 +18,63 @@ const WAITING_LABEL = {
   sleep: 'сон',
   phases: 'режимы набора и сушки',
 };
+
+// Everything a sync carries, in the order the restore check lists it.
+export const SYNCED = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
+export const ENTITY_LABEL = {
+  sessions: 'тренировки',
+  sets: 'подходы',
+  metrics: 'самочувствие и вес (записи до v1.1)',
+  records: 'рекорды, добавленные вручную',
+  exercises: 'настройки упражнений',
+  body: 'замеры тела',
+  sleep: 'сон',
+  phases: 'режимы набора и сушки',
+};
+
+// What a new phone would get from the sheet, compared record by record with this one; read-only on
+// both sides. A problem is a record of this phone the sheet doesn't have (or has an older version
+// of) while nothing is waiting to be sent — a new phone would not get it.
+export function restoreReport(state, res, entities = SYNCED) {
+  const known = new Set(res?.ack && typeof res.ack === 'object' ? Object.keys(res.ack) : LEGACY_ENTITIES);
+  const queued = new Set(state.outbox?.keys?.() || []);
+  const rows = [];
+  let problems = 0;
+  for (const entity of entities) {
+    const local = state[entity] || new Map();
+    const liveHere = [...local.values()].filter((r) => !r.deleted).length;
+    if (!known.has(entity)) {
+      rows.push({ entity, label: ENTITY_LABEL[entity] || entity, unsupported: true, here: liveHere, there: null });
+      if (liveHere) problems++;
+      continue;
+    }
+    const server = new Map((res.pull?.[entity] || []).map((r) => [r.id, r]));
+    const row = { entity, label: ENTITY_LABEL[entity] || entity, here: liveHere, there: 0, same: 0, pending: 0, missing: 0, older: 0, newer: 0, onlyThere: 0 };
+    for (const r of server.values()) if (!r.deleted) row.there++;
+    for (const [id, r] of local) {
+      const s = server.get(id);
+      const waiting = queued.has(`${entity}:${id}`);
+      if (!s) {
+        if (r.deleted) continue;
+        if (waiting) row.pending++;
+        else row.missing++;
+      } else if (Number(s.updatedAt) === Number(r.updatedAt)) row.same++;
+      else if (Number(s.updatedAt) < Number(r.updatedAt)) {
+        if (waiting) row.pending++;
+        else row.older++;
+      } else row.newer++;
+    }
+    for (const [id, s] of server) if (!local.has(id) && !s.deleted) row.onlyThere++;
+    problems += row.missing + row.older;
+    rows.push(row);
+  }
+  const sp = res?.pull?.program || null;
+  const here = state.program?.updatedAt || 0;
+  const program = { here, there: sp ? Number(sp.updatedAt) || 0 : 0, pending: queued.has('program:main') };
+  program.ok = !here || program.there >= here || program.pending;
+  if (!program.ok) problems++;
+  return { ok: problems === 0, problems, rows, program, api: res?.api ?? null };
+}
 
 export class SyncError extends Error {
   constructor(code, detail = '') {
@@ -162,6 +219,8 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     await store.setKV({
       cursor: Math.max(store.state.kv.cursor || 0, Number(res.cursor) || 0),
       programSince: Math.max(store.state.kv.programSince || 0, Number(res.programUpdatedAt) || 0),
+      // API 6: when «Команды» last delivered Health data (times and counts from App_HealthLog).
+      ...(res.ingest && typeof res.ingest === 'object' ? { ingest: res.ingest } : {}),
       ...Object.fromEntries(behind.filter((entity) => known.has(entity)).map((entity) => [`${entity}Pulled`, true])),
     });
     return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size };
@@ -215,6 +274,17 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     timer = setTimeout(syncNow, ms);
   }
 
+  // Asks the sheet for everything, as a new phone would, and changes nothing on either side: no
+  // records are sent and nothing received is applied.
+  async function verify() {
+    const cfg = config();
+    if (!cfg) throw new SyncError('unauthorized', 'Синхронизация не подключена');
+    const all = Object.fromEntries(SYNCED.map((e) => [e, 0]));
+    const res = await transport(cfg.url, { action: 'sync', token: cfg.token, api: API_VERSION, since: 0, entitySince: all, programSince: 0, push: {} }, { timeoutMs: 90000 });
+    if (!res || res.ok !== true) throw new SyncError(res?.error || 'bad_response', res?.message || '');
+    return restoreReport(store.state, res);
+  }
+
   async function ping(cfg) {
     const res = await transport(cfg.url, { action: 'ping', token: cfg.token, api: API_VERSION });
     if (!res || res.ok !== true) throw new SyncError(res?.error || 'bad_response', res?.message || '');
@@ -226,6 +296,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     syncNow,
     schedule,
     ping,
+    verify,
     refresh: () => update({}),
     subscribe(fn) {
       listeners.add(fn);

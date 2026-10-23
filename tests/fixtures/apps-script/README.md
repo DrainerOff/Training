@@ -17,3 +17,8 @@ wait on the phone until the owner updates to API 4.
 with `App_Body`, `App_Sleep`, `App_HealthLog` and the `ingest` action, without `App_Phases`).
 `tests/server/phases-sync.test.js` checks that bulk / cut phases wait on the phone until the owner
 updates to API 5, and that «Команды» keep working with it.
+
+`Code.api5.gs` — `apps-script/Code.gs` of v1.2.0 (05f067e, API 5, with `App_Phases`, without
+`bw_share` in `App_Exercises` and without the delivery times of «Команды» in the sync answer).
+`tests/server/v1.3-sync.test.js` checks that the share of body weight stays on the phone until the
+owner updates to API 6 and that the restore check names what that script does not store.

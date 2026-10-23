@@ -6,7 +6,7 @@ import {
   fmtOverride, targetFor, fmtTarget, reuseKeys,
 } from '../lib/program.js';
 import { parseResultsText } from '../lib/textimport.js';
-import { fmtDay, fmtTime, uid } from '../lib/util.js';
+import { fmtDay, fmtTime, fmtNum, parseNum, uid } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { SETUP_MAX } from '../data/store.js';
 import { findSameSlotSession } from '../lib/planner.js';
@@ -156,6 +156,7 @@ export function Settings({ syncStatus }) {
       <div class="btn-stack" style="margin-top:12px">
         <button type="button" class="btn btn--primary" onClick=${saveAndTest}>Сохранить и проверить связь</button>
         ${syncStatus.state !== 'off' ? html`<button type="button" class="btn" onClick=${() => app.sync.syncNow()}>Синхронизировать сейчас</button>` : null}
+        ${syncStatus.state !== 'off' ? html`<button type="button" class="btn" onClick=${() => openSheet((close) => html`<${RestoreCheckSheet} onClose=${close} />`)}>Проверить восстановление</button>` : null}
       </div>
       <p class="muted" style="font-size:13px;margin-top:10px">Как подключить: таблица → Расширения → Apps Script → вставить код из apps-script/Code.gs → меню «Тренировки» → «Подготовить листы и ключ» → Развернуть как веб-приложение (доступ «Все»). Подробно — в README.</p>
     </div>
@@ -196,6 +197,57 @@ export function Settings({ syncStatus }) {
 
     <p class="muted" style="font-size:12px;margin-top:20px">Версия ${app.version}${app.build && !app.build.startsWith('__') ? `, сборка ${app.build}` : ''}. Хранилище: ${app.storageKind}${app.persisted ? ', постоянное' : ''}.</p>
   </main>`;
+}
+
+// Would a new phone get everything? Reads the whole sheet the way a new phone does and compares
+// it with this one; nothing is sent, nothing received is applied.
+function RestoreCheckSheet({ onClose }) {
+  const [res, setRes] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await app.sync.syncNow(); // send what is waiting first, so the comparison is about what is stored
+      setRes(await app.sync.verify());
+    } catch (e) {
+      setErr(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const footer = html`<button type="button" class="btn btn--primary btn--big" disabled=${busy} onClick=${run}>${busy ? 'Проверяю…' : res ? 'Проверить ещё раз' : 'Проверить'}</button>`;
+  return html`<${Sheet} title="Проверка восстановления" onClose=${onClose} footer=${footer}>
+    <p style="font-size:15px">Приложение прочитает из таблицы всё, что получил бы новый телефон, и сравнит с этим телефоном запись за записью. Ничего не отправляется и не меняется.</p>
+    ${err ? html`<p class="warn-line">${err}</p>` : null}
+    ${res
+      ? html`<div class=${'notice' + (res.ok ? '' : ' notice--caution')} role="status" aria-label="Результат проверки">
+          <h3>${res.ok ? 'Новый телефон получит всё' : 'Новый телефон получит не всё'}</h3>
+          <p>${res.ok
+            ? 'Каждая запись этого телефона есть в таблице в той же версии.'
+            : `Проблем: ${res.problems}. Синхронизируйте и проверьте ещё раз; если не помогло — обновите Code.gs (docs/SETUP.md).`}</p>
+        </div>
+        <ul class="rows restore-rows">
+          ${res.rows.map((r) => html`<li class="row">
+            <span class="row__title">${r.label}</span>
+            <span class="num">${r.unsupported ? '—' : r.there}</span>
+            <span class="row__sub">${r.unsupported
+              ? r.here ? `на телефоне ${r.here}; эта версия Code.gs их не хранит` : 'эта версия Code.gs их не хранит'
+              : [
+                  `на телефоне ${r.here}`,
+                  r.pending ? `ждут отправки ${r.pending}` : null,
+                  r.missing ? `нет в таблице ${r.missing}` : null,
+                  r.older ? `в таблице старее ${r.older}` : null,
+                  r.newer ? `в таблице новее ${r.newer} — придут при синхронизации` : null,
+                  r.onlyThere ? `только в таблице ${r.onlyThere}` : null,
+                ].filter(Boolean).join(', ')}</span>
+          </li>`)}
+          <li class="row"><span class="row__title">программа</span><span>${res.program.ok ? 'совпадает' : 'в таблице старее'}</span></li>
+        </ul>`
+      : null}
+    <p class="muted" style="font-size:13px">Полная проверка без второго телефона: откройте draineroff.github.io/Training в Safari, а не с экрана «Домой», — у Safari своё хранилище, это как новый телефон. Подключите тот же адрес и ключ, дождитесь синхронизации и сравните «Тело», «Прогресс» и последние тренировки.</p>
+  <//>`;
 }
 
 export function applyTheme(v) {
@@ -322,14 +374,25 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   // (App_Exercises by series key — the same records the workout's «Настройки» line edits).
   const options = optionsFor(v);
   const setupText = (key) => (key in typed ? typed[key] : app.store.setupOf(key));
-  const setupsChanged = options.filter((o) => o.key in typed && typed[o.key].trim() !== app.store.setupOf(o.key));
+  // The lifted part of the body weight, typed in %; '' = by category (pull-ups 100 %, others 0).
+  const [shares, setShares] = useState({});
+  const storedShare = (key) => app.store.setupRecord(key)?.bwShare ?? null;
+  const shareText = (key) => (key in shares ? shares[key] : storedShare(key) == null ? '' : fmtNum(storedShare(key) * 100));
+  const shareOf = (key) => {
+    const t = String(shares[key] ?? '').trim();
+    if (!t) return null;
+    const n = parseNum(t);
+    return n >= 0 && n <= 150 ? n / 100 : undefined;
+  };
+  const shareBad = options.some((o) => o.key in shares && shareOf(o.key) === undefined);
+  const setupsChanged = options.filter((o) => (o.key in typed && typed[o.key].trim() !== app.store.setupOf(o.key)) || (o.key in shares && shareOf(o.key) !== undefined && shareOf(o.key) !== storedShare(o.key)));
   const dirty = JSON.stringify(v) !== JSON.stringify(start) || setupsChanged.length > 0;
   const busy = useRef(false); // a double tap on «Готово» must not add the exercise twice
   const save = async () => {
     if (busy.current) return;
     busy.current = true;
     try {
-      for (const o of setupsChanged) await app.store.saveSetup(o.key, o.name, typed[o.key]);
+      for (const o of setupsChanged) await app.store.saveSetup(o.key, o.name, o.key in typed ? typed[o.key] : null, o.key in shares ? { bwShare: shareOf(o.key) } : {});
     } catch (err) {
       busy.current = false;
       app.ui.toast(`Не удалось сохранить настройки: ${err.message}`);
@@ -346,7 +409,7 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   };
   const footer = html`
     ${onDelete ? html`<button type="button" class="btn btn--danger" onClick=${() => { onDelete(); onClose(); }}>Удалить</button>` : null}
-    <button type="button" class="btn btn--primary" disabled=${!v.name.trim()} onClick=${save}>Готово</button>`;
+    <button type="button" class="btn btn--primary" disabled=${!v.name.trim() || shareBad} onClick=${save}>Готово</button>`;
   return html`<${Sheet} title=${isNew ? 'Новое упражнение' : 'Упражнение'} onClose=${onClose} footer=${footer} dirty=${dirty}>
     ${isNew
       ? html`<div class="sheet__section"><div class="sheet__label">Быстрый выбор</div>
@@ -370,7 +433,14 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
             <span class="setup-field__name">${o.name}</span>
             <textarea class="input" rows="2" maxlength=${SETUP_MAX} aria-label=${`Настройки: ${o.name}`} placeholder="например: сиденье 5, ручки 3"
               value=${setupText(o.key)} onInput=${(e) => { const t = e.currentTarget.value; setTyped((x) => ({ ...x, [o.key]: t })); }}></textarea>
+            <span class="setup-field__bw">
+              <span>Масса тела в нагрузке, %</span>
+              <input class="input" inputmode="decimal" aria-label=${`Масса тела в нагрузке, %: ${o.name}`} placeholder=${v.category === 'pullup' ? '100' : '0'}
+                value=${shareText(o.key)} onInput=${(e) => { const t = e.currentTarget.value; setShares((x) => ({ ...x, [o.key]: t })); }} />
+            </span>
           </label>`)}
+          <p class="muted" style="font-size:12px">Масса тела в нагрузке — для сравнения и оценок, в подходах по-прежнему записывается только добавленный вес. Пусто: подтягивания — 100 %, остальное — 0. Для отжиманий или брусьев укажите сами.</p>
+          ${shareBad ? html`<p class="warn-line">Масса тела в нагрузке — число от 0 до 150 или пусто.</p>` : null}
         </div>`
       : null}
     <div class="sheet__section">

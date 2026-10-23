@@ -5,7 +5,8 @@
 import { html, useState, app, openSheet, Sheet, Icon, local } from './core.js';
 import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
-import { isoDate, fmtDay, fmtDayShort, fmtNum, sum, plural } from '../lib/util.js';
+import { isoDate, fmtDay, fmtDayShort, fmtNum, fmtTime, sum, plural } from '../lib/util.js';
+import { healthDelivery, describeDelivery } from '../lib/health.js';
 import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf } from '../lib/bodydata.js';
 import { ImportButton, importFile, openAddBody, openKindHistory, openNights, Sources, sleepLine } from './bodyentry.js';
 import { PhaseCard, PhaseWeeks } from './phase.js';
@@ -41,6 +42,7 @@ export function Body() {
       <button type="button" class="add-btn" aria-label="Добавить: самочувствие, замер или файл" onClick=${() => openAdd(today)}><${Icon} name="plus" /></button>
     </header>
 
+    <${HealthQuiet} />
     <${PhaseCard} phase=${phase} report=${report} />
 
     ${nothing
@@ -387,5 +389,30 @@ function EntrySheet({ date, onClose }) {
             <input class="input" placeholder="Заметка" aria-label="Заметка" value=${v.note} onInput=${(e) => setV({ ...v, note: e.currentTarget.value })} />
           </div>`
       : null}
+  <//>`;
+}
+
+// The automations in «Команды» went quiet: an informative note with what came last and how to check.
+export function HealthQuiet() {
+  const st = app.store.state;
+  const d = healthDelivery({ ingest: st.kv.ingest, body: st.body.values(), sleep: st.sleep.values() });
+  if (!d.quiet) return null;
+  const at = (ms) => `${fmtDay(isoDate(new Date(ms)))}, ${fmtTime(ms)}`;
+  return html`<div class="notice notice--caution" role="status" aria-label="Данные из «Здоровья»">
+    <h3>Данные из «Здоровья» не приходят</h3>
+    <p>${describeDelivery(d, { fmt: at })} Если вы взвешивались или спали с часами, проверьте автоматизации.</p>
+    <div class="btn-row"><button type="button" class="btn" onClick=${() => openSheet((close) => html`<${HealthCheckSheet} onClose=${close} />`)}>Как проверить</button></div>
+  </div>`;
+}
+
+function HealthCheckSheet({ onClose }) {
+  return html`<${Sheet} title="Проверить «Команды»" onClose=${onClose}>
+    <ol class="steps">
+      <li>Разблокируйте iPhone: пока он заблокирован, iOS не даёт читать «Здоровье», и автоматизация по времени может не сработать.</li>
+      <li>Откройте «Команды» → вкладка «Автоматизация». Автоматизации для Zepp Life и Fitdays+ («Закрыто») и ежедневная («Время суток») должны быть на месте, с «Запускать сразу» и командой «Здоровье → таблица».</li>
+      <li>Запустите команду «Здоровье → таблица» вручную на вкладке «Команды» и вернитесь в приложение: оно синхронизируется само, и это предупреждение пропадёт.</li>
+      <li>В таблице на листе App_HealthLog появится строка с временем запуска и числом строк — значения туда не пишутся. Если в ней есть ошибка, она названа словами.</li>
+    </ol>
+    <p class="muted" style="font-size:13px">Подробно — docs/SHORTCUTS.md в репозитории.</p>
   <//>`;
 }

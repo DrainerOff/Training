@@ -16,4 +16,6 @@ font) from `shared/fonts/`.
 `tests/e2e/update.spec.js`, `blockers.spec.js`, `records.spec.js` and `release.spec.js` install a release, record data in
 it, then publish the current code over it and check that the update keeps the IndexedDB data,
 does not repeat the one-time import and starts offline. Don't edit these files: they stand for what is already on
-users' phones.
+users' phones. One exception: `js/data/gsheets-snapshot.js` in each folder holds the **synthetic** copy of
+the cells (`tests/fixtures/synthetic/gsheets-snapshot.js`) instead of the owner's real values, so the repository
+carries no personal data; the code of each release is unchanged.

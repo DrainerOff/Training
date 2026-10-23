@@ -353,3 +353,21 @@ test('bulk phase: set it, an honest «данных недостаточно», t
   await expect(page.locator('.phase')).toContainText('в пределах цели');
   await context.close();
 });
+
+test('«Команды» went quiet: a calm note on «Тело» with what came last and how to check', async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole('status', { name: 'Данные из «Здоровья»' })).toHaveCount(0);
+  await page.evaluate(async () => {
+    const { store } = window.__trainer;
+    const at = Date.now() - 3 * 86400000;
+    const d = new Date(at).toISOString();
+    await store.applyRemote({ body: [{ id: 'b:weight:zepp:20261019T041000:8040', kind: 'weight', value: 80.4, origValue: 80.4, unit: 'кг', measuredAt: d.slice(0, 19) + 'Z', date: d.slice(0, 10), family: 'zepp', source: 'Zepp Life', via: 'shortcut', srcId: '', batch: 'sc20261019', excluded: null, edited: false, note: '', updatedAt: at, deleted: false }] });
+  });
+  const note = page.getByRole('status', { name: 'Данные из «Здоровья»' });
+  await expect(note).toContainText('Данные из «Здоровья» не приходят 3 дня');
+  await expect(note).toContainText('вес —');
+  await note.getByRole('button', { name: 'Как проверить' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Проверить «Команды»' });
+  await expect(sheet).toContainText('«Автоматизация»');
+  await expect(sheet).toContainText('App_HealthLog');
+});

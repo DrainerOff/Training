@@ -110,6 +110,16 @@ test('a new phone: empty until connected, then everything from the sheet, same i
     await expect(p2.locator('.next__title')).toHaveText('День 3');
     await expect(p2.locator('.next__meta')).toContainText('Цикл 1. Тяжёлая неделя');
 
+    // «Проверить восстановление» in Settings says the same, and changes nothing.
+    await p2.getByRole('button', { name: 'Настройки' }).click();
+    await p2.getByRole('button', { name: 'Проверить восстановление' }).click();
+    const check = p2.getByRole('dialog', { name: 'Проверка восстановления' });
+    await check.getByRole('button', { name: 'Проверить', exact: true }).click();
+    await expect(check.getByRole('status', { name: 'Результат проверки' })).toContainText('Новый телефон получит всё');
+    await expect(check.locator('.restore-rows li', { hasText: 'подходы' })).toContainText(`на телефоне ${original.sets.length}`);
+    expect(await everything(p2)).toEqual(original);
+    await check.getByRole('button', { name: 'Закрыть' }).click();
+
     // CSP: the page cannot send anything (e.g. the access key) to other hosts.
     const external = await p2.evaluate(() => fetch('https://example.com/collect', { method: 'POST', body: 'x' }).then(() => 'sent', () => 'blocked'));
     expect(external).toBe('blocked');

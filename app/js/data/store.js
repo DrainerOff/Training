@@ -442,14 +442,25 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return r && !r.deleted ? r.setup || '' : '';
   }
 
-  async function saveSetup(seriesKey, exercise, text) {
+  // `bwShare`: the lifted part of the body weight for this variant (0–1.5), null = by category
+  // (lib/bodyweight.js loadShare); left out = as it was.
+  async function saveSetup(seriesKey, exercise, text, opts = {}) {
     const id = `x:${seriesKey}`;
     const prev = state.exercises.get(id);
-    const setup = String(text || '').trim().slice(0, SETUP_MAX);
-    if (prev && !prev.deleted && (prev.setup || '') === setup) return prev;
-    const rec = { id, seriesKey, exercise, setup, updatedAt: stamp(prev), deleted: false };
+    const live = prev && !prev.deleted ? prev : null;
+    const setup = text == null ? live?.setup || '' : String(text).trim().slice(0, SETUP_MAX);
+    const share = 'bwShare' in opts ? opts.bwShare : live?.bwShare ?? null;
+    const bwShare = share == null || share === '' ? null : Math.round(Math.min(1.5, Math.max(0, Number(share))) * 100) / 100;
+    if (live && (live.setup || '') === setup && (live.bwShare ?? null) === bwShare) return prev;
+    if (!live && !setup && bwShare == null) return prev || null;
+    const rec = { id, seriesKey, exercise, setup, bwShare, updatedAt: stamp(prev), deleted: false };
     await save('exercises', [rec]);
     return rec;
+  }
+
+  function setupRecord(seriesKey) {
+    const r = state.exercises.get(`x:${seriesKey}`);
+    return r && !r.deleted ? r : null;
   }
 
   // --- body measurements and sleep -----------------------------------------------------------
@@ -789,6 +800,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     deleteRecord,
     restoreRecord,
     setupOf,
+    setupRecord,
     saveSetup,
     addBody,
     editBody,

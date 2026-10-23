@@ -1004,6 +1004,19 @@ p {
   min-height: 0;
   height: 64px;
 }
+.setup-field__bw {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--steel);
+}
+.setup-field__bw .input {
+  width: 80px;
+  flex: none;
+  text-align: right;
+}
 .slot-edit__setup {
   display: flex;
   align-items: center;
@@ -1026,6 +1039,15 @@ p {
   padding: 0 14px;
   font-size: 15px;
 }
+/* numbered how-to steps in a sheet */
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  font-size: 15px;
+}
+
 /* one-time correction card */
 .fix__list {
   list-style: none;
