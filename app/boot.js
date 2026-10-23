@@ -15,7 +15,6 @@
     'storage-open': 'Открытие базы данных на устройстве (IndexedDB)',
     'storage-read': 'Чтение сохранённых тренировок',
     'storage-write': 'Проверка записи на устройство',
-    import: 'Перенос программы из Google Таблицы (первый запуск)',
     ui: 'Отрисовка интерфейса',
   };
   var STORAGE_STAGES = { 'storage-open': 1, 'storage-read': 1, 'storage-write': 1 };

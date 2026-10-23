@@ -1,14 +1,14 @@
-// The v1.0.1 correction of the owner's 18.10.2026 workout, on a copy of the real rows
-// (tests/fixtures/real): what changes, what never changes, the sheet, other devices, offline,
+// The v1.0.1 correction of the owner's 18.10.2026 workout, on its rows as the sheet stored them
+// (ids and keys as recorded, values synthetic — tests/fixtures/synthetic): what changes, what never changes, the sheet, other devices, offline,
 // both phones applying it, the records and the way back.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGas } from '../helpers/fake-gas.js';
-import { realSession, realSets, realProgramDay2 } from '../helpers/real-data.js';
+import { session1018, sets1018, programDay2Before1018 } from '../helpers/workout-2026-10-18.js';
 import { createStore } from '../../app/js/data/store.js';
 import { memoryAdapter } from '../../app/js/data/db.js';
 import { createSync, SyncError } from '../../app/js/data/sync.js';
-import { programFromSnapshot } from '../../app/js/data/legacy-import.js';
+import { programFromSnapshot } from '../helpers/legacy-import.js';
 import { FIX_2026_10_18 as FIX, pendingFix, applyFix, revertFix } from '../../app/js/data/fixes.js';
 import { performances, buildRecordBook } from '../../app/js/lib/records.js';
 import { buildExposures } from '../../app/js/lib/plateau.js';
@@ -40,7 +40,7 @@ async function today() {
   const net = network(gas);
   const phone = await device(token, net);
   await phone.store.saveProgram(programFromSnapshot().program);
-  await phone.store.applyRemote({ sessions: [realSession()], sets: realSets() }, { queue: true });
+  await phone.store.applyRemote({ sessions: [session1018()], sets: sets1018() }, { queue: true });
   await phone.sync.syncNow();
   assert.equal(phone.store.state.outbox.size, 0);
   return { gas, token, net, phone };
@@ -59,7 +59,7 @@ test('the app program is the one in the sheet: day 2 slots, keys and names match
   const day2 = programFromSnapshot().program.days.find((d) => d.day === 2);
   assert.deepEqual(
     day2.slots.map((s) => ({ slotId: s.id, keys: s.options.map((o) => o.key), names: s.options.map((o) => o.name) })),
-    realProgramDay2(),
+    programDay2Before1018(),
   );
 });
 
@@ -68,9 +68,9 @@ test('found exactly: one workout, three exercises, the nine recorded sets — no
   const plan = pendingFix(phone.store.state);
   assert.ok(plan);
   assert.deepEqual(plan.moves.map((m) => [m.slotId, m.item.name, m.sets.map((x) => `${x.weight}×${x.reps}@${x.rir}`).join(' ')]), [
-    ['D2-03', 'Гиперэкстензия с весом', '50×10@5 55×10@4 60×10@2'],
-    ['D2-05', 'Кроссовер на заднюю дельту', '30×8@1 30×8@0 30×8@0'],
-    ['D2-06', 'Подъем EZ-грифа перед собой', '55×10@4 65×10@2 65×10@1'],
+    ['D2-03', 'Гиперэкстензия с весом', '40×10@4 45×10@3 50×10@2'],
+    ['D2-05', 'Кроссовер на заднюю дельту', '25×9@1 25×9@0 25×8@0'],
+    ['D2-06', 'Подъем EZ-грифа перед собой', '45×10@3 50×10@2 50×9@1'],
   ]);
   assert.equal(plan.skipped.length, 0);
   // A set that is not the recorded one (here: one more set added since) → that exercise is not offered.
@@ -237,7 +237,7 @@ test('records and progress follow the variant: no record left on the old series,
     assert.ok(b, `${m.to.key}: records from the moved sets`);
     assert.deepEqual(b.perfs.map((p) => p.setId).sort(), [...m.setIds].sort());
   }
-  assert.deepEqual(after.get('giperekstenziya-v-trenazhere').table.map((r) => `${r.reps}:${r.best.weight}`), ['10:60']);
+  assert.deepEqual(after.get('giperekstenziya-v-trenazhere').table.map((r) => `${r.reps}:${r.best.weight}`), ['10:50']);
   // Untouched exercises keep exactly their records.
   for (const key of ['mayatnikovyy-prised', 'podtyagivaniya-obratnym-hvatom', 'ikry-v-zhime-nogami']) {
     assert.deepEqual(after.get(key).table, before.get(key).table);
@@ -246,7 +246,7 @@ test('records and progress follow the variant: no record left on the old series,
   const st = phone.store.state;
   const series = buildExposures([...st.sessions.values()], st.sets.values(), { metricsByDate: new Map() });
   assert.equal(series.get('krossover-na-zadnyuyu-deltu'), undefined);
-  assert.deepEqual(series.get('obratnaya-babochka-dvumya-rukami').flatMap((e) => e.sets.map((x) => x.weight)), [30, 30, 30]);
+  assert.deepEqual(series.get('obratnaya-babochka-dvumya-rukami').flatMap((e) => e.sets.map((x) => x.weight)), [25, 25, 25]);
 });
 
 test('the way back: undo puts the sets and the program back as they were, and the fix is offered again', async () => {

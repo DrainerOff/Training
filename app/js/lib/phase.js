@@ -3,7 +3,7 @@
 // figure says what it is based on; with too little data the answer is «данных недостаточно», not
 // a guess. Numbers describe what happened; they do not claim why (correlation is not causation).
 
-import { setScore } from './plateau.js';
+import { setScore, bodyweightSides, pairRatio } from './plateau.js';
 import { sum } from './util.js';
 
 export const MODES = {
@@ -116,8 +116,9 @@ export function waistVsWeight(body, days, { from, to }) {
 }
 
 // Strength over the phase, the way the progress screen compares: the same week of the cycle at the
-// start and at the end of the phase, best set (Epley on reps; pull-ups with body weight on top).
-export function strengthOver(series, { from, to, bodyweight = null }) {
+// start and at the end of the phase, best set (Epley on reps; pull-ups with each day's body weight
+// on top, see plateau.bodyweightSides). `shareOf(key, category)` — the lifted part of the body.
+export function strengthOver(series, { from, to, shareOf = (key, category) => (category === 'pullup' ? 1 : 0) }) {
   const out = { up: 0, flat: 0, down: 0, items: [] };
   for (const [key, list] of series) {
     const inPhase = list.filter((e) => !e.active && e.date >= from && e.date <= to && e.sets.length);
@@ -134,12 +135,12 @@ export function strengthOver(series, { from, to, bodyweight = null }) {
       if (!best || span > best.span) best = { first: es[0], last: es[es.length - 1], span };
     }
     if (!best || best.span < 14) continue;
-    const bw = best.first.category === 'pullup' ? bodyweight || 75 : 0;
-    const top = (e) => Math.max(...e.sets.map((s) => setScore(s, { bwAdj: bw })));
-    const change = top(best.last) / top(best.first) - 1;
+    const bw = bodyweightSides(best.last, best.first, shareOf(key, best.first.category));
+    const top = (e, w) => e.sets.reduce((a, s) => (!a || setScore(s, { bwAdj: bw.share * (w || 0) }) > setScore(a, { bwAdj: bw.share * (w || 0) }) ? s : a), null);
+    const change = pairRatio(top(best.last, bw.cur), top(best.first, bw.prev), false, bw);
     const verdict = change > STRENGTH_EPS ? 'up' : change < -STRENGTH_EPS ? 'down' : 'flat';
     out[verdict]++;
-    out.items.push({ key, name: best.last.name, week: best.last.week, from: best.first.date, to: best.last.date, change, verdict });
+    out.items.push({ key, name: best.last.name, week: best.last.week, from: best.first.date, to: best.last.date, change, verdict, bodyweight: bw.share ? bw : null });
   }
   out.items.sort((a, b) => b.change - a.change);
   out.compared = out.items.length;
@@ -147,7 +148,7 @@ export function strengthOver(series, { from, to, bodyweight = null }) {
 }
 
 // Everything the phase card shows. `days`: dailyWeights(...).days; `nights`: sleepNights(...).nights.
-export function phaseReport(phase, { days, body = [], nights = [], series = new Map(), today }) {
+export function phaseReport(phase, { days, body = [], nights = [], series = new Map(), today, shareOf = null }) {
   const from = phase.start;
   const to = phase.end && phase.end < today ? phase.end : today;
   const inPhase = days.filter((d) => d.date >= from && d.date <= to);
@@ -170,7 +171,7 @@ export function phaseReport(phase, { days, body = [], nights = [], series = new 
     targetKg: lastWeight != null ? (lastWeight * target) / 100 : null,
     weekly: weeklyWeights(inPhase, { from, to }),
     waist: waistVsWeight(body, days, { from, to }),
-    strength: strengthOver(series, { from, to, bodyweight: lastWeight }),
+    strength: strengthOver(series, { from, to, ...(shareOf ? { shareOf } : {}) }),
     sleep: { nights: sleep.length, avg: sleep.length ? sum(sleep.map((n) => n.hours)) / sleep.length : null },
   };
 }

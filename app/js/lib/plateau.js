@@ -45,8 +45,9 @@ export function bySessionOrder(a, b) {
 }
 
 // Groups sets into exposures: one exposure = one series in one session.
-// Returns Map<seriesKey, exposure[]> sorted chronologically.
-export function buildExposures(sessions, sets, { metricsByDate = null, includeActive = true } = {}) {
+// Returns Map<seriesKey, exposure[]> sorted chronologically. `bodyweightAt(date)` (optional) gives
+// each exposure the body weight of its day.
+export function buildExposures(sessions, sets, { metricsByDate = null, includeActive = true, bodyweightAt = null } = {}) {
   const sById = new Map();
   for (const s of sessions) if (!s.deleted && (includeActive || s.status === 'done')) sById.set(s.id, s);
   const byKey = new Map();
@@ -80,6 +81,9 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
         note: item?.note || '',
         recovery: m?.recovery ?? null,
         sleep: m?.sleep ?? null,
+        // Body weight on the day of the workout (lib/bodyweight.js), or null: context for
+        // exercises where the body is part of the load. Never stored with the sets.
+        bw: bodyweightAt ? bodyweightAt(s.date) : null,
       };
       byKey.set(k, e);
     }
@@ -99,7 +103,7 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
 }
 
 // Strength score of one set. Epley on (reps + RIR) when RIR is comparable.
-// For pull-ups the added weight sits on top of a nominal bodyweight so that
+// `bwAdj` is the lifted part of the body weight on top of the recorded weight (pull-ups), so that
 // "+2.5 kg at the same reps" and "+1 rep at the same weight" both read as gains.
 export function setScore(set, { useRir = false, bwAdj = 0 } = {}) {
   const eff = (set.reps || 0) + (useRir && set.rir != null ? set.rir : 0);
@@ -108,26 +112,57 @@ export function setScore(set, { useRir = false, bwAdj = 0 } = {}) {
   return load * (1 + eff / 30);
 }
 
-export function compareExposures(cur, prev, { category = null, bodyweight = null } = {}) {
+// The body weight each side of a comparison is scored with, for a series where the body is part of
+// the load (`share` > 0): each workout its own day's weight (exposure.bw, lib/bodyweight.js). When
+// one side is unknown the known one stands for both — the comparison then ignores a change of body
+// weight, and says so; when both are unknown, sets are compared by added weight and reps only.
+export function bodyweightSides(cur, prev, share) {
+  if (!share) return { cur: 0, prev: 0, share: 0, missing: null };
+  const a = cur.bw?.value ?? null;
+  const b = prev.bw?.value ?? null;
+  if (a != null && b != null) return { cur: a, prev: b, share, missing: null };
+  if (a != null) return { cur: a, prev: a, share, missing: 'prev' };
+  if (b != null) return { cur: b, prev: b, share, missing: 'cur' };
+  return { cur: null, prev: null, share, missing: 'both' };
+}
+
+// Ratio of two sets. Without any body weight: the same added weight is compared by reps (Epley —
+// independent of the body weight), a heavier weight for no fewer reps is better, a lighter one for
+// no more reps is worse; anything else can't be told and counts as equal.
+export function pairRatio(a, b, useRir, bw) {
+  if (bw.missing !== 'both') {
+    const sa = setScore(a, { useRir, bwAdj: bw.share * bw.cur });
+    const sb = setScore(b, { useRir, bwAdj: bw.share * bw.prev });
+    return sb > 0 ? sa / sb - 1 : 0;
+  }
+  const ea = (a.reps || 0) + (useRir && a.rir != null ? a.rir : 0);
+  const eb = (b.reps || 0) + (useRir && b.rir != null ? b.rir : 0);
+  const wa = a.weight || 0;
+  const wb = b.weight || 0;
+  if (wa === wb) return (30 + ea) / (30 + eb) - 1;
+  if (wa > wb && ea >= eb) return EPS * 2;
+  if (wa < wb && ea <= eb) return -EPS * 2;
+  return 0;
+}
+
+export function compareExposures(cur, prev, { category = null, share = null } = {}) {
   const n = Math.min(cur.sets.length, prev.sets.length);
   if (!n) return null;
   const cat = category || cur.category || prev.category;
-  const bwAdj = cat === 'pullup' ? bodyweight || 75 : 0;
+  const bw = bodyweightSides(cur, prev, share ?? (cat === 'pullup' ? 1 : 0));
   const pairs = [];
   for (let i = 0; i < n; i++) {
     const a = cur.sets[i];
     const b = prev.sets[i];
     const useRir = a.rir != null && b.rir != null;
-    const sa = setScore(a, { useRir, bwAdj });
-    const sb = setScore(b, { useRir, bwAdj });
-    pairs.push({ cur: a, prev: b, ratio: sb > 0 ? sa / sb - 1 : 0 });
+    pairs.push({ cur: a, prev: b, ratio: pairRatio(a, b, useRir, bw) });
   }
   const ratios = pairs.map((p) => p.ratio);
   const med = median(ratios);
   const worst = Math.min(...ratios);
-  const ton = (list) => sum(list.slice(0, n).map((s) => ((s.weight || 0) + bwAdj) * (s.reps || 0)));
-  const tonPrev = ton(prev.sets);
-  const tonnage = tonPrev > 0 ? ton(cur.sets) / tonPrev - 1 : 0;
+  const ton = (list, w) => sum(list.slice(0, n).map((s) => ((s.weight || 0) + bw.share * (w || 0)) * (s.reps || 0)));
+  const tonPrev = ton(prev.sets, bw.prev);
+  const tonnage = tonPrev > 0 ? ton(cur.sets, bw.cur) / tonPrev - 1 : 0;
   const repsDelta = sum(cur.sets.slice(0, n).map((s) => s.reps || 0)) - sum(prev.sets.slice(0, n).map((s) => s.reps || 0));
   const sameWeights = pairs.every((p) => (p.cur.weight || 0) === (p.prev.weight || 0));
   let verdict = 'flat';
@@ -144,6 +179,7 @@ export function compareExposures(cur, prev, { category = null, bodyweight = null
     setsDelta: cur.sets.length - prev.sets.length,
     pairs,
     prev,
+    bodyweight: bw,
   };
 }
 
@@ -260,13 +296,13 @@ export function seriesStatus(exposures, opts = {}) {
 }
 
 // Overview across all series, sorted by what needs attention first.
-export function overview(seriesMap, { nameOf = (k, list) => list[list.length - 1].name, categoryOf = () => null, bodyweight = null } = {}) {
+export function overview(seriesMap, { nameOf = (k, list) => list[list.length - 1].name, categoryOf = () => null, shareOf = () => null } = {}) {
   const rows = [];
   for (const [key, list] of seriesMap) {
     const done = list.filter((e) => !e.active);
     if (!done.length) continue;
     const category = categoryOf(key) || done[done.length - 1].category;
-    const st = seriesStatus(done, { category, bodyweight });
+    const st = seriesStatus(done, { category, share: shareOf(key, category) });
     rows.push({
       key,
       name: nameOf(key, done),

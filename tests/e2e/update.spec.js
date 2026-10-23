@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'node:path';
 import { startPages, APP, RELEASES } from '../helpers/pages-server.js';
+import { seedOwner } from './helpers.js';
 
 const OLD = path.join(RELEASES, 'ea0febc');
 let pages;
@@ -129,12 +130,13 @@ test('update from the published ea0febc release keeps IndexedDB data, imports on
   expect(await snapshot(page)).toEqual(before);
 });
 
-test('relaunch with an existing IndexedDB: same data, no second import, every stage reported', async ({ page, context }) => {
+test('relaunch with an existing IndexedDB: same data, nothing imported, every stage reported', async ({ page, context }) => {
   pages.publish(APP, 'new1');
   await page.goto(pages.url);
   await booted(page);
-  await expect(page.getByText('Перенесено из Google Таблицы')).toBeVisible();
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  // v1.3 ships no data of its own: a new phone starts with the starter program.
+  await expect(page.getByText('Перенесите программу')).toBeVisible();
+  await seedOwner(page);
   await recordWorkout(page);
   const before = await snapshot(page);
   const firstLaunch = await idbKv(page, 'lastLaunchAt');
@@ -154,7 +156,7 @@ test('relaunch with an existing IndexedDB: same data, no second import, every st
   await page.goto(pages.url);
   await booted(page);
   expect(await page.evaluate(() => window.__trainer.store.state.kv.lastLaunchAt)).toBeGreaterThan(firstLaunch); // written by the previous launch
-  await expect(page.getByText('Перенесено из Google Таблицы')).toHaveCount(0);
+  await expect(page.getByText('Перенесите программу')).toHaveCount(0);
 });
 
 test('a corrupted cached file is repaired automatically; data untouched', async ({ page }) => {

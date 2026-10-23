@@ -128,3 +128,6 @@ export function slugify(name) {
     .replace(/^-+|-+$/g, '');
   return s.slice(0, 48) || 'ex';
 }
+
+// A number and its unit stay on one line in running text: «+0,24 %», «90 г», «3300 ккал».
+export const keepUnits = (text) => String(text).replace(/(\d) (%|г|кг|ккал|ч|см|дн\.)(?![а-яё])/g, '$1\u00a0$2');

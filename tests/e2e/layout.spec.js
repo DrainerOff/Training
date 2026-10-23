@@ -5,7 +5,7 @@
 // are in normal flow, the tab bar is hidden during a workout.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
-import { ready } from './helpers.js';
+import { ready, seedOwner } from './helpers.js';
 
 let web;
 let base;
@@ -161,7 +161,7 @@ for (const screen of SCREENS) {
 
   test(`${screen.name}: workout — the composer is always whole, the list scrolls on its own`, async ({ browser }) => {
     const page = await open(browser, screen);
-    await page.getByRole('button', { name: 'Понятно' }).click();
+    await seedOwner(page);
     await page.getByRole('button', { name: 'Начать тренировку' }).click();
     await page.locator('.dock').waitFor();
 
@@ -215,7 +215,7 @@ for (const screen of SCREENS) {
 
 test('during a workout the other sections are in the workout menu; the tab brings the workout back', async ({ browser }) => {
   const page = await open(browser, SCREENS[3]);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   await page.getByRole('button', { name: 'Начать тренировку' }).click();
   await expect(page.locator('.tabbar')).toHaveCount(0);
   await page.getByRole('button', { name: 'Меню тренировки' }).click();

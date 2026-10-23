@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
 import { startPages, APP, RELEASES, ROOT } from '../helpers/pages-server.js';
-import { ready, connectSync } from './helpers.js';
+import { ready, connectSync, seedOwner } from './helpers.js';
 
 const API3 = fs.readFileSync(path.join(ROOT, 'tests/fixtures/apps-script/Code.api3.gs'), 'utf8');
 
@@ -38,7 +38,7 @@ test.afterAll(() => web?.close());
 async function open(page) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
   await expect(page.getByRole('heading', { name: 'Тело', exact: true })).toBeVisible();
 }
@@ -211,7 +211,7 @@ test('update from v1.0.2: the database gains body and sleep, workouts and check-
       await page.waitForFunction(() => window.__trainer?.store.state.loaded || document.querySelector('.diag'));
     }
     expect(await page.evaluate(() => window.__trainer.build)).toBe('new1');
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 5 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 6 }]);
     expect(await page.evaluate(() => ({ sets: window.__trainer.store.state.sets.size, metrics: window.__trainer.store.state.metrics.size }))).toEqual(before);
 
     await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
@@ -230,7 +230,7 @@ test('update from v1.0.2: the database gains body and sleep, workouts and check-
     });
     expect(days).toEqual(['2026-09-30:81:metrics', '2026-10-01:80.1:body', '2026-10-02:79.85:body']);
 
-    // Rollback to v1.0.2 (if main were reverted): it opens the v5 database as it is, workouts and
+    // Rollback to v1.0.2 (if main were reverted): it opens the v6 database as it is, workouts and
     // check-ins intact; going forward again, measurements are still there.
     await page.evaluate(() => window.__trainer.store.savePhase({ mode: 'bulk', start: '2026-10-01', targetPct: 0.25 }));
     pages.publish(path.join(RELEASES, 'bf41b45'), 'bf41b45');
@@ -240,7 +240,7 @@ test('update from v1.0.2: the database gains body and sleep, workouts and check-
       await page.waitForFunction(() => window.__trainer?.store.state.loaded || document.querySelector('.diag'));
     }
     expect(await page.evaluate(() => window.__trainer.build)).toBe('bf41b45');
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 5 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 6 }]);
     expect(await page.evaluate(() => ({ sets: window.__trainer.store.state.sets.size, metrics: window.__trainer.store.state.metrics.size }))).toEqual(before);
     pages.publish(APP, 'new2');
     for (let i = 0; i < 5 && !(await page.evaluate(() => window.__trainer?.build === 'new2')); i++) {
@@ -352,4 +352,22 @@ test('bulk phase: set it, an honest «данных недостаточно», t
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
   await expect(page.locator('.phase')).toContainText('в пределах цели');
   await context.close();
+});
+
+test('«Команды» went quiet: a calm note on «Тело» with what came last and how to check', async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole('status', { name: 'Данные из «Здоровья»' })).toHaveCount(0);
+  await page.evaluate(async () => {
+    const { store } = window.__trainer;
+    const at = Date.now() - 3 * 86400000;
+    const d = new Date(at).toISOString();
+    await store.applyRemote({ body: [{ id: 'b:weight:zepp:20261019T041000:8040', kind: 'weight', value: 80.4, origValue: 80.4, unit: 'кг', measuredAt: d.slice(0, 19) + 'Z', date: d.slice(0, 10), family: 'zepp', source: 'Zepp Life', via: 'shortcut', srcId: '', batch: 'sc20261019', excluded: null, edited: false, note: '', updatedAt: at, deleted: false }] });
+  });
+  const note = page.getByRole('status', { name: 'Данные из «Здоровья»' });
+  await expect(note).toContainText('Данные из «Здоровья» не приходят 3 дня');
+  await expect(note).toContainText('вес —');
+  await note.getByRole('button', { name: 'Как проверить' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Проверить «Команды»' });
+  await expect(sheet).toContainText('«Автоматизация»');
+  await expect(sheet).toContainText('App_HealthLog');
 });

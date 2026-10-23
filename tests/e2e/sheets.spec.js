@@ -3,7 +3,7 @@
 // settings of each exercise variant in the program editor, the same records as the workout line.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
-import { ready, connectSync, logButton } from './helpers.js';
+import { ready, connectSync, logButton, seedOwner } from './helpers.js';
 
 const HAMMER = 'Наклонный жим: Hammer - наклон';
 const DUMBBELLS = 'Наклонный жим: Гантели - наклон';
@@ -25,7 +25,7 @@ async function phone(browser, screen = SCREENS[1]) {
   const page = await context.newPage();
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   return { context, page };
 }
 

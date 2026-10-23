@@ -2,7 +2,7 @@
 
 import { html, useState, app, Icon, WeekMark, Seg, fmtWeight, SetText, local } from './core.js';
 import { RecordsOverview, openRecordSheet } from './records.js';
-import { derived, latestBodyweight } from './derive.js';
+import { derived } from './derive.js';
 import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
 import { CATEGORY } from '../lib/program.js';
 import { fmtDay, fmtDayShort, fmtNum, median } from '../lib/util.js';
@@ -36,8 +36,8 @@ export function ProgressList() {
 }
 
 function ProgressPane({ switcher }) {
-  const { series, categories } = derived();
-  const rows = overview(series, { categoryOf: (k) => categories.get(k), bodyweight: latestBodyweight() });
+  const { series, categories, shareOf } = derived();
+  const rows = overview(series, { categoryOf: (k) => categories.get(k), shareOf });
   const attention = rows.filter((r) => STATUS[r.status].rank <= STATUS.dip.rank);
   const rest = rows.filter((r) => STATUS[r.status].rank > STATUS.dip.rank);
   const open = (key) => app.ui.go({ view: { type: 'exercise', key } });
@@ -79,12 +79,11 @@ function ProgressPane({ switcher }) {
 }
 
 export function ExerciseDetail({ seriesKey }) {
-  const { series, categories } = derived();
+  const { series, categories, shareOf } = derived();
   const list = series.get(seriesKey) || [];
   const done = list.filter((e) => !e.active);
   const category = categories.get(seriesKey) || list[list.length - 1]?.category || null;
-  const bw = latestBodyweight();
-  const result = seriesStatus(done, { category, bodyweight: bw });
+  const result = seriesStatus(done, { category, share: shareOf(seriesKey, category) });
   const [filter, setFilter] = useState('heavy');
   const weeksIn = new Set(list.map((e) => e.week));
   const shown = list.filter((e) => (filter === 'heavy' ? e.week !== 1 : e.week === filter));
@@ -128,7 +127,7 @@ export function ExerciseDetail({ seriesKey }) {
           ${e.drops.map((s) => html`<span class="drop"><${SetText} set=${s} category=${category} /></span>`)}
         </div>
         ${d
-          ? html`<div class="expo__cmp"><span class=${'delta--' + d.tone}>${d.word}</span> — ${d.detail}; к ${fmtDay(c.cmp.prev.date)}</div>`
+          ? html`<div class="expo__cmp"><span class=${'delta--' + d.tone}>${d.word}</span> — ${d.detail}; к ${fmtDay(c.cmp.prev.date)}${d.bodyweight ? html`<br /><span class="muted">${d.bodyweight}</span>` : null}</div>`
           : null}
         ${c?.notes?.length ? html`<div class="expo__cmp">${c.notes.join('; ')}</div>` : null}
         ${e.note ? html`<div class="expo__cmp">${e.note}</div>` : null}

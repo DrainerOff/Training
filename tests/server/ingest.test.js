@@ -221,7 +221,9 @@ test('a refused line says why: in the answer, in its message and in the log, nev
   const log = rows(gas, 'App_HealthLog');
   assert.match(log[0].errors, /ISO 8601.* ×1; нужно 4 поля.* ×1$/);
   assert.equal(log[1].errors, '');
-  assert.ok(!JSON.stringify(log).includes('84'), 'no values in the log');
+  // received_at is the server clock: its milliseconds can read «84» by chance, it holds no value.
+  const logged = log.map(({ received_at, ...r }) => r);
+  assert.ok(!JSON.stringify(logged).includes('84'), 'no values in the log');
 });
 
 test('a request refused as a whole (too big, too many lines, unknown type) is logged too', () => {

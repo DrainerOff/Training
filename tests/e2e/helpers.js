@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { convertSnapshot } from '../helpers/legacy-import.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const SAMPLE_PROGRAM = fs.readFileSync(path.join(ROOT, 'tests/fixtures/sample-program.txt'), 'utf8');
@@ -10,13 +11,24 @@ export async function ready(page) {
   await page.waitForFunction(() => window.__trainer && window.__trainer.store.state.loaded);
 }
 
+// A phone set up like the owner's after the first start of v1.0–v1.2: the program and the
+// 16.10.2026 workout with that day's weight and sleep (synthetic values), queued for the sheet
+// as the one-time import did. v1.3 doesn't ship this import any more.
+export const OWNER = convertSnapshot();
+export async function seedOwner(page, { workout = true } = {}) {
+  await page.evaluate(async (data) => {
+    await window.__trainer.store.applyRemote(data, { queue: true });
+  }, workout ? { program: OWNER.program, sessions: OWNER.sessions, sets: OWNER.sets, metrics: OWNER.metrics } : { program: OWNER.program });
+  await page.waitForFunction(() => !window.__trainer.store.state.program.draft);
+}
+
 // Program goes in through the real UI path (paste text → preview → confirm).
 export async function importProgramViaUi(page, text = SAMPLE_PROGRAM) {
   await page.getByRole('button', { name: 'Вставить текстом' }).click();
   await page.getByPlaceholder('Вставьте программу').fill(text);
   await page.getByRole('button', { name: 'Заменить программу' }).click();
   await page.getByRole('button', { name: 'Заменить', exact: true }).click();
-  await page.getByRole('button', { name: 'Начать тренировку' }).waitFor();
+  await page.waitForFunction(() => !window.__trainer.store.state.program.draft);
 }
 
 export async function seedHistory(page, text = SAMPLE_HISTORY) {

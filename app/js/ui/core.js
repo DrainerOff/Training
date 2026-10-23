@@ -62,6 +62,7 @@ const ICONS = {
   ruler: 'M3.5 15.5l12-12 5 5-12 12zM7.5 11.5l2 2M10.5 8.5l2 2M13.5 5.5l2 2',
   moon: 'M20 14.5A8.5 8.5 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z',
   pulse: 'M3 12h4l2.5-5 4.5 10 2.5-5H21',
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5.5M12 7.5h.01',
 };
 
 export function Icon({ name, label = null }) {
@@ -88,6 +89,15 @@ export function fmtWeight(w, category) {
 
 export function SetText({ set, category, showRir = true }) {
   return html`<span>${set.drop ? 'дроп ' : ''}${fmtWeight(set.weight, category)}×${set.reps}${showRir && set.rir != null ? html`<sup>${fmtNum(set.rir)}</sup>` : ''}</span>`;
+}
+
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    app.ui.toast('Скопировано');
+  } catch {
+    app.ui.toast('Не удалось скопировать — выделите текст вручную');
+  }
 }
 
 export function Seg({ options, value, onChange, fill = false, label }) {

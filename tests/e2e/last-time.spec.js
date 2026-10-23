@@ -4,7 +4,7 @@
 // Variants never mix: Hammer vs dumbbells, barbell incline vs flat, pull-up grips.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
-import { ready, dock, logButton } from './helpers.js';
+import { ready, dock, logButton, seedOwner } from './helpers.js';
 
 let web;
 let base;
@@ -19,7 +19,7 @@ const prev = (page) => page.locator('.dock__prev');
 async function start(page, { week, day } = {}) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   if (week) {
     await page.getByRole('button', { name: 'Другой день или неделя' }).click();
     await page.getByRole('group', { name: 'Неделя цикла' }).getByRole('button').nth(week - 1).click();
@@ -39,7 +39,7 @@ test('same week of the cycle: last time for this exact variant, the current set 
   await start(page, { week: 2, day: 1 });
   await expect(dock(page)).toContainText('Подтягивания прямым хватом');
   await expect(prev(page)).toHaveAttribute('data-kind', 'same');
-  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 24×6, 24×6, 24×6');
+  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 20×6, 20×6, 20×6');
   await expect(prev(page).locator('.dock__prev-label')).toHaveText('Прошлый раз');
   await expect(prev(page).locator('.dock__prev-date')).toHaveText('16.10');
   await expect(prev(page).locator('.is-now')).toHaveCount(1);
@@ -50,7 +50,7 @@ test('same week of the cycle: last time for this exact variant, the current set 
 
   // Hammer has history, the dumbbell variant of the same slot does not — never mixed.
   await page.getByRole('button', { name: /Наклонный жим: Hammer - наклон/ }).click();
-  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 90×9, 90×9, 90×8');
+  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 85×10, 85×9, 85×9');
   await swapTo(page, /Гантели - наклон/);
   await expect(prev(page)).toHaveAttribute('data-kind', 'first');
   await expect(prev(page)).toHaveText('Первое выполнение');
@@ -59,7 +59,7 @@ test('same week of the cycle: last time for this exact variant, the current set 
   await page.getByRole('button', { name: /Жим штанги лежа: Штанга - наклон/ }).click();
   await expect(prev(page)).toHaveText('Первое выполнение');
   await swapTo(page, /Штанга - горизонт/);
-  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 80×7, 75×9, 75×9, 75×10');
+  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 70×8, 70×9, 67,5×10, 67,5×10');
 });
 
 test('another week: the latest result is shown as another phase, reps follow this week', async ({ page }) => {
@@ -67,10 +67,10 @@ test('another week: the latest result is shown as another phase, reps follow thi
   await page.getByRole('button', { name: /Наклонный жим: Hammer - наклон/ }).click();
   await expect(prev(page)).toHaveAttribute('data-kind', 'other');
   await expect(prev(page).locator('.dock__prev-label')).toHaveText('Другая фаза · нед. 2');
-  await expect(prev(page)).toHaveAttribute('aria-label', 'Другая фаза, неделя 2, 16 октября: 90×9, 90×9, 90×8');
+  await expect(prev(page)).toHaveAttribute('aria-label', 'Другая фаза, неделя 2, 16 октября: 85×10, 85×9, 85×9');
   await expect(dock(page)).toContainText('из другой фазы');
-  // Week 3 is 6–8 reps: the weight comes from week 2 as a reference, the 9 reps don't.
-  await expect(logButton(page)).toContainText('90 × 8');
+  // Week 3 is 6–8 reps: the weight comes from week 2 as a reference, the 10 reps don't.
+  await expect(logButton(page)).toContainText('85 × 8');
 });
 
 test('no history for this variant: «Первое выполнение», nothing borrowed from another grip', async ({ page }) => {

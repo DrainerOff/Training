@@ -12,12 +12,14 @@ export const STORES = {
   body: 'id', // body measurements: weight, waist, girths (since version 4)
   sleep: 'id', // main sleep per wake date (since version 4)
   phases: 'id', // bulk / cut / maintenance periods with a target rate (since version 5)
+  nutrition: 'id', // calories and macros per accounting day (since version 6)
+  nutritionGoals: 'id', // nutrition goals per phase (since version 6)
   outbox: 'key',
   kv: 'k',
 };
 // Bumped when a store is added. The upgrade only creates missing stores — existing data is
 // never touched. A database from a newer release is opened as it is (see openOnce).
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 // Every IndexedDB request below has a deadline. WebKit has had bugs where `open()` or a
 // transaction never fires success *or* error in a regular (disk-backed) Safari tab while a

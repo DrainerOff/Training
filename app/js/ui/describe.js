@@ -19,5 +19,14 @@ export function describeComparison(cmp) {
     detail = `${pct >= 0 ? '+' : '−'}${fmtNum(Math.abs(pct), 1)}% силы по подходам`;
   }
   if (cmp.setsDelta < 0) detail += `, подходов меньше на ${-cmp.setsDelta}`;
-  return { tone, word, detail, short: `${word}, ${detail}` };
+  return { tone, word, detail, short: `${word}, ${detail}`, bodyweight: bodyweightNote(cmp.bodyweight) };
+}
+
+// For exercises with the body as part of the load: what the comparison knew of the body weight.
+export function bodyweightNote(bw) {
+  if (!bw?.share) return null;
+  if (bw.missing === 'both') return 'масса тела на эти даты неизвестна — сравнение по добавленному весу и повторениям';
+  if (bw.missing) return `масса тела известна только ${bw.missing === 'cur' ? 'на прошлую дату' : 'на эту дату'} — считается одинаковой`;
+  if (Math.abs(bw.cur - bw.prev) >= 0.05) return `с учётом массы тела: ${fmtNum(bw.prev, 1)} → ${fmtNum(bw.cur, 1)} кг`;
+  return null;
 }

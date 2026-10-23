@@ -8,9 +8,8 @@ import { createSync } from './data/sync.js';
 import { mount } from './ui/app.js';
 import { app } from './ui/core.js';
 import { applyTheme } from './ui/settings.js';
-import { applyLegacyImport } from './data/legacy-import.js';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 // Replaced with the commit hash on deploy (same as in sw.js) — shown in Settings.
 export const BUILD = '__BUILD__';
 
@@ -48,9 +47,6 @@ async function start() {
     await adapter.write([{ store: 'kv', value: { k: 'lastLaunchAt', v: Date.now() } }]);
   }
   applyTheme(store.state.kv.theme);
-  // First launch only; every write has a deadline, and a failed import is retried next time.
-  boot.stage('import');
-  const importError = await importBundled(store);
 
   boot.stage('ui');
   const sync = createSync(store);
@@ -64,10 +60,6 @@ async function start() {
 
   // Debug/test handle; harmless in production.
   window.__trainer = { store, sync, build: BUILD };
-
-  if (importError) {
-    app.ui?.toast(`Перенос из Google Таблицы не выполнен: ${importError}. Повторю при следующем запуске.`, { ms: 8000 });
-  }
 
   window.addEventListener('online', () => sync.syncNow());
   document.addEventListener('visibilitychange', () => {
@@ -89,26 +81,6 @@ async function start() {
   }
 
   setupServiceWorker();
-}
-
-// One-time import of the program and the 16.10.2026 workout from the old Google Sheet.
-// Idempotent; skipped when `trainer.skipBundledImport` is set (used by tests). Runs before
-// the first sync, so a fresh device never pushes a half-imported state. Returns an error text.
-async function importBundled(store) {
-  let skip = false;
-  try {
-    skip = localStorage.getItem('trainer.skipBundledImport') === '1';
-  } catch {
-    skip = false;
-  }
-  if (skip) return null;
-  try {
-    await applyLegacyImport(store);
-    return null;
-  } catch (err) {
-    console.error('Bundled import failed', err);
-    return err?.message || String(err);
-  }
 }
 
 function setupServiceWorker() {

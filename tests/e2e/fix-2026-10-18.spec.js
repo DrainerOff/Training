@@ -1,10 +1,10 @@
-// The v1.0.1 correction card on a copy of the owner's real 18.10.2026 rows: what it shows, that
+// The v1.0.1 correction card on the 18.10.2026 rows (ids and keys as recorded, values synthetic): what it shows, that
 // nothing changes before «Исправить», the result in the app and in the sheet, the second device,
 // «Отменить», and the smallest iPhone.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
-import { realSession, realSets } from '../helpers/real-data.js';
-import { ready, connectSync } from './helpers.js';
+import { session1018, sets1018 } from '../helpers/workout-2026-10-18.js';
+import { ready, connectSync, seedOwner } from './helpers.js';
 
 const SID = 'ssmve7dlgnd8b059146ff3fc37';
 const MOVED_TO = ['giperekstenziya-v-trenazhere', 'obratnaya-babochka-dvumya-rukami', 'tyaga-shtangi-k-podborodku-v-smite'];
@@ -21,13 +21,13 @@ test.afterAll(() => web?.close());
 async function phone(page, gas) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   if (gas) await connectSync(page, execUrl(gas), gas.token);
   await page.evaluate(async ({ s, sets }) => {
     const { store, sync } = window.__trainer;
     await store.applyRemote({ sessions: [s], sets }, { queue: true });
     await sync.syncNow();
-  }, { s: realSession(), sets: realSets() });
+  }, { s: session1018(), sets: sets1018() });
 }
 
 const execUrl = (gas) => `http://127.0.0.1:${gas.server.address().port}/exec`;
@@ -61,11 +61,11 @@ test('the card shows the exact records; nothing changes until «Исправит
     const items = card(page).locator('.fix__list li');
     await expect(items).toHaveCount(3);
     await expect(items.nth(0)).toContainText('Гиперэкстензия с весом → Гиперэкстензия в тренажере');
-    await expect(items.nth(0)).toContainText('50×10, 55×10, 60×10');
+    await expect(items.nth(0)).toContainText('40×10, 45×10, 50×10');
     await expect(items.nth(1)).toContainText('Кроссовер на заднюю дельту → Обратная бабочка двумя руками');
-    await expect(items.nth(1)).toContainText('30×8, 30×8, 30×8');
+    await expect(items.nth(1)).toContainText('25×9, 25×9, 25×8');
     await expect(items.nth(2)).toContainText('Подъем EZ-грифа перед собой → Тяга штанги к подбородку в Смите');
-    await expect(items.nth(2)).toContainText('55×10, 65×10, 65×10');
+    await expect(items.nth(2)).toContainText('45×10, 50×10, 50×9');
     await expect(card(page)).toContainText('Веса, повторения, RIR и дата не меняются');
     await page.reload();
     await ready(page);
@@ -88,7 +88,7 @@ test('the card shows the exact records; nothing changes until «Исправит
     await page.evaluate((id) => import('./js/ui/core.js').then(({ app }) => app.ui.go({ view: { type: 'session', id } })), SID);
     await page.getByRole('button', { name: /^Тяга штанги к подбородку в Смите: 3 из/ }).click();
     await expect(page.locator('.panel .set')).toHaveCount(3); // the exercise is complete: just its three sets
-    await expect(page.locator('.panel .set__nums').first()).toContainText('55');
+    await expect(page.locator('.panel .set__nums').first()).toContainText('45');
     const day2 = await page.evaluate(() => window.__trainer.store.state.program.days.find((d) => d.day === 2).slots.map((s) => s.options.map((o) => o.name).join(' / ')));
     expect(day2[2]).toBe('Гиперэкстензия в тренажере / Гиперэкстензия с весом');
     expect(day2[4]).toBe('Кроссовер на заднюю дельту / Обратная бабочка двумя руками / Обратная бабочка одной рукой');
@@ -106,9 +106,9 @@ test('the card shows the exact records; nothing changes until «Исправит
     expect(s.sets).toHaveLength(sheetBefore.sets.length);
     expect(new Set(s.sets.map((r) => r.id)).size).toBe(s.sets.length);
     expect(s.sets.filter((r) => MOVED_TO.includes(r.series_key)).map((r) => `${r.exercise} ${r.weight_kg}×${r.reps}`)).toEqual([
-      'Гиперэкстензия в тренажере 50×10', 'Гиперэкстензия в тренажере 55×10', 'Гиперэкстензия в тренажере 60×10',
-      'Обратная бабочка двумя руками 30×8', 'Обратная бабочка двумя руками 30×8', 'Обратная бабочка двумя руками 30×8',
-      'Тяга штанги к подбородку в Смите 55×10', 'Тяга штанги к подбородку в Смите 65×10', 'Тяга штанги к подбородку в Смите 65×10',
+      'Гиперэкстензия в тренажере 40×10', 'Гиперэкстензия в тренажере 45×10', 'Гиперэкстензия в тренажере 50×10',
+      'Обратная бабочка двумя руками 25×9', 'Обратная бабочка двумя руками 25×9', 'Обратная бабочка двумя руками 25×8',
+      'Тяга штанги к подбородку в Смите 45×10', 'Тяга штанги к подбородку в Смите 50×10', 'Тяга штанги к подбородку в Смите 50×9',
     ]);
     expect(s.sessions.filter((r) => r.id === SID)).toHaveLength(1);
     expect(s.program.find((r) => r.slot_id === 'D2-06').keys).toBe('tyaga-shtangi-k-podborodku-v-smite / podem-ez-grifa-pered-soboy');

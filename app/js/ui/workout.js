@@ -8,6 +8,7 @@ import { derived, latestBodyweight, recordsDerived } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures } from '../lib/plateau.js';
+import { recommend, fmtLoad } from '../lib/recommend.js';
 import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
 import { SETUP_MAX } from '../data/store.js';
@@ -15,20 +16,27 @@ import { SETUP_MAX } from '../data/store.js';
 const STALE_MS = 12 * 3600 * 1000;
 
 function buildRows(session) {
-  const { series } = derived();
+  const { series, bodyweightAt, shareOf } = derived();
   return session.items.map((item) => {
     const sets = app.store.setsOf(session.id, item.slotId);
     const target = itemTarget(item, session.week);
-    const prevs = previousExposures(series.get(item.seriesKey), {
+    const list = series.get(item.seriesKey);
+    const prevs = previousExposures(list, {
       week: session.week,
       sessionId: session.id,
       date: session.date,
       startedAt: session.startedAt,
     });
+    // A suggestion beside «Прошлый раз», never written into the composer by itself.
+    const rec = recommend({
+      list, session, target, category: item.category, step: item.step || 2.5,
+      share: shareOf(item.seriesKey, item.category), todaySets: sets, todayFlags: item.flags || {},
+      bodyweightToday: bodyweightAt(session.date),
+    });
     const working = sets.filter((s) => !s.drop).length;
     const drops = sets.length - working;
     const complete = !!item.skipped || (working >= target.sets && drops >= target.drop);
-    return { item, sets, target, prevs, working, drops, complete };
+    return { item, sets, target, prevs, rec, working, drops, complete };
   });
 }
 
@@ -346,6 +354,7 @@ function Dock({ row, session, live, onLogged, justLogged }) {
       ${rest ? html`<span class="dock__rest" aria-label=${'Отдых ' + rest}>отдых ${rest}</span>` : null}
     </div>
     <${LastTime} prevs=${prevs} category=${category} index=${working} drop=${dropMode} />
+    ${dropMode ? null : html`<${Recommendation} rec=${row.rec} category=${category} current=${v.weight} onUse=${(w) => update({ weight: w, touchedW: true })} />`}
     <div class="dock__grid">
       <div>
         <div class="field__label"><span>${category === 'pullup' ? 'Доп. вес, кг' : 'Вес, кг'}</span><span class="field__hint">${weightHint}</span></div>
@@ -388,6 +397,37 @@ function LastTime({ prevs, category, index, drop }) {
     <span class="dock__prev-sets num">${sets.map((t, i) => html`<span class=${i === now ? 'is-now' : null}>${t}</span>`)}</span>
     <span class="dock__prev-date">${fmtDayShort(p.date)}</span>
   </div>`;
+}
+
+// Today's weight, one compact line under «Прошлый раз»: what and why (ⓘ), and «Использовать» to put
+// it into the weight field. Nothing changes until that tap. Not shown for a drop set.
+function Recommendation({ rec, category, current, onUse }) {
+  if (!rec) return null;
+  const info = () => openSheet((close) => html`<${RecommendationSheet} rec=${rec} category=${category} onClose=${close} />`);
+  const has = rec.weight != null;
+  const tag = rec.kind === 'up' ? (rec.conditional ? 'условно' : 'повысить') : rec.kind === 'hold' ? 'закрепить' : '';
+  const said = has ? `Рекомендуем сегодня: ${fmtLoad(rec.weight, category)}, ${rec.label.toLowerCase()}${rec.conditional ? ', условно' : ''}` : `Рекомендация: ${rec.label.toLowerCase()}`;
+  return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
+    <button type="button" class="dock__rec-why" onClick=${info} aria-label=${said + '. Почему'}>
+      ${has
+        ? html`<span class="dock__rec-label">Сегодня:</span><b class="num">${fmtLoad(rec.weight, category)}</b><span class="dock__rec-tag">· ${tag}</span>`
+        : html`<span class="dock__rec-label dock__rec-label--keep">Рекомендация:</span><span class="dock__rec-tag">недостаточно данных</span>`}
+      <${Icon} name="info" />
+    </button>
+    ${has && current !== rec.weight
+      ? html`<button type="button" class="dock__rec-use" onClick=${() => onUse(rec.weight)}>Использовать</button>`
+      : null}
+  </div>`;
+}
+
+function RecommendationSheet({ rec, category, onClose }) {
+  const head = rec.weight != null ? `${rec.label}: ${fmtLoad(rec.weight, category)}${rec.conditional ? ' (условно)' : ''}` : rec.label;
+  return html`<${Sheet} title="Рекомендация на сегодня" onClose=${onClose}>
+    <p class="rec-sheet__head"><b>${head}</b></p>
+    <ul class="rec-sheet__why">${rec.reasons.map((r) => html`<li>${r.replace(/ кг/g, '\u00a0кг')}</li>`)}</ul>
+    <p class="muted" style="font-size:13px">Это подсказка по вашим прошлым подходам, а не обещание результата. Вес в поле меняется, только если нажать «Использовать». Сравнение — только с той же неделей цикла.</p>
+    <div class="btn-row"><button type="button" class="btn btn--block" onClick=${onClose}>Понятно</button></div>
+  <//>`;
 }
 
 // ---------------------------------------------------------------- sheets
@@ -704,7 +744,7 @@ function openFinish(session, rows) {
 }
 
 function FinishSheet({ session, rows, onClose }) {
-  const bw = latestBodyweight();
+  const { bodyweightAt, shareOf } = derived();
   const missing = rows.reduce((t, r) => t + (r.item.skipped ? 0 : Math.max(0, r.target.sets - r.working)), 0);
   const allSets = rows.reduce((t, r) => t + r.sets.length, 0);
   const minutes = allSets ? Math.round((Math.max(...rows.flatMap((r) => r.sets.map((s) => s.createdAt))) - session.startedAt) / 60000) : 0;
@@ -722,14 +762,14 @@ function FinishSheet({ session, rows, onClose }) {
     <p class="muted">${allSets} ${plural(allSets, 'подход', 'подхода', 'подходов')}${minutes > 0 ? `, ${minutes} мин` : ''}. Сравнение — с той же неделей прошлого цикла.</p>
     <ul class="rows" style="margin-top:10px">
       ${rows.filter((r) => r.sets.length).map((r) => {
-        const cur = { sets: r.sets.filter((s) => !s.drop), category: r.item.category };
+        const cur = { sets: r.sets.filter((s) => !s.drop), category: r.item.category, bw: bodyweightAt(session.date) };
         const ref = r.prevs.samePhase;
-        const cmp = ref && cur.sets.length ? compareExposures(cur, ref, { category: r.item.category, bodyweight: bw }) : null;
+        const cmp = ref && cur.sets.length ? compareExposures(cur, ref, { category: r.item.category, share: shareOf(r.item.seriesKey, r.item.category) }) : null;
         const d = cmp ? describeComparison(cmp) : null;
         return html`<li class="row">
           <span class="row__title">${r.item.name}</span>
           <span class=${d ? 'delta--' + d.tone : 'muted'} style="font-size:14px">${d ? d.short : 'нет сравнения'}</span>
-          <span class="row__sub">${r.sets.map((s) => `${s.drop ? 'дроп ' : ''}${fmtWeight(s.weight, r.item.category)}×${s.reps}`).join(', ')}</span>
+          <span class="row__sub">${r.sets.map((s) => `${s.drop ? 'дроп ' : ''}${fmtWeight(s.weight, r.item.category)}×${s.reps}`).join(', ')}${d?.bodyweight ? html`<br />${d.bodyweight}` : null}</span>
         </li>`;
       })}
     </ul>
