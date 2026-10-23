@@ -1,12 +1,12 @@
-// The owner's 18.10.2026 workout as read from the sheet before v1.0.1
-// (tests/fixtures/real/2026-10-18-before-v1.0.1.json), turned into app records the way a pull
-// from the sheet delivers them.
+// The 18.10.2026 workout rows as the sheet stored them before v1.0.1 — ids, slots and series keys
+// as recorded, weights, reps, RIR and times synthetic (tests/fixtures/synthetic/
+// 2026-10-18-before-v1.0.1.json) — turned into app records the way a pull from the sheet delivers them.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-export const REAL = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/real/2026-10-18-before-v1.0.1.json'), 'utf8'));
+export const WORKOUT_1018 = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/synthetic/2026-10-18-before-v1.0.1.json'), 'utf8'));
 
 const num = (v) => (v === '' || v == null ? null : Number(String(v).replace(',', '.')));
 const bool = (v) => String(v).toUpperCase() === 'TRUE';
@@ -16,8 +16,8 @@ function table(rows) {
   return data.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
 }
 
-export function realSession() {
-  const [r] = table(REAL.App_Sessions);
+export function session1018() {
+  const [r] = table(WORKOUT_1018.App_Sessions);
   return {
     id: r.id,
     date: r.date,
@@ -34,8 +34,8 @@ export function realSession() {
   };
 }
 
-export function realSets() {
-  return table(REAL.App_Sets).map((r) => ({
+export function sets1018() {
+  return table(WORKOUT_1018.App_Sets).map((r) => ({
     id: r.id,
     sessionId: r.session_id,
     slotId: r.slot_id,
@@ -60,8 +60,8 @@ export function realSets() {
 }
 
 // Day 2 of App_Program as the sheet has it: [{ slotId, keys, names }].
-export function realProgramDay2() {
-  return table(REAL.App_Program_day2).map((r) => ({
+export function programDay2Before1018() {
+  return table(WORKOUT_1018.App_Program_day2).map((r) => ({
     slotId: r.slot_id,
     keys: r.keys.split(' / '),
     names: [r.exercise, ...(r.alternatives ? r.alternatives.split(' / ') : [])],

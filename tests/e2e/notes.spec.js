@@ -3,7 +3,7 @@
 // double tap on the last set of an exercise.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
-import { ready, connectSync, logButton } from './helpers.js';
+import { ready, connectSync, logButton, seedOwner } from './helpers.js';
 
 const HAMMER = 'Наклонный жим: Hammer - наклон';
 const DUMBBELLS = 'Наклонный жим: Гантели - наклон';
@@ -21,7 +21,7 @@ test.afterAll(() => web?.close());
 async function gym(page, { cycle = 2 } = {}) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   await page.evaluate((c) => window.__trainer.store.startSession({ cycle: c, week: 2, day: 1 }), cycle);
   await expect(page.locator('.panel')).toBeVisible();
 }

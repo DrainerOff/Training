@@ -7,7 +7,7 @@ import { PHASE, phaseSummary, fmtTarget, fmtRange } from '../lib/program.js';
 import { previousExposures } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayWeekday, plural } from '../lib/util.js';
 import { CycleWeekDay } from './workout.js';
-import { pendingFix, applyFix, revertFix } from '../data/fixes.js';
+import { pendingFixes, applyFix, revertFix } from '../data/fixes.js';
 
 export function Home({ syncStatus }) {
   const st = app.store.state;
@@ -34,14 +34,14 @@ export function Home({ syncStatus }) {
       <button type="button" class="icon-btn" aria-label="Настройки" onClick=${() => app.ui.go({ view: { type: 'settings' } })}><${Icon} name="gear" /></button>
     </header>
 
-    <${ImportNotice} />
-    <${FixNotice} />
+    <${FixNotices} />
 
     ${st.program.draft
       ? html`<div class="notice notice--caution">
           <h3>Перенесите программу</h3>
-          <p>Сейчас в программе только подтягивания. Добавьте упражнения из исходной программы — один раз: вставьте текстом или соберите в редакторе.</p>
+          <p>Сейчас в программе только подтягивания. Если программа и тренировки уже есть в Google Таблице — подключите синхронизацию в настройках, и всё загрузится оттуда. Иначе добавьте упражнения один раз: вставьте текстом или соберите в редакторе.</p>
           <div class="btn-row">
+            <button type="button" class="btn" onClick=${() => app.ui.go({ view: { type: 'settings' } })}>Синхронизация</button>
             <button type="button" class="btn" onClick=${() => app.ui.go({ view: { type: 'program-import' } })}>Вставить текстом</button>
             <button type="button" class="btn" onClick=${() => app.ui.go({ view: { type: 'program' } })}>Редактор</button>
           </div>
@@ -106,56 +106,30 @@ function CycleMap({ plan, days, sessions }) {
   </div>`;
 }
 
-// Shown once after the bundled import from the old Google Sheet: what came in, what was skipped.
-function ImportNotice() {
-  const r = app.store.state.kv.importNotice;
-  if (!r || r.seen) return null;
-  const dismiss = () => app.store.setKV({ importNotice: { ...r, seen: true } });
-  const session = app.store.state.sessions.get('gs-s5');
-  if (r.problems?.length) {
-    return html`<div class="notice notice--caution">
-      <h3>Перенос из Google Таблицы не выполнен</h3>
-      <p>${r.problems.join('; ')}</p>
-      <div class="btn-row"><button type="button" class="btn" onClick=${dismiss}>Понятно</button></div>
-    </div>`;
-  }
-  const lines = [];
-  if (r.program) lines.push('программа: 4 дня, 3-недельный цикл, варианты упражнений');
-  if (r.sessions) lines.push(`тренировка 16 октября: ${r.sets} подходов`);
-  if (r.metrics) lines.push('вес тела и сон за 16 октября');
-  return html`<div class="notice">
-    <h3>Перенесено из Google Таблицы</h3>
-    <p>${lines.length ? lines.join('; ') + '.' : 'Новых данных нет.'} Исходные таблицы не изменялись.</p>
-    ${r.skipped.map((s) => html`<p>${s}</p>`)}
-    <div class="btn-row">
-      ${session && !session.deleted
-        ? html`<button type="button" class="btn" onClick=${() => { dismiss(); app.ui.go({ view: { type: 'session', id: session.id } }); }}>Открыть 16 октября</button>`
-        : null}
-      <button type="button" class="btn" onClick=${dismiss}>Понятно</button>
-    </div>
-  </div>`;
+// One-time corrections of recorded data (data/fixes.js): each is shown on a device that has those
+// records as recorded, until the owner applies it here (or another device's correction arrives
+// through sync). Nothing changes before «Исправить».
+const fixLater = new Set();
+let fixBusy = false;
+function FixNotices() {
+  const pending = pendingFixes(app.store.state).filter((x) => !fixLater.has(x.fix.id));
+  return pending.map(({ fix, plan }) => html`<${FixNotice} key=${fix.id} fix=${fix} plan=${plan} />`);
 }
 
-// The 18.10.2026 correction: shown on a device that has those records as recorded, until the
-// owner applies it here (or another device's correction arrives through sync). Nothing changes
-// before «Исправить».
-let fixLater = false;
-let fixBusy = false;
-function FixNotice() {
+function FixNotice({ fix, plan }) {
   const [, rerender] = useState(0);
-  const plan = fixLater ? null : pendingFix(app.store.state);
-  if (!plan) return null;
+  if (fixLater.has(fix.id)) return null;
   const apply = async () => {
     if (fixBusy) return;
     fixBusy = true;
     rerender((x) => x + 1);
     try {
-      const res = await applyFix(app.store);
+      const res = await applyFix(app.store, fix);
       if (res) {
-        const what = [res.sets ? `${res.sets} ${plural(res.sets, 'подход', 'подхода', 'подходов')}` : '', res.program ? 'программа дня 2' : ''].filter(Boolean).join(', ');
+        const what = [res.sets ? `${res.sets} ${plural(res.sets, 'подход', 'подхода', 'подходов')}` : '', res.program ? `программа дня ${fix.day}` : ''].filter(Boolean).join(', ');
         app.ui.toast(`Исправлено: ${what}`, {
           ms: 15000,
-          action: { label: 'Отменить', fn: () => revertFix(app.store).catch((err) => app.ui.toast(`Не удалось отменить: ${err.message}`)) },
+          action: { label: 'Отменить', fn: () => revertFix(app.store, fix).catch((err) => app.ui.toast(`Не удалось отменить: ${err.message}`)) },
         });
       }
     } catch (err) {
@@ -165,25 +139,24 @@ function FixNotice() {
       rerender((x) => x + 1);
     }
   };
-  return html`<div class="notice notice--caution fix" aria-label="Исправление тренировки 18 октября">
-    <h3>Исправить тренировку 18 октября</h3>
+  const many = new Set(plan.moves.map((m) => m.sessionId)).size > 1;
+  return html`<div class="notice notice--caution fix" aria-label=${fix.label}>
+    <h3>${fix.title}</h3>
     ${plan.moves.length
-      ? html`<p>Записано под упражнениями программы, а сделано на других тренажёрах. Подходы перейдут в серии того, что было сделано. Веса, повторения, RIR и дата не меняются.</p>`
+      ? html`<p>${fix.why} Веса, повторения, RIR и дата не меняются.</p>`
       : html`<p>Подходы уже перенесены, но в программе нет этих вариантов — вероятно, программу изменили на другом устройстве до синхронизации.</p>`}
     <ul class="fix__list">
       ${plan.moves.map((m) => html`<li>
-        <span class="fix__what"><span class="fix__from">${m.from.name}</span> → <b>${m.to.name}</b></span>
+        <span class="fix__what">${many ? html`<span class="fix__date">${fmtDay(m.date)}: </span>` : null}<span class="fix__from">${m.from.name}</span> → <b>${m.to.name}</b></span>
         <span class="fix__sets">${m.sets.length ? m.sets.map((x) => `${fmtWeight(x.weight, m.item.category)}×${x.reps}`).join(', ') : 'подходы уже перенесены, осталось название упражнения'}</span>
       </li>`)}
     </ul>
     ${plan.skipped.map((m) => html`<p>«${m.from.name}»: в этом упражнении есть подходы, записанные после тренировки, — его не трогаю. При необходимости — «Заменить» в этой тренировке.</p>`)}
-    ${plan.program
-      ? html`<p>Программа, день 2: основными станут «Гиперэкстензия в тренажере» и «Тяга штанги к подбородку в Смите», прежние варианты останутся альтернативами. К кроссоверу добавятся «Обратная бабочка двумя руками» и «одной рукой».</p>`
-      : null}
+    ${plan.program ? html`<p>${fix.programText}</p>` : null}
     <p>Перед изменением на телефоне сохраняется резервная копия, после — можно отменить.</p>
     <div class="btn-row">
       <button type="button" class="btn btn--primary" disabled=${fixBusy} onClick=${apply}>Исправить</button>
-      <button type="button" class="btn" onClick=${() => { fixLater = true; rerender((x) => x + 1); }}>Позже</button>
+      <button type="button" class="btn" onClick=${() => { fixLater.add(fix.id); rerender((x) => x + 1); }}>Позже</button>
     </div>
   </div>`;
 }

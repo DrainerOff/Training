@@ -1,21 +1,18 @@
-// Read-only snapshot of the owner's Google Sheet "Тренировки - прогресс и плато (Google Таблица)"
-// (id 10jlAOVqpZbhSr_-v5Ahz83oHcJFXZnz187nspKKlVkg), taken 2026-10-17 through the Google Sheets
-// connector. Cell values are copied verbatim from the API response; nothing was written back.
-// legacy-import.js converts this into app records. See docs/IMPORT.md for the mapping.
+// Synthetic stand-in for the read-only snapshot of the owner's old Google Sheet that v1.0–v1.2
+// bundled for the one-time import (tests/helpers/legacy-import.js). Same shape, the program rows
+// and footnotes as the program is described in the app; the workout numbers, body weight, sleep,
+// well-being, the sheet id and revision are made up. Real values are not kept in the repository.
 //
-// Only rows that carry data are included:
-//  * «Программа» A5:K34 — the current 4-day × 3-week program (header + 29 slots) and its footnotes;
+//  * «Программа» A5:K34 — the 4-day × 3-week program (header + 29 slots) and its footnotes;
 //  * «Главная» — the split lines (day titles);
 //  * «Дневник» — the 7 rows of session 5 (the only session with results), effective values;
 //  * «Сессии» — the session 5 row (the only row with a date), effective + displayed values.
-// The «Архив силовых» / «Архив замеров» tabs are not imported: the sheet itself marks them as
-// "несопоставимы с новой схемой" and "не полноценный лог".
 
 export const SNAPSHOT = {
   readAt: '2026-10-17',
-  spreadsheetId: '10jlAOVqpZbhSr_-v5Ahz83oHcJFXZnz187nspKKlVkg',
+  spreadsheetId: 'synthetic-spreadsheet-id',
   title: 'Тренировки - прогресс и плато (Google Таблица)',
-  revisionId: 'APfK_pAt2DLWGKtlRruGiPO5s7PDESnHqK4n4TM4aWhdKvdvDvUGQE9pTgsR6i1DchT1FrTTxCbWS6-bX7JYsi21PjmWv52ohmcEHGAQdCM',
+  revisionId: 'synthetic-revision',
 
   program: {
     range: 'Программа!A5:K38',
@@ -73,25 +70,25 @@ export const SNAPSHOT = {
     range: 'Дневник!A35:AD41',
     header: ['Сессия', 'Цикл', 'Нед.', 'День', 'Дата', 'Слот', 'Упражнение', 'Вариант', 'Подх.', 'Повторы', 'RIR план', 'Вес 1', 'Повт. 1', 'Вес 2', 'Повт. 2', 'Вес 3', 'Повт. 3', 'Вес 4', 'Повт. 4', 'RIR факт', 'Техника', 'Заметки', 'Сетов', 'Индекс', 'Прошлый', 'Δ, %', 'Без роста', 'Оценка', 'Дроп вес', 'Дроп повт.'],
     rows: [
-      [5, 1, 2, 1, 46311, 'D1-01', 'Подтягивания прямым хватом', 'Прямой хват', 3, '6', '1-2', 24, 6, 24, 6, 24, 6, null, null, null, null, null, 3, 24, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-02', 'Наклонный жим: Hammer / гантели', 'Hammer - наклон', 3, '8-10', '1-2', 90, 9, 90, 9, 90, 8, null, null, null, null, null, 3, 117, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-03', 'Горизонтальная тяга блока', 'Параллельная рукоять', 4, '8-10', '1-2', 90, 10, 90, 10, 90, 10, 90, 10, null, null, null, 4, 120, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-04', 'Жим штанги лежа (выбор угла)', 'Штанга - горизонт', 4, '8-10', '1-2', 80, 7, 75, 9, 75, 9, 75, 10, null, null, null, 4, 100, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-05', 'Сгибание рук на нижнем блоке', 'Косичка - нижний блок', 3, '8-10', '1-2', 27.5, 12, 27.5, 12, 27.5, 12, null, null, null, null, null, 3, 38.5, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-06', 'Разгибание рук из-за головы на блоке', 'Косичка - из-за головы', 3, '8-10', '1-2', 30, 12, 30, 12, 30, 11, null, null, null, null, null, 3, 42, null, null, null, 'Новая база', null, null],
-      [5, 1, 2, 1, 46311, 'D1-07', 'Пресс в тренажере', 'Тренажер для пресса', 3, '8-10', '1-2', 42.5, 8, 42.5, 8, 42.5, 8, null, null, null, null, null, 3, 53.83333333333333, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-01', 'Подтягивания прямым хватом', 'Прямой хват', 3, '6', '1-2', 20, 6, 20, 6, 20, 6, null, null, null, null, null, 3, 20, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-02', 'Наклонный жим: Hammer / гантели', 'Hammer - наклон', 3, '8-10', '1-2', 85, 10, 85, 9, 85, 9, null, null, null, null, null, 3, 113.33333333333333, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-03', 'Горизонтальная тяга блока', 'Параллельная рукоять', 4, '8-10', '1-2', 80, 10, 80, 10, 80, 10, 80, 10, null, null, null, 4, 106.66666666666666, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-04', 'Жим штанги лежа (выбор угла)', 'Штанга - горизонт', 4, '8-10', '1-2', 70, 8, 70, 9, 67.5, 10, 67.5, 10, null, null, null, 4, 91, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-05', 'Сгибание рук на нижнем блоке', 'Косичка - нижний блок', 3, '8-10', '1-2', 25, 12, 25, 12, 25, 11, null, null, null, null, null, 3, 35, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-06', 'Разгибание рук из-за головы на блоке', 'Косичка - из-за головы', 3, '8-10', '1-2', 27.5, 12, 27.5, 11, 27.5, 11, null, null, null, null, null, 3, 38.5, null, null, null, 'Новая база', null, null],
+      [5, 1, 2, 1, 46311, 'D1-07', 'Пресс в тренажере', 'Тренажер для пресса', 3, '8-10', '1-2', 40, 10, 40, 9, 40, 9, null, null, null, null, null, 3, 53.33333333333333, null, null, null, 'Новая база', null, null],
     ],
   },
 
-  // «Сессии» A10:J10. The sleep cell was typed as "8.4"; in the ru_RU locale Sheets stored it as a
-  // date (serial 46120 = 08.04.2026) while still displaying "8.4" — both forms are kept.
+  // «Сессии» A10:J10. A sleep cell typed like "7.5" in the ru_RU locale is stored by Sheets as a
+  // date (serial 46149 = 07.05.2026) while still displaying "7.5" — both forms are kept.
   sessions: {
     range: 'Сессии!A10:J10',
     header: ['ID', 'Цикл', 'Неделя', 'День', 'RIR план', 'Дата (ввод)', 'Вес утром, кг', 'Сон, ч', 'Самочувствие', 'Примечания / восстановление'],
     rows: [
       {
-        values: [5, 1, 2, 1, '1-2', 46311, 79.7, 46120, 'Отлично', null],
-        displayed: ['5', '1', '2', '1', '1-2', '16.10.2026', '79,7', '8.4', 'Отлично', ''],
+        values: [5, 1, 2, 1, '1-2', 46311, 81.2, 46149, 'Хорошо', null],
+        displayed: ['5', '1', '2', '1', '1-2', '16.10.2026', '81,2', '7.5', 'Хорошо', ''],
       },
     ],
   },

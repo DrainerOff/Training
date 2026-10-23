@@ -2,7 +2,7 @@
 
 import { html, useState, app, Icon, Sheet, openSheet, NumberPad, Stepper, RirPicker, confirmSheet, local } from './core.js';
 import { recordsDerived } from './derive.js';
-import { STATE, assess, describeEvent as describe, fmtLoad, repProgress, chartReps, estimateProgress, bodyweightNear, recentAchievements, day } from '../lib/records.js';
+import { STATE, assess, describeEvent as describe, fmtLoad, repProgress, chartReps, estimateProgress, recentAchievements, day } from '../lib/records.js';
 import { allOptions, CATEGORY } from '../lib/program.js';
 import { fmtDay, fmtDayShort, fmtNum, isoDate, normName, parseNum, plural, daysBetween } from '../lib/util.js';
 
@@ -29,9 +29,9 @@ const repsWord = (n) => plural(n, 'повторение', 'повторения'
 // ---------------------------------------------------------------- overview (in «Прогресс»)
 
 export function RecordsOverview() {
-  const { books, metrics, steps } = recordsDerived();
+  const { books, bodyweightAt, shareOf, steps } = recordsDerived();
   const today = isoDate();
-  const list = [...books.values()].map((b) => ({ book: b, a: assess(b, { today, metrics, step: steps.get(b.key) || 2.5 }) }));
+  const list = [...books.values()].map((b) => ({ book: b, a: assess(b, { today, bodyweightAt, share: shareOf(b.key, b.category), step: steps.get(b.key) || 2.5 }) }));
   list.sort((x, y) => RANK[x.a.state] - RANK[y.a.state] || (x.book.perfs.at(-1).date < y.book.perfs.at(-1).date ? 1 : -1));
   const fresh = recentAchievements(books, { today, days: 60, limit: 5 });
   const open = (key) => app.ui.go({ view: { type: 'records', key } });
@@ -73,16 +73,17 @@ export function RecordsOverview() {
 // ---------------------------------------------------------------- one exercise
 
 export function RecordsDetail({ seriesKey }) {
-  const { books, metrics, steps, duplicates } = recordsDerived();
+  const { books, bodyweightAt, shareOf, steps, duplicates } = recordsDerived();
   const [showCovered, setShowCovered] = useState(false);
   const book = books.get(seriesKey);
   const manual = [...app.store.state.records.values()].filter((r) => r.seriesKey === seriesKey && !r.deleted).sort((a, b) => (a.date < b.date ? 1 : -1));
   const name = book?.name || manual[0]?.exercise || seriesKey;
   const category = book?.category || manual[0]?.category || null;
   const today = isoDate();
-  const a = assess(book, { today, metrics, step: steps.get(seriesKey) || 2.5 });
+  const share = book ? shareOf(book.key, book.category) : 0;
+  const a = assess(book, { today, bodyweightAt, share, step: steps.get(seriesKey) || 2.5 });
   // The same numbers as the «1ПМ (расчёт)» chart: the best estimate of any day.
-  const est = book ? Math.max(0, ...estimateProgress(book, { metrics }).map((p) => p.value)) || null : null;
+  const est = book ? Math.max(0, ...estimateProgress(book, { bodyweightAt, share }).map((p) => p.value)) || null : null;
   const add = () => openRecordSheet({ preset: { seriesKey, exercise: name, category } });
 
   return html`<main class="screen">
@@ -121,7 +122,7 @@ export function RecordsDetail({ seriesKey }) {
         </div>
 
         <h2 class="section-title">Динамика</h2>
-        <${RecordChart} book=${book} metrics=${metrics} />
+        <${RecordChart} book=${book} bodyweightAt=${bodyweightAt} share=${share} />
 
         <h2 class="section-title">История рекордов</h2>
         <ol class="rec-history">
@@ -167,7 +168,7 @@ function niceTicks(lo, hi, n = 4) {
 
 // One rep count per chart (a record for 6 reps never shares a line with 10); "1ПМ (расчёт)"
 // is the only cross-rep view, and it says so.
-function RecordChart({ book, metrics }) {
+function RecordChart({ book, bodyweightAt, share }) {
   const reps = chartReps(book).slice(0, 5);
   const key = `records.chart:${book.key}`;
   const [mode, setModeRaw] = useState(() => {
@@ -182,7 +183,7 @@ function RecordChart({ book, metrics }) {
   const today = isoDate();
   const isEst = mode === 'e1rm';
   const pts = isEst
-    ? estimateProgress(book, { metrics }).map((p) => ({ date: p.date, v: p.value, label: `${setText(p.from, book.category)}${p.from.rir != null ? `, RIR ${fmtNum(p.from.rir)}` : ''}`, source: p.from.source }))
+    ? estimateProgress(book, { bodyweightAt, share }).map((p) => ({ date: p.date, v: p.value, label: `${setText(p.from, book.category)}${p.from.rir != null ? `, RIR ${fmtNum(p.from.rir)}` : ''}`, source: p.from.source }))
     : repProgress(book, mode).map((p) => ({ date: p.date, v: p.weight, label: `${fmtLoad(p.weight, book.category)} × ${mode}`, source: p.source }));
 
   const tabs = html`<div class="seg seg--chips" role="group" aria-label="Что показать">
@@ -292,7 +293,7 @@ export function openRecordSheet({ record = null, preset = null } = {}) {
 }
 
 function RecordSheet({ record, preset, onClose }) {
-  const { metrics, steps } = recordsDerived();
+  const { bodyweightAt, steps } = recordsDerived();
   const init = record || preset || {};
   const [start] = useState(() => ({
     seriesKey: init.seriesKey || null,
@@ -311,7 +312,7 @@ function RecordSheet({ record, preset, onClose }) {
   const up = (p) => setV((x) => ({ ...x, ...p }));
   const pullup = v.category === 'pullup';
   const step = (v.seriesKey && steps.get(v.seriesKey)) || 2.5;
-  const knownBw = pullup ? bodyweightNear(metrics, v.date) : null;
+  const knownBw = pullup && /^\d{4}-\d{2}-\d{2}$/.test(v.date) ? bodyweightAt(v.date) : null;
   const today = isoDate();
   const problem = !v.seriesKey
     ? 'Выберите упражнение'
@@ -376,7 +377,7 @@ function RecordSheet({ record, preset, onClose }) {
       <label class="kv"><span>Дата</span>
         <input class="input" type="date" max=${today} value=${v.date} onInput=${(e) => up({ date: e.currentTarget.value })} /></label>
       ${pullup
-        ? html`<label class="kv"><span>Масса тела, кг — необязательно${knownBw ? ` (записано: ${fmtNum(knownBw)})` : ''}</span>
+        ? html`<label class="kv"><span>Масса тела, кг — необязательно${knownBw ? ` (${knownBw.measured ? 'взвешивание в этот день' : `ближайшее взвешивание ${fmtDay(knownBw.date)}`}: ${fmtNum(knownBw.value)})` : ''}</span>
             <input class="input" inputmode="decimal" placeholder="не указана" value=${v.bodyweight ?? ''} onInput=${(e) => up({ bodyweight: parseNum(e.currentTarget.value) })} /></label>`
         : null}
       <label class="kv"><span>Заметка — необязательно</span>

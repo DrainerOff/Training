@@ -1039,7 +1039,8 @@ p {
   gap: 1px;
   font-size: 14px;
 }
-.fix__from {
+.fix__from,
+.fix__date {
   color: var(--steel);
 }
 .fix__sets {

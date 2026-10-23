@@ -2,7 +2,8 @@
 // against the DOM of each screen. Used by the live check (tools/blockers/check.mjs) and the
 // snapshot test (tests/e2e/blockers.spec.js).
 
-import { realSession, realSets } from '../../tests/helpers/real-data.js';
+import { session1018, sets1018 } from '../../tests/helpers/workout-2026-10-18.js';
+import { convertSnapshot } from '../../tests/helpers/legacy-import.js';
 
 // Runs in the page: which selectors match at least one element right now.
 export function matchSelectors(page, selectors) {
@@ -29,11 +30,12 @@ export function matchSelectors(page, selectors) {
 export async function walkScreens(page, url, visit) {
   await page.goto(url);
   await page.waitForFunction(() => window.__trainer?.store.state.loaded && !document.getElementById('boot'));
-  await page.getByText('Перенесено из Google Таблицы').waitFor();
-  await visit('home (first launch notice)');
-  await page.getByRole('button', { name: 'Понятно' }).click();
-  // The owner's 18.10.2026 workout as recorded: the one-time correction card appears.
-  await page.evaluate(({ s, sets }) => window.__trainer.store.applyRemote({ sessions: [s], sets }), { s: realSession(), sets: realSets() });
+  await page.getByText('Перенесите программу').waitFor();
+  await visit('home (first launch)');
+  // A phone like the owner's (synthetic values): the program, the 16.10 workout and the
+  // 18.10.2026 workout as recorded — the one-time correction card appears.
+  const owner = convertSnapshot();
+  await page.evaluate(({ program, sessions, sets }) => window.__trainer.store.applyRemote({ program, sessions, sets }), { program: owner.program, sessions: [...owner.sessions, session1018()], sets: [...owner.sets, ...sets1018()] });
   await page.getByText('Исправить тренировку 18 октября').waitFor();
   await visit('home (correction card)');
   await page.getByRole('button', { name: 'Позже' }).click();

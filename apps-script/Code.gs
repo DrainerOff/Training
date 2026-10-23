@@ -17,7 +17,10 @@
 // (App_Sleep). Old clients never send them and never receive them. `ingest`: iPhone Shortcuts
 // add weight, waist and sleep with their own key, which can do nothing else.
 // 5: bulk / cut / maintenance phases with a target rate (App_Phases).
-var API_VERSION = 5;
+// 6: the lifted part of the body weight per exercise variant (App_Exercises bw_share); the sync
+// answer says when «Команды» last delivered Health data (from App_HealthLog: times and counts, no
+// values); a field a client does not send (an older app version) keeps its cell as it is.
+var API_VERSION = 6;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
 var MAX_BODY = 5 * 1024 * 1024; // a year of workouts is well under 1 MB
@@ -95,6 +98,7 @@ var SCHEMA = {
     cols: [
       ['exercise', 'exercise', 'text'],
       ['setup', 'setup', 'text'],
+      ['bw_share', 'bwShare', 'num'],
       ['series_key', 'seriesKey', 'key'],
       ['id', 'id', 'key'],
       ['updated_at', 'updatedAt', 'ms'],
@@ -368,7 +372,7 @@ function sync_(req) {
 
     if (touched) rebuildSummary_(tables.sets, tables.sessions);
     SpreadsheetApp.flush();
-    return { ok: true, api: API_VERSION, entities: ENTITIES, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, serverTime: Date.now() };
+    return { ok: true, api: API_VERSION, entities: ENTITIES, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, ingest: ingestSeen_(), serverTime: Date.now() };
   } finally {
     lock.releaseLock();
   }
@@ -523,6 +527,27 @@ function ingestSleep_(samples, table, res, now, nextSrv) {
     table.changed[at] = true;
     res.updated++;
   });
+}
+
+// When «Команды» last delivered each type, from the end of App_HealthLog: { type: { at, lines,
+// added, rejected }, lastAt } — times and counts only. The app warns when it goes quiet.
+var INGEST_SEEN_ROWS = 300;
+function ingestSeen_() {
+  var sh = ss_().getSheetByName(HEALTH_LOG_SHEET);
+  var out = { lastAt: null, byType: {} };
+  if (!sh || sh.getLastRow() < 2) return out;
+  var n = Math.min(INGEST_SEEN_ROWS, sh.getLastRow() - 1);
+  var rows = sh.getRange(sh.getLastRow() - n + 1, 1, n, 8).getValues();
+  rows.forEach(function (r) {
+    var at = r[0] instanceof Date ? r[0].getTime() : Date.parse(String(r[0]));
+    var type = INGEST_TYPES[String(r[1])];
+    if (!isFinite(at) || !type) return;
+    var cur = out.byType[type];
+    if (cur && cur.at >= at) return;
+    out.byType[type] = { at: at, lines: Number(r[2]) || 0, added: (Number(r[3]) || 0) + (Number(r[4]) || 0), rejected: Number(r[7]) || 0 };
+    if (!out.lastAt || at > out.lastAt) out.lastAt = at;
+  });
+  return out;
 }
 
 function logIngest_(row) {
@@ -753,9 +778,10 @@ function writeTable_(table) {
 
 function toRow_(entity, rec, table, existingRow) {
   var row = existingRow ? existingRow.slice() : table.header.map(function () { return ''; });
+  var absent = (existingRow && rec.__absent) || {};
   SCHEMA[entity].cols.forEach(function (c) {
     var pos = table.map[c[1]];
-    if (pos < 0) return;
+    if (pos < 0 || absent[c[1]]) return;
     row[pos] = toCell_(rec[c[1]], c[2]);
   });
   return row;
@@ -840,11 +866,15 @@ function sanitize_(entity, rec) {
   if (!(updatedAt > 0)) return null;
   var out = {};
   var ok = true;
+  // Fields the client did not send at all: an app version older than the column. On an existing
+  // row they keep their cells (toRow_), so updating the app on one phone first loses nothing.
+  var absent = {};
   SCHEMA[entity].cols.forEach(function (c) {
     var f = c[1];
     var t = c[2];
     var v = rec[f];
     if (f === '_srv') return;
+    if (v === undefined) absent[f] = true;
     if (v === undefined || v === null || v === '') {
       out[f] = t === 'bool' ? false : null;
       return;
@@ -873,6 +903,7 @@ function sanitize_(entity, rec) {
     }
   });
   out.updatedAt = updatedAt;
+  out.__absent = absent;
   // A record without what makes it a record is refused (and stays queued on the phone).
   if (entity === 'records' && (!out.date || !out.seriesKey || !(out.reps >= 1) || out.weight == null)) ok = false;
   if (entity === 'exercises' && (!out.seriesKey || out.id !== 'x:' + out.seriesKey)) ok = false;

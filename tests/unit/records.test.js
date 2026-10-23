@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { performances, buildRecordBook, assess, estimate1rm, describeEvent, repProgress, recentAchievements, fmtLoad } from '../../app/js/lib/records.js';
-import { convertSnapshot } from '../../app/js/data/legacy-import.js';
-import { SNAPSHOT } from '../../app/js/data/gsheets-snapshot.js';
+import { performances, buildRecordBook, assess, estimate1rm, estimateProgress, describeEvent, repProgress, recentAchievements, fmtLoad } from '../../app/js/lib/records.js';
+import { bodyweightLookup } from '../../app/js/lib/bodyweight.js';
+import { convertSnapshot } from '../helpers/legacy-import.js';
+import { SNAPSHOT } from '../fixtures/synthetic/gsheets-snapshot.js';
 
 let n = 0;
 function workout(date, week, key, sets, { category = 'base', flags = {} } = {}) {
@@ -36,18 +37,18 @@ function book(workouts, manual = []) {
 }
 const rows = (b) => b.table.map((r) => `${r.reps}:${r.best.weight}${r.coveredBy ? `<${r.coveredBy.weight}x${r.coveredBy.reps}` : ''}`);
 
-test('16.10.2026 from the sheet: records per variant and rep count — and no invented 1-rep record', () => {
+test('16.10.2026 (synthetic sheet snapshot): records per variant and rep count — and no invented 1-rep record', () => {
   const data = convertSnapshot(SNAPSHOT);
   const perf = performances({ sessions: data.sessions, sets: data.sets });
   const books = buildRecordBook(perf.list);
   const hammer = books.get('naklonnyy-zhim-hammer-naklon');
-  assert.deepEqual(rows(hammer), ['8:90<90x9', '9:90']);
-  assert.deepEqual(hammer.events.map((e) => describeEvent(e)), ['90×9 — первый результат на 9 повторений']);
+  assert.deepEqual(rows(hammer), ['9:85<85x10', '10:85']);
+  assert.deepEqual(hammer.events.map((e) => describeEvent(e)), ['85×10 — первый результат на 10 повторений']);
   const bench = books.get('zhim-shtangi-lezha-shtanga-gorizont');
-  assert.deepEqual(rows(bench), ['7:80', '9:75<75x10', '10:75']);
-  assert.deepEqual(bench.events.map((e) => `${e.perf.weight}x${e.reps}:${e.kind}`), ['80x7:first', '75x10:first']);
-  assert.equal(bench.heaviest.weight, 80);
-  assert.equal(bench.heaviest.reps, 7);
+  assert.deepEqual(rows(bench), ['8:70<70x9', '9:70', '10:67.5']);
+  assert.deepEqual(bench.events.map((e) => `${e.perf.weight}x${e.reps}:${e.kind}`), ['70x9:first', '67.5x10:first']);
+  assert.equal(bench.heaviest.weight, 70);
+  assert.equal(bench.heaviest.reps, 9);
   for (const b of books.values()) {
     assert.ok(!b.table.some((r) => r.reps === 1), `${b.key}: no 1-rep record from multi-rep sets`);
     assert.ok(!b.events.some((e) => e.kind === 'record'), `${b.key}: a first workout sets no "new record"`);
@@ -209,7 +210,7 @@ test('latest achievements across exercises, newest first', () => {
 
 // --- regressions found in review -------------------------------------------------------------
 
-test('pull-ups: a heavier body alone is not "можно обновить" — the same bodyweight is used throughout', () => {
+test('pull-ups: a heavier body alone is not "можно обновить" — each day its own body weight, the target on top of today\'s', () => {
   const metrics = [
     { date: ago(150), bodyweight: 80 },
     { date: ago(30), bodyweight: 90 },
@@ -222,8 +223,37 @@ test('pull-ups: a heavier body alone is not "можно обновить" — th
     workout(ago(23), 2, 'pu', [[20, 6]], { category: 'pullup' }),
     workout(ago(16), 2, 'pu', [[20, 6]], { category: 'pullup' }),
   ]);
-  const a = assess(books.get('pu'), { today: TODAY, metrics });
+  const a = assess(books.get('pu'), { today: TODAY, bodyweightAt: bodyweightLookup({ metrics }) });
   assert.equal(a.state, 'steady');
+});
+
+test('pull-ups: the same added weight with a lighter body now is not stronger; more reps at a heavier body is', () => {
+  const metrics = [
+    { date: ago(60), bodyweight: 82 },
+    { date: ago(20), bodyweight: 78 },
+    { date: ago(10), bodyweight: 78 },
+  ];
+  const bodyweightAt = bodyweightLookup({ metrics });
+  const lighter = book([
+    workout(ago(60), 2, 'pu', [[20, 8]], { category: 'pullup' }),
+    workout(ago(20), 2, 'pu', [[20, 8]], { category: 'pullup' }),
+    workout(ago(10), 2, 'pu', [[20, 8]], { category: 'pullup' }),
+  ]);
+  assert.equal(assess(lighter.books.get('pu'), { today: TODAY, bodyweightAt }).state, 'steady');
+  // Estimates per day: the lighter days estimate lower for the same set — never one body weight for all.
+  const est = estimateProgress(lighter.books.get('pu'), { bodyweightAt });
+  assert.deepEqual(est.map((e) => Math.round(e.value * 10) / 10), [Math.round(102 * (1 + 8 / 30) * 10) / 10, Math.round(98 * (1 + 8 / 30) * 10) / 10, Math.round(98 * (1 + 8 / 30) * 10) / 10]);
+  // No weigh-in near a day: that day has no estimate (no 75 kg, no other guess).
+  const far = estimateProgress(lighter.books.get('pu'), { bodyweightAt: bodyweightLookup({ metrics: [{ date: ago(60), bodyweight: 82 }] }) });
+  assert.deepEqual(far.map((e) => e.date), [ago(60)]);
+});
+
+test('a share of the body weight is used only where set: push-ups are not assumed to lift the whole body', () => {
+  const bodyweightAt = bodyweightLookup({ metrics: [{ date: ago(10), bodyweight: 80 }] });
+  const dips = book([workout(ago(10), 2, 'dips', [[10, 8]], { category: 'base' })]).books.get('dips');
+  assert.equal(Math.round(estimateProgress(dips, { bodyweightAt })[0].value), Math.round(10 * (1 + 8 / 30)), 'no share: the recorded weight is the load');
+  assert.equal(Math.round(estimateProgress(dips, { bodyweightAt, share: 1 })[0].value), Math.round(90 * (1 + 8 / 30)), 'share 1 set by the owner');
+  assert.equal(Math.round(estimateProgress(dips, { bodyweightAt, share: 0.65 })[0].value), Math.round((10 + 52) * (1 + 8 / 30)));
 });
 
 test('two workouts on one day are one day: no "можно обновить" from a single day', () => {

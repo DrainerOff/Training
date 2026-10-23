@@ -1,5 +1,8 @@
-// One-time migration of the owner's existing Google Sheet into the app (program + the
-// 16.10.2026 workout). Source data: gsheets-snapshot.js (read-only copy of the cells).
+// The one-time migration of the owner's old Google Sheet (program + the 16.10.2026 workout) that
+// v1.0–v1.2 ran on first start. v1.3 no longer ships it: a new device gets everything from the
+// sheet through sync, and the public build carries no personal data. Tests use it with the
+// synthetic snapshot (tests/fixtures/synthetic/gsheets-snapshot.js) to set up a phone as the
+// owner's looks: the program and one earlier workout.
 //
 // Guarantees:
 //  * nothing is invented: every value comes from a cell; anything the converter does not
@@ -9,10 +12,10 @@
 //  * the owner's own data wins: an existing session for the same date/cycle/week/day, an
 //    existing body-metric entry for the date, or a program the owner already set up are kept.
 
-import { SNAPSHOT } from './gsheets-snapshot.js';
-import { targetFor, makeOption, normalizeProgram } from '../lib/program.js';
-import { itemsForDay } from '../lib/planner.js';
-import { parseNum } from '../lib/util.js';
+import { SNAPSHOT } from '../fixtures/synthetic/gsheets-snapshot.js';
+import { targetFor, makeOption, normalizeProgram } from '../../app/js/lib/program.js';
+import { itemsForDay } from '../../app/js/lib/planner.js';
+import { parseNum } from '../../app/js/lib/util.js';
 
 export const IMPORT_ID = 'gsheets-2026-10-17';
 // Same on every device; any later real edit has a newer timestamp and wins.

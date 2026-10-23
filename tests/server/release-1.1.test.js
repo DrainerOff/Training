@@ -38,7 +38,7 @@ async function newPhone(gas, token) {
   return { store, sync: createSync(store, { transport: post(gas), now }) };
 }
 
-test('API 4 → API 5 on the same sheet: every existing row stays as it was, App_Phases is added, the key and the Shortcuts key still work', async () => {
+test('API 4 → the current Apps Script on the same sheet: every existing row stays as it was, App_Phases is added, the key and the Shortcuts key still work', async () => {
   const gas = createGas({ code: API4 });
   const token = gas.call('setup');
   const key = gas.call('showIngestKey');
@@ -56,11 +56,19 @@ test('API 4 → API 5 on the same sheet: every existing row stays as it was, App
   assert.equal(table(gas, 'App_Phases'), null);
 
   gas.redeploy();
-  assert.equal(gas.post({ action: 'ping', token }).api, 5);
+  assert.equal(gas.post({ action: 'ping', token }).api, 6);
   const v11 = await newPhone(gas, token);
   await v11.sync.syncNow();
   assert.equal(v11.sync.status.state, 'idle');
-  for (const n of names.filter((x) => x !== 'App_HealthLog')) assert.equal(JSON.stringify(table(gas, n)), before[n], `${n} unchanged`);
+  // Every cell that was there stays; API 6 only appends its new column to App_Exercises.
+  const added = { App_Exercises: ['bw_share'] };
+  for (const n of names.filter((x) => x !== 'App_HealthLog')) {
+    const was = JSON.parse(before[n]);
+    const now = table(gas, n);
+    const width = was[0].length;
+    assert.deepEqual(now[0].slice(width), added[n] || [], `${n}: columns added at the end only`);
+    assert.equal(JSON.stringify(now.map((r) => r.slice(0, width))), before[n], `${n} unchanged`);
+  }
   assert.deepEqual(table(gas, 'App_Phases')[0].slice(0, 4), ['start', 'end', 'mode', 'target_pct_week']);
   // The phone got everything: the workout, the check-in, the Shortcuts weigh-in and night.
   assert.equal(v11.store.state.sets.size, 1);

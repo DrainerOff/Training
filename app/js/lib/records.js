@@ -15,7 +15,8 @@
 //  * A record for N reps is the heaviest weight lifted for exactly N reps. A 1-rep record exists
 //    only if a single was actually lifted; the estimated 1RM is a reference, never a record.
 //  * Pull-ups compare the ADDED weight (0 = bodyweight only). Bodyweight is context; an estimate
-//    uses it only when it was actually recorded near that date.
+//    uses the body weight of its own day (a manual record's own value, else the nearest weigh-in,
+//    lib/bodyweight.js) and is left out when that is unknown — never assumed.
 //  * New records never replace old ones: the history keeps every achievement with its date.
 
 import { daysBetween, roundToStep } from './util.js';
@@ -24,7 +25,6 @@ const EPS = 1e-6;
 export const MAX_REPS = 30;
 export const RECENT_DAYS = 42; // "recent workouts" for the assessment
 export const NEW_DAYS = 21; // a new record stays "new" this long
-const BODYWEIGHT_WINDOW = 3; // days around a date where a recorded bodyweight still applies
 
 export const STATE = {
   new: { label: 'Новый рекорд', tone: 'good' },
@@ -210,26 +210,20 @@ export function buildRecordBook(list) {
 
 // ---------------------------------------------------------------- estimates (reference only)
 
-// Bodyweight recorded within a few days of `date` (nearest), or null — never assumed.
-export function bodyweightNear(metrics, date) {
-  let best = null;
-  for (const m of metrics || []) {
-    if (m.deleted || !(m.bodyweight > 0)) continue;
-    const d = Math.abs(daysBetween(m.date, date));
-    if (d <= BODYWEIGHT_WINDOW && (!best || d < best.d)) best = { d, w: m.bodyweight };
-  }
-  return best ? best.w : null;
-}
+// `bodyweightAt(date)` → { value } | null (lib/bodyweight.js bodyweightLookup); the value or null.
+const bwValue = (bodyweightAt, date) => (bodyweightAt ? bodyweightAt(date)?.value ?? null : null);
 
 // Estimated 1RM (Epley, with reps in reserve when reported and small). A reference for
 // comparing different rep counts — never a record. Null when the set says too little:
-// far from failure (RIR > 3), too many reps, or a pull-up without a recorded bodyweight.
-export function estimate1rm(p, { bodyweight = null } = {}) {
+// far from failure (RIR > 3), too many reps, or a pull-up without a known body weight.
+// `share` — the lifted part of the body weight (pull-ups 1; lib/bodyweight.js loadShare).
+export function estimate1rm(p, { bodyweight = null, share = null } = {}) {
   if (p.rir != null && p.rir > 3) return null;
   const reps = p.reps + (p.rir ?? 0);
   if (reps > 12) return null;
   const bw = p.bodyweight ?? bodyweight;
-  const load = isPullup(p.category) ? (bw > 0 ? bw + p.weight : null) : p.weight;
+  const k = share ?? (isPullup(p.category) ? 1 : 0);
+  const load = k ? (bw > 0 ? k * bw + p.weight : null) : p.weight;
   if (!(load > 0)) return null;
   return reps === 1 ? load : load * (1 + reps / 30);
 }
@@ -260,8 +254,8 @@ export function describeEvent(e, { thisYear = null } = {}) {
 }
 
 // Recent training days of this series (two workouts on one day are still one day), each with
-// its best usable capacity estimate. `bw` — the bodyweight every pull-up estimate uses.
-function dayLevels(book, { today, bw }) {
+// its best usable capacity estimate. `bwOf(date)` — the body weight a pull-up estimate of that day uses.
+function dayLevels(book, { today, bwOf, share }) {
   const byDay = new Map();
   for (const p of book.perfs) {
     if (p.source !== 'workout' || daysBetween(p.date, today) > RECENT_DAYS || daysBetween(p.date, today) < 0) continue;
@@ -270,7 +264,7 @@ function dayLevels(book, { today, bw }) {
     s.sets.push(p);
     // A light-week set without reported RIR is submaximal by design: it says nothing about the limit.
     if (p.week === 1 && p.rir == null) continue;
-    const e = estimate1rm({ ...p, bodyweight: null }, { bodyweight: bw });
+    const e = estimate1rm(p, { bodyweight: bwOf(p.date), share });
     if (e != null && (s.level == null || e > s.level)) {
       s.level = e;
       s.from = p;
@@ -281,7 +275,7 @@ function dayLevels(book, { today, bw }) {
 
 // { state, reasons[] } — see STATE. Conservative: never a forecast from a single workout;
 // "можно обновить" is a hint, not a verdict, and lower recent results are never called a regress.
-export function assess(book, { today, metrics = [], step = 2.5 }) {
+export function assess(book, { today, bodyweightAt = null, step = 2.5, share = null }) {
   const thisYear = Number(today.slice(0, 4));
   const at = (iso) => day(iso, thisYear);
   if (!book || !book.perfs.length) return { state: 'unknown', reasons: ['Недостаточно данных для оценки: результатов пока нет.'] };
@@ -297,11 +291,14 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
     };
   }
 
-  // Pull-ups: records and recent sets are estimated with ONE bodyweight (the latest recorded),
-  // so a change of bodyweight alone never looks like more (or less) strength.
+  // Pull-ups: every estimate — records and recent sets — is made with the body weight of its own
+  // day, and the weight to try is what that capacity leaves on top of today's body weight: a
+  // heavier body alone never reads as more added weight to lift (nor a lighter one as less).
+  const k = share ?? (isPullup(book.category) ? 1 : 0);
+  const bwOf = (date) => (k ? bwValue(bodyweightAt, date) : null);
   const recent = book.perfs.filter((p) => p.source === 'workout' && daysBetween(p.date, today) <= RECENT_DAYS && daysBetween(p.date, today) >= 0);
-  const bw = isPullup(book.category) ? (recent.length ? bodyweightNear(metrics, recent[recent.length - 1].date) : null) : null;
-  const sessions = dayLevels(book, { today, bw });
+  const bwNow = k && recent.length ? bwOf(recent[recent.length - 1].date) : null;
+  const sessions = dayLevels(book, { today, bwOf, share: k });
   if (sessions.length < 2) {
     return {
       state: 'unknown',
@@ -326,7 +323,7 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
   // spare capacity recent workouts may show).
   const recordLevels = book.table
     .filter((r) => !r.coveredBy)
-    .map((r) => ({ row: r, e: estimate1rm({ ...r.best, rir: null, bodyweight: null }, { bodyweight: isPullup(book.category) ? bw : null }) }))
+    .map((r) => ({ row: r, e: estimate1rm({ ...r.best, rir: null }, { bodyweight: bwOf(r.best.date), share: k }) }))
     .filter((x) => x.e != null);
   const top = recordLevels.sort((a, b) => b.e - a.e)[0] || null;
   let level = null;
@@ -337,7 +334,7 @@ export function assess(book, { today, metrics = [], step = 2.5 }) {
   if (top && level != null && level >= top.e * 1.03) {
     // Only with a concrete weight above the current record — less than one step is no news.
     const r = usable[usable.length - 1].from.reps;
-    const target = Math.floor((level / (1 + r / 30) - (bw || 0)) / step + EPS) * step;
+    const target = k && bwNow == null ? -Infinity : Math.floor((level / (1 + r / 30) - k * (bwNow || 0)) / step + EPS) * step;
     const row = book.table.find((x) => x.reps === r);
     if (target > (row ? row.best.weight : 0) + EPS) {
       reasons.push(
@@ -377,11 +374,11 @@ export function chartReps(book) {
 }
 
 // Best estimated 1RM per day (explicitly a computed reference, across rep counts).
-export function estimateProgress(book, { metrics = [] } = {}) {
+export function estimateProgress(book, { bodyweightAt = null, share = null } = {}) {
   const byDay = new Map();
   for (const p of book.perfs) {
     if (p.source === 'workout' && p.week === 1 && p.rir == null) continue;
-    const e = estimate1rm(p, { bodyweight: bodyweightNear(metrics, p.date) });
+    const e = estimate1rm(p, { bodyweight: bwValue(bodyweightAt, p.date), share });
     if (e == null) continue;
     const cur = byDay.get(p.date);
     if (!cur || e > cur.value) byDay.set(p.date, { date: p.date, value: e, from: p });

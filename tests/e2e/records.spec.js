@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
 import { startPages, APP, RELEASES, ROOT } from '../helpers/pages-server.js';
-import { ready, dock, logButton, connectSync } from './helpers.js';
+import { ready, dock, logButton, connectSync, seedOwner } from './helpers.js';
 
 const API1 = fs.readFileSync(path.join(ROOT, 'tests/fixtures/apps-script/Code.api1.gs'), 'utf8');
 const HAMMER = 'Наклонный жим: Hammer - наклон';
@@ -22,7 +22,7 @@ test.afterAll(() => web?.close());
 async function open(page) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
 }
 
 async function toRecords(page) {
@@ -91,22 +91,22 @@ test('a record set in a workout is detected right away; earlier achievements sta
   await page.getByRole('button', { name: 'Выбрать' }).click();
   await page.getByRole('button', { name: 'Начать тренировку' }).click();
   await page.getByRole('button', { name: new RegExp(HAMMER) }).click();
-  await expect(logButton(page)).toContainText('90 × 9'); // last time, same week
+  await expect(logButton(page)).toContainText('85 × 10'); // last time, same week
   await page.getByRole('button', { name: 'Увеличить: Вес' }).click();
-  await expect(logButton(page)).toContainText('92,5 × 9');
+  await expect(logButton(page)).toContainText('87,5 × 10');
   await logButton(page).click();
-  await expect(dock(page)).toContainText('Новый рекорд: 92,5×9');
+  await expect(dock(page)).toContainText('Новый рекорд: 87,5×10');
 
   // The tab bar is hidden during a workout: the workout menu leads to Прогресс.
   await page.getByRole('button', { name: 'Меню тренировки' }).click();
   await page.getByRole('group', { name: 'Разделы' }).getByRole('button', { name: 'Прогресс' }).click();
   await page.getByRole('group', { name: 'Раздел' }).getByRole('button', { name: 'Рекорды' }).click();
-  await expect(page.locator('.rows').first()).toContainText('92,5×9 — рекорд на 9 повторений (было 90 кг, 16 октября)');
+  await expect(page.locator('.rows').first()).toContainText('87,5×10 — рекорд на 10 повторений (было 85 кг, 16 октября)');
   await page.locator('.rows').last().getByRole('button', { name: new RegExp(HAMMER) }).click();
   await expect(page.locator('.callout')).toContainText('Новый рекорд');
   const history = page.locator('.rec-event__text');
-  await expect(history).toHaveText(['92,5×9 — рекорд на 9 повторений (было 90 кг, 16 октября)', '90×9 — первый результат на 9 повторений']);
-  await expect(page.locator('.rec').filter({ hasText: /^9повт\./ })).toContainText('92,5 кг');
+  await expect(history).toHaveText(['87,5×10 — рекорд на 10 повторений (было 85 кг, 16 октября)', '85×10 — первый результат на 10 повторений']);
+  await expect(page.locator('.rec').filter({ hasText: /^10повт\./ })).toContainText('87,5 кг');
 });
 
 test('edit and delete a manual entry; undo brings it back; the rest of the history is untouched', async ({ page }) => {
@@ -128,7 +128,7 @@ test('edit and delete a manual entry; undo brings it back; the rest of the histo
   await page.getByRole('dialog', { name: 'Удалить запись?' }).getByRole('button', { name: 'Удалить' }).click();
   await expect(page.locator('.toast')).toContainText('Запись удалена');
   await expect(page.locator('.rec').filter({ hasText: /^6повт\./ })).toHaveCount(0);
-  await expect(page.locator('.rec').filter({ hasText: /^9повт\./ })).toContainText('90 кг'); // 16.10 untouched
+  await expect(page.locator('.rec').filter({ hasText: /^10повт\./ })).toContainText('85 кг'); // 16.10 untouched
   await page.locator('.toast').getByRole('button', { name: 'Вернуть' }).click();
   await expect(page.locator('.rec').filter({ hasText: /^6повт\./ })).toContainText('95 кг');
 });
@@ -137,12 +137,12 @@ test('16.10.2026: no invented 1-rep record, the 1RM estimate is labelled as a re
   await open(page);
   await toRecords(page);
   await page.getByRole('button', { name: /Жим штанги лежа: Штанга - горизонт/ }).click();
-  await expect(page.locator('.rec__reps b')).toHaveText(['7', '10']); // 9 reps is covered by 75×10
+  await expect(page.locator('.rec__reps b')).toHaveText(['9', '10']); // 8 reps is covered by 70×9
   await page.getByRole('button', { name: /Показать перекрытые/ }).click();
-  await expect(page.locator('.rec__reps b')).toHaveText(['7', '9', '10']);
-  await expect(page.locator('.rec--covered')).toContainText('перекрыт: 75×10');
-  await expect(page.locator('.rec-facts')).toContainText('Максимальный вес: 80 кг на 7 повторений');
-  await expect(page.locator('.rec-facts')).toContainText('Расчётный 1ПМ ≈ 100 кг — ориентир по формуле, а не рекорд: подхода на 1 повторение не было');
+  await expect(page.locator('.rec__reps b')).toHaveText(['8', '9', '10']);
+  await expect(page.locator('.rec--covered')).toContainText('перекрыт: 70×9');
+  await expect(page.locator('.rec-facts')).toContainText('Максимальный вес: 70 кг на 9 повторений');
+  await expect(page.locator('.rec-facts')).toContainText('Расчётный 1ПМ ≈ 91 кг — ориентир по формуле, а не рекорд: подхода на 1 повторение не было');
   await expect(page.locator('.callout')).toContainText('Мало данных');
   await expect(page.locator('.callout')).toContainText('Недостаточно данных для оценки');
   await page.getByRole('button', { name: '1ПМ (расчёт)' }).click();

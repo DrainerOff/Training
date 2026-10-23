@@ -57,7 +57,7 @@ test('the sheet refuses a broken phase', () => {
     action: 'sync', token, since: 0,
     push: { phases: [ok, { ...ok, id: 'ph2', mode: 'diet' }, { ...ok, id: 'ph3', targetPct: 5 }, { ...ok, id: 'ph4', end: '2026-09-01' }, { ...ok, id: 'ph5', start: '1 октября' }] },
   });
-  assert.equal(res.api, 5);
+  assert.equal(res.api, 6);
   assert.equal(res.ack.phases, 1);
   assert.equal(res.rejected.length, 4);
 });

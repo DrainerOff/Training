@@ -31,7 +31,7 @@ export function Body() {
   const waist = latestOf(body, 'waist');
   const nothing = !metrics.length && !body.some((r) => !r.deleted) && !nights.length;
   const phase = phaseOn(st.phases.values(), today);
-  const report = phase ? phaseReport(phase, { days, body, nights, series: derived().series, today }) : null;
+  const report = phase ? phaseReport(phase, { days, body, nights, series: derived().series, shareOf: derived().shareOf, today }) : null;
   const lastMetric = metrics[0];
   const week7 = Array.from({ length: 7 }, (_, i) => nights.find((n) => n.date === addDays(today, i - 6))?.hours ?? null);
 

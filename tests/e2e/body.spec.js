@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
 import { startPages, APP, RELEASES, ROOT } from '../helpers/pages-server.js';
-import { ready, connectSync } from './helpers.js';
+import { ready, connectSync, seedOwner } from './helpers.js';
 
 const API3 = fs.readFileSync(path.join(ROOT, 'tests/fixtures/apps-script/Code.api3.gs'), 'utf8');
 
@@ -38,7 +38,7 @@ test.afterAll(() => web?.close());
 async function open(page) {
   await page.goto(base);
   await ready(page);
-  await page.getByRole('button', { name: 'Понятно' }).click();
+  await seedOwner(page);
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
   await expect(page.getByRole('heading', { name: 'Тело', exact: true })).toBeVisible();
 }

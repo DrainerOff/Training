@@ -704,7 +704,7 @@ function openFinish(session, rows) {
 }
 
 function FinishSheet({ session, rows, onClose }) {
-  const bw = latestBodyweight();
+  const { bodyweightAt, shareOf } = derived();
   const missing = rows.reduce((t, r) => t + (r.item.skipped ? 0 : Math.max(0, r.target.sets - r.working)), 0);
   const allSets = rows.reduce((t, r) => t + r.sets.length, 0);
   const minutes = allSets ? Math.round((Math.max(...rows.flatMap((r) => r.sets.map((s) => s.createdAt))) - session.startedAt) / 60000) : 0;
@@ -722,14 +722,14 @@ function FinishSheet({ session, rows, onClose }) {
     <p class="muted">${allSets} ${plural(allSets, 'подход', 'подхода', 'подходов')}${minutes > 0 ? `, ${minutes} мин` : ''}. Сравнение — с той же неделей прошлого цикла.</p>
     <ul class="rows" style="margin-top:10px">
       ${rows.filter((r) => r.sets.length).map((r) => {
-        const cur = { sets: r.sets.filter((s) => !s.drop), category: r.item.category };
+        const cur = { sets: r.sets.filter((s) => !s.drop), category: r.item.category, bw: bodyweightAt(session.date) };
         const ref = r.prevs.samePhase;
-        const cmp = ref && cur.sets.length ? compareExposures(cur, ref, { category: r.item.category, bodyweight: bw }) : null;
+        const cmp = ref && cur.sets.length ? compareExposures(cur, ref, { category: r.item.category, share: shareOf(r.item.seriesKey, r.item.category) }) : null;
         const d = cmp ? describeComparison(cmp) : null;
         return html`<li class="row">
           <span class="row__title">${r.item.name}</span>
           <span class=${d ? 'delta--' + d.tone : 'muted'} style="font-size:14px">${d ? d.short : 'нет сравнения'}</span>
-          <span class="row__sub">${r.sets.map((s) => `${s.drop ? 'дроп ' : ''}${fmtWeight(s.weight, r.item.category)}×${s.reps}`).join(', ')}</span>
+          <span class="row__sub">${r.sets.map((s) => `${s.drop ? 'дроп ' : ''}${fmtWeight(s.weight, r.item.category)}×${s.reps}`).join(', ')}${d?.bodyweight ? html`<br />${d.bodyweight}` : null}</span>
         </li>`;
       })}
     </ul>
