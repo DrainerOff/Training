@@ -23,6 +23,7 @@ const SHELL = [
   './js/lib/phase.js',
   './js/lib/bodyweight.js',
   './js/lib/health.js',
+  './js/lib/recommend.js',
   './js/data/db.js',
   './js/data/store.js',
   './js/data/sync.js',

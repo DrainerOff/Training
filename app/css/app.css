@@ -1169,6 +1169,87 @@ p {
   margin-left: auto;
   color: var(--ghost);
 }
+/* Today's recommendation — one line under «Прошлый раз»; the weight field is not touched. */
+.dock__rec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  min-height: 30px;
+}
+.dock__rec-why {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--steel);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.dock__rec-why b {
+  font-size: 16px;
+  color: var(--iron);
+}
+.dock__rec--up .dock__rec-why b {
+  color: var(--accent-text);
+}
+.dock__rec-label,
+.dock__rec-why b {
+  flex: none;
+}
+.dock__rec-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 320 pt: the weight, the verdict, ⓘ and «Использовать» first; the word «Сегодня» goes. */
+@media (max-width: 359px) {
+  .dock__rec-label:not(.dock__rec-label--keep) {
+    display: none;
+  }
+}
+.dock__rec-why svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  align-self: center;
+  color: var(--ghost);
+}
+.dock__rec-use {
+  flex: none;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  color: var(--iron);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dock__rec-use:active,
+.dock__rec-why:active {
+  opacity: 0.7;
+}
+.rec-sheet__head {
+  margin: 0 0 8px;
+  font-size: 17px;
+}
+.rec-sheet__why {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+}
 .menu-tabs {
   margin-bottom: 12px;
 }
