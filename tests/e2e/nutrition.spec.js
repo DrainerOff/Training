@@ -33,6 +33,25 @@ const syncNow = (page) => page.evaluate(async () => {
   return { ...sync.status };
 });
 const rec = (page, date) => page.evaluate((d) => window.__trainer.store.state.nutrition.get(`n:${d}`) || null, date);
+// The day as IndexedDB has it. The screen updates before the write commits, and a reload aborts a
+// write still in progress, so a test waits for this before reloading.
+const stored = (page, date) =>
+  page.evaluate(
+    (d) =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open('trainer');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const get = open.result.transaction('nutrition').objectStore('nutrition').get(`n:${d}`);
+          get.onsuccess = () => {
+            open.result.close();
+            resolve(get.result ? { kcal: get.result.kcal, deleted: !!get.result.deleted } : null);
+          };
+          get.onerror = () => reject(get.error);
+        };
+      }),
+    date,
+  );
 function rows(gas, name) {
   const sh = gas.sheet(name);
   if (!sh) return [];
@@ -94,6 +113,7 @@ test('a day entered by hand offline: kept on the phone, reaches App_Nutrition on
     await expect(days(page)).toHaveCount(0);
     await page.locator('.toast').getByRole('button', { name: 'Вернуть' }).click();
     await expect(row).toContainText('3300 ккал');
+    await expect.poll(() => stored(page, '2026-10-20')).toEqual({ kcal: 3300, deleted: false });
     await page.reload();
     await ready(page);
     await nutritionTab(page);
