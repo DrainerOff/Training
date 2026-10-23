@@ -20,6 +20,9 @@
 // 6: the lifted part of the body weight per exercise variant (App_Exercises bw_share); the sync
 // answer says when «Команды» last delivered Health data (from App_HealthLog: times and counts, no
 // values); a field a client does not send (an older app version) keeps its cell as it is.
+// Calories and macros per accounting day (App_Nutrition, one row per date) and goals per phase
+// (App_NutritionGoals). ChatGPT appends rows to App_NutritionInbox; each sync (or the menu) takes
+// them in by the app's rules (js/lib/nutrition.js) and writes the outcome next to each row.
 var API_VERSION = 6;
 var MAX_RECORDS = 2000;
 var MAX_TEXT = 2000;
@@ -188,6 +191,54 @@ var SCHEMA = {
       ['_srv', '_srv', 'ms'],
     ],
   },
+  // Totals of one accounting day (not the calendar day: the owner may close a day at 5 a.m.). A range
+  // stays a range (ranges, JSON) and its value column stays empty. prev_json: values entered by hand
+  // that a ChatGPT entry replaced, so the app can put them back.
+  nutrition: {
+    sheet: 'App_Nutrition',
+    cols: [
+      ['date', 'date', 'date'],
+      ['kcal', 'kcal', 'num'],
+      ['protein_g', 'protein', 'num'],
+      ['fat_g', 'fat', 'num'],
+      ['carbs_g', 'carbs', 'num'],
+      ['ranges', 'ranges', 'obj'],
+      ['approx', 'approx', 'bool'],
+      ['status', 'status', 'key'],
+      ['source', 'source', 'key'],
+      ['comment', 'comment', 'text'],
+      ['ext_rev', 'extRev', 'key'],
+      ['prev_json', 'prev', 'obj'],
+      ['batch', 'batch', 'key'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
+  // Goals of a phase from a date (a change from another date is a new row: history). Empty max =
+  // a minimum; carbs_mode rest = carbs are what is left of the kcal after protein and fat.
+  nutritionGoals: {
+    sheet: 'App_NutritionGoals',
+    cols: [
+      ['phase_id', 'phaseId', 'key'],
+      ['from', 'from', 'date'],
+      ['kcal_min', 'kcalMin', 'num'],
+      ['kcal_max', 'kcalMax', 'num'],
+      ['protein_min_g', 'proteinMin', 'num'],
+      ['protein_max_g', 'proteinMax', 'num'],
+      ['fat_min_g', 'fatMin', 'num'],
+      ['fat_max_g', 'fatMax', 'num'],
+      ['carbs_min_g', 'carbsMin', 'num'],
+      ['carbs_max_g', 'carbsMax', 'num'],
+      ['carbs_mode', 'carbsMode', 'key'],
+      ['note', 'note', 'text'],
+      ['id', 'id', 'key'],
+      ['updated_at', 'updatedAt', 'ms'],
+      ['deleted', 'deleted', 'bool'],
+      ['_srv', '_srv', 'ms'],
+    ],
+  },
 };
 var PHASE_MODES = { bulk: true, cut: true, maintain: true };
 var BODY_KINDS = {
@@ -196,7 +247,7 @@ var BODY_KINDS = {
   calf_l: [10, 250], calf_r: [10, 250], head: [10, 250],
 };
 var STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?[+-]\d{2}:\d{2}$/;
-var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
+var ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'nutrition', 'nutritionGoals'];
 
 var PROGRAM_SHEET = 'App_Program';
 var PROGRAM_COLS = ['day', 'day_title', 'order', 'exercise', 'alternatives', 'category', 'step', 'w1', 'w2', 'w3', 'note', 'slot_id', 'keys'];
@@ -294,6 +345,7 @@ function sync_(req) {
     var pull = {};
     var touched = false;
     var tables = {};
+    var inbox = null;
 
     ENTITIES.forEach(function (entity) {
       var table = readTable_(entity);
@@ -311,6 +363,20 @@ function sync_(req) {
         var at = table.index[clean.id];
         if (at != null) {
           var existing = Number(table.rows[at][table.map.updatedAt]) || 0;
+          // A day entered by hand on a phone that was offline while a ChatGPT entry for that date came
+          // in later: the later entry stays, the hand-entered values are kept next to it («Вернуть»).
+          if (entity === 'nutrition' && clean.updatedAt < existing && clean.source === 'manual' && !clean.deleted) {
+            var day = fromRow_('nutrition', table.rows[at], table);
+            if (day && !day.deleted && day.source !== 'manual' && !sameNutrition_(day, clean) && !(day.prev && day.prev.updatedAt >= clean.updatedAt)) {
+              day.prev = nutritionValues_(clean);
+              day.updatedAt = existing + 1;
+              day._srv = srv++;
+              table.rows[at] = toRow_(entity, day, table, table.rows[at]);
+              table.changed[at] = true;
+              touched = true;
+            }
+            return;
+          }
           if (clean.updatedAt <= existing) return; // older or identical resend → ignore
           // A night from «Команды» (all sleep of the day) is not replaced by the same night from a CSV
           // imported on a phone that had not synced yet; the phone gets the night back instead.
@@ -336,6 +402,9 @@ function sync_(req) {
         }
         touched = true;
       });
+      // ChatGPT's rows, after this phone's pushes (they are older: the phone made them before this
+      // sync) and before the pull (so this phone gets the result now).
+      if (entity === 'nutrition') inbox = processInbox_(table, function () { return srv++; }, Date.now());
       writeTable_(table);
     });
     props.setProperty('LAST_SRV', String(srv));
@@ -372,7 +441,7 @@ function sync_(req) {
 
     if (touched) rebuildSummary_(tables.sets, tables.sessions);
     SpreadsheetApp.flush();
-    return { ok: true, api: API_VERSION, entities: ENTITIES, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, ingest: ingestSeen_(), serverTime: Date.now() };
+    return { ok: true, api: API_VERSION, entities: ENTITIES, ack: ack, rejected: rejected, pull: pull, cursor: cursor, programUpdatedAt: programUpdatedAt, ingest: ingestSeen_(), inbox: inbox, serverTime: Date.now() };
   } finally {
     lock.releaseLock();
   }
@@ -562,6 +631,279 @@ function logIngest_(row) {
   sh.getRange(sh.getLastRow() + 1, 1, 1, row.length).setValues([row]);
 }
 
+// ---------------------------------------------------------------------------- nutrition inbox (ChatGPT)
+
+// ChatGPT only appends rows to App_NutritionInbox: date (the accounting day), kcal, protein_g, fat_g,
+// carbs_g (a number, «~3200» or a range «2800-3000»), status «итог» / «черновик», approx «да» /
+// «нет», comment, written_at. It never writes App_Nutrition: ids, revisions, _srv and the rules
+// below are this script's job. Each row is taken once; the outcome goes into result / processed_at.
+// The rules are the app's (js/lib/nutrition.js applyExternal), line for line:
+//  1. one row per date in App_Nutrition, updated, never duplicated;
+//  2. the same entry again («Закрыть день» twice) changes nothing, even after a delete in the app;
+//  3. a draft never replaces a final day;
+//  4. otherwise the later action wins; hand-entered values it replaces are kept in prev_json;
+//  5. a day deleted in the app comes back only with a new entry (other numbers).
+var NUTRITION_INBOX_SHEET = 'App_NutritionInbox';
+var NUTRITION_INBOX_COLS = ['date', 'kcal', 'protein_g', 'fat_g', 'carbs_g', 'status', 'approx', 'comment', 'written_at', 'result', 'processed_at'];
+var NUTRITION_FIELDS = ['kcal', 'protein', 'fat', 'carbs'];
+var NUTRITION_INBOX_FIELD = { kcal: 'kcal', protein: 'protein_g', fat: 'fat_g', carbs: 'carbs_g' };
+var NUTRITION_LIMITS = { kcal: 15000, protein: 1000, fat: 1000, carbs: 2000 };
+var NUTRITION_LABEL = { kcal: 'калории', protein: 'белки', fat: 'жиры', carbs: 'углеводы' };
+var NUTRITION_STATUS = { final: true, draft: true };
+var NUTRITION_SOURCES = { manual: true, chatgpt: true, 'import': true };
+var NUTRITION_INBOX_MAX = 500;
+var NUTRITION_ACTION = {
+  create: 'создан',
+  update: 'обновлён',
+  same: 'без изменений',
+  deleted: 'без изменений: день удалён в приложении',
+  draft: 'пропущен: черновик не заменяет итог',
+};
+
+function validRanges_(r) {
+  if (r == null) return true;
+  if (typeof r !== 'object' || Array.isArray(r)) return false;
+  return Object.keys(r).every(function (f) {
+    var x = r[f];
+    return NUTRITION_LIMITS[f] != null && Array.isArray(x) && x.length === 2 && typeof x[0] === 'number' && typeof x[1] === 'number' && x[0] >= 0 && x[0] <= x[1] && x[1] <= NUTRITION_LIMITS[f];
+  });
+}
+
+var NUTRITION_VALUE_KEYS = ['kcal', 'protein', 'fat', 'carbs', 'ranges', 'approx', 'status', 'comment', 'source'];
+function sameNutrition_(a, b) {
+  return NUTRITION_VALUE_KEYS.every(function (k) {
+    var x = a[k] == null ? null : a[k];
+    var y = b[k] == null ? null : b[k];
+    if (k === 'comment') {
+      x = x || '';
+      y = y || '';
+    }
+    if (k === 'approx') {
+      x = !!x;
+      y = !!y;
+    }
+    return JSON.stringify(x) === JSON.stringify(y);
+  });
+}
+function nutritionValues_(r) {
+  var out = {};
+  NUTRITION_VALUE_KEYS.concat(['updatedAt']).forEach(function (k) { out[k] = r[k] == null ? null : r[k]; });
+  return out;
+}
+
+function nutritionAmount_(raw, field) {
+  if (raw == null || raw === '') return null;
+  var max = NUTRITION_LIMITS[field];
+  var fits = function (x) {
+    var vals = x.range || [x.value];
+    return vals.some(function (v) { return v < 0 || v > max; }) ? { error: 'вне диапазона 0–' + max } : x;
+  };
+  if (typeof raw === 'number') return isFinite(raw) ? fits({ value: raw }) : { error: 'не число' };
+  var s = String(raw).trim().toLowerCase().replace(/ /g, ' ');
+  if (!s || s === '-' || s === '—' || s === '–') return null;
+  var approx = false;
+  if (/^(~|≈|около|примерно|прибл\.?)\s*/.test(s)) {
+    approx = true;
+    s = s.replace(/^(~|≈|около|примерно|прибл\.?)\s*/, '');
+  }
+  s = s.replace(/\s*(ккал|kcal|кал|г|g|гр)\.?$/, '').trim();
+  var num = function (t) {
+    var x = t.replace(/\s+/g, '').replace(',', '.');
+    return /^\d+(\.\d+)?$/.test(x) ? Number(x) : NaN;
+  };
+  var m = s.match(/^([\d\s.,]+?)\s*(?:-|–|—|до)\s*([\d\s.,]+)$/);
+  if (m) {
+    var lo = num(m[1]);
+    var hi = num(m[2]);
+    if (!isFinite(lo) || !isFinite(hi)) return { error: 'не число' };
+    if (lo > hi) return { error: 'начало диапазона больше конца' };
+    return lo === hi ? fits({ value: lo, approx: approx }) : fits({ range: [lo, hi], approx: true });
+  }
+  var v = num(s);
+  if (!isFinite(v)) return { error: 'не число' };
+  return fits({ value: v, approx: approx });
+}
+
+function nutritionStatus_(raw) {
+  var s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return null;
+  if (/^(итог|final|закрыт|подтвержд|готов)/.test(s)) return 'final';
+  if (/^(черновик|draft|не\s*закрыт|предвар)/.test(s)) return 'draft';
+  return undefined;
+}
+
+function nutritionYes_(raw) {
+  if (raw === true || raw === false) return raw;
+  var s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return false;
+  return /^(да|yes|true|1|приблиз|≈|~)/.test(s);
+}
+
+function nutritionDate_(raw, today) {
+  var iso = null;
+  if (raw instanceof Date) iso = Utilities.formatDate(raw, tz_(), 'yyyy-MM-dd');
+  else {
+    var s = String(raw == null ? '' : raw).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) iso = s;
+    else if ((m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/))) iso = m[3] + '-' + (m[2].length < 2 ? '0' : '') + m[2] + '-' + (m[1].length < 2 ? '0' : '') + m[1];
+  }
+  if (!iso) return null;
+  var d = new Date(iso + 'T00:00:00Z');
+  if (isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) return null;
+  var tomorrow = new Date(Date.parse(today + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+  if (iso < '2015-01-01' || iso > tomorrow) return null;
+  return iso;
+}
+
+function normalizeNutrition_(input, today) {
+  var errors = [];
+  var date = nutritionDate_(input.date, today);
+  if (!date) errors.push('дата: нужна ГГГГ-ММ-ДД, не позже завтрашнего дня');
+  var out = { date: date, ranges: null, approx: nutritionYes_(input.approx), status: 'draft', comment: String(input.comment == null ? '' : input.comment).trim().slice(0, 300) };
+  var any = false;
+  NUTRITION_FIELDS.forEach(function (f) {
+    var a = nutritionAmount_(input[f], f);
+    out[f] = null;
+    if (!a) return;
+    if (a.error) {
+      errors.push(NUTRITION_LABEL[f] + ': ' + a.error);
+      return;
+    }
+    any = true;
+    if (a.range) {
+      out.ranges = out.ranges || {};
+      out.ranges[f] = a.range;
+    } else out[f] = a.value;
+    if (a.approx) out.approx = true;
+  });
+  if (!any && !errors.length) errors.push('нет ни одного значения');
+  var st = nutritionStatus_(input.status);
+  if (st === undefined) errors.push('статус: «итог» или «черновик»');
+  else if (st) out.status = st;
+  if (errors.length) return { ok: false, errors: errors };
+  return { ok: true, entry: out, rev: nutritionRev_(out), statusGiven: !!st };
+}
+
+function fnv1a_(str) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  var hex = h.toString(16);
+  while (hex.length < 8) hex = '0' + hex;
+  return hex;
+}
+
+function nutritionRev_(e) {
+  var r = e.ranges || {};
+  var parts = [e.date];
+  NUTRITION_FIELDS.forEach(function (f) { parts.push(r[f] ? r[f][0] + '-' + r[f][1] : e[f] == null ? '' : e[f]); });
+  parts.push(e.status, e.approx ? 1 : 0, e.comment || '');
+  return 'r' + fnv1a_(parts.join('|'));
+}
+
+function applyNutrition_(existing, entry, rev, source, at) {
+  if (existing && existing.extRev === rev) return { action: existing.deleted ? 'deleted' : 'same', rec: null };
+  if (existing && !existing.deleted && existing.status === 'final' && entry.status === 'draft') return { action: 'draft', rec: null };
+  var manual = {};
+  NUTRITION_VALUE_KEYS.forEach(function (k) { manual[k] = entry[k]; });
+  manual.source = 'manual';
+  var prev = null;
+  if (existing && !existing.deleted) prev = existing.source === 'manual' && !sameNutrition_(existing, manual) ? nutritionValues_(existing) : existing.prev || null;
+  var rec = { id: 'n:' + entry.date, date: entry.date, ranges: entry.ranges || null, approx: !!entry.approx, status: entry.status, source: source,
+    comment: entry.comment || '', extRev: rev, prev: prev, batch: null, updatedAt: Math.max(at, ((existing && existing.updatedAt) || 0) + 1), deleted: false };
+  NUTRITION_FIELDS.forEach(function (f) { rec[f] = entry[f] == null ? null : entry[f]; });
+  return { action: existing ? 'update' : 'create', rec: rec };
+}
+
+// Takes the unprocessed rows of the inbox into `table` (App_Nutrition, read by readTable_), in the
+// order they were written. → { rows, create, update, same, deleted, draft, rejected, dates } or null.
+function processInbox_(table, nextSrv, now) {
+  var sh = ss_().getSheetByName(NUTRITION_INBOX_SHEET);
+  if (!sh || sh.getLastRow() < 2) return null;
+  var lastCol = sh.getLastColumn();
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var col = {};
+  NUTRITION_INBOX_COLS.forEach(function (c) { col[c] = header.indexOf(c); });
+  if (col.date < 0 || col.result < 0 || col.processed_at < 0) return null;
+  var n = sh.getLastRow() - 1;
+  var rows = sh.getRange(2, 1, n, lastCol).getValues();
+  var today = Utilities.formatDate(new Date(now), tz_(), 'yyyy-MM-dd');
+  var out = { rows: 0, create: 0, update: 0, same: 0, deleted: 0, draft: 0, rejected: 0, dates: [] };
+  var marks = [];
+  var stamp = new Date(now).toISOString();
+  for (var i = 0; i < rows.length && out.rows < NUTRITION_INBOX_MAX; i++) {
+    var r = rows[i];
+    if (String(r[col.processed_at] || '') !== '') continue;
+    var filled = NUTRITION_INBOX_COLS.slice(0, 8).some(function (c) { return col[c] >= 0 && String(r[col[c]]) !== ''; });
+    if (!filled) continue;
+    out.rows++;
+    var input = { date: r[col.date] };
+    NUTRITION_FIELDS.forEach(function (f) { input[f] = col[NUTRITION_INBOX_FIELD[f]] >= 0 ? r[col[NUTRITION_INBOX_FIELD[f]]] : ''; });
+    ['status', 'approx', 'comment'].forEach(function (c) { input[c] = col[c] >= 0 ? r[col[c]] : ''; });
+    var norm = normalizeNutrition_(input, today);
+    var text;
+    if (!norm.ok) {
+      out.rejected++;
+      text = 'отклонён: ' + norm.errors.join('; ');
+    } else {
+      var id = 'n:' + norm.entry.date;
+      var at = table.index[id];
+      var existing = at != null ? fromRow_('nutrition', table.rows[at], table) : null;
+      var res = applyNutrition_(existing, norm.entry, norm.rev, 'chatgpt', now);
+      out[res.action]++;
+      text = NUTRITION_ACTION[res.action] + (norm.statusGiven ? '' : ' (статус не указан — черновик)');
+      if (res.rec) {
+        res.rec._srv = nextSrv();
+        if (at != null) {
+          table.rows[at] = toRow_('nutrition', res.rec, table, table.rows[at]);
+          table.changed[at] = true;
+        } else {
+          table.index[id] = table.rows.length;
+          table.rows.push(toRow_('nutrition', res.rec, table, null));
+          table.changed[table.rows.length - 1] = true;
+        }
+        out.dates.push(norm.entry.date);
+      }
+    }
+    marks.push([i, text]);
+  }
+  if (!marks.length) return null;
+  // Only the two outcome columns are written, row by row: ChatGPT's own cells stay as written.
+  marks.forEach(function (m) {
+    sh.getRange(m[0] + 2, col.result + 1).setValue(m[1]);
+    sh.getRange(m[0] + 2, col.processed_at + 1).setValue(stamp);
+  });
+  return out;
+}
+
+// Menu: take the inbox in now, without waiting for a phone to sync.
+function processNutritionInbox() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    notify_('Таблица занята синхронизацией. Попробуйте через минуту.');
+    return null;
+  }
+  try {
+    ensureSheets_();
+    var props = PropertiesService.getScriptProperties();
+    var srv = Math.max(Date.now(), Number(props.getProperty('LAST_SRV') || 0) + 1);
+    var table = readTable_('nutrition');
+    var res = processInbox_(table, function () { return srv++; }, Date.now());
+    writeTable_(table);
+    props.setProperty('LAST_SRV', String(srv));
+    SpreadsheetApp.flush();
+    notify_(res
+      ? 'Питание из ChatGPT: строк ' + res.rows + '. Создано ' + res.create + ', обновлено ' + res.update + ', без изменений ' + (res.same + res.deleted) + ', пропущено черновиков ' + res.draft + ', отклонено ' + res.rejected + '. Подробности — в столбце result.'
+      : 'Новых строк в App_NutritionInbox нет.');
+    return res;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Stage names come in English even on a Russian iPhone.
 function sleepStage_(v) {
   var s = String(v || '').trim().toLowerCase();
@@ -705,6 +1047,14 @@ function ensureSheets_() {
       formatByHeader_(sh, entity, have.concat(missing), 2, Math.max(1, sh.getMaxRows() - 1));
     }
   });
+  var ib = ss.getSheetByName(NUTRITION_INBOX_SHEET);
+  if (!ib) {
+    ib = ss.insertSheet(NUTRITION_INBOX_SHEET, ss.getSheets().length);
+    ib.getRange(1, 1, 1, NUTRITION_INBOX_COLS.length).setValues([NUTRITION_INBOX_COLS]);
+    ib.setFrozenRows(1);
+    // Dates, ranges and words stay text; a date typed into an automatic cell would become a Date.
+    ib.getRange(2, 1, Math.max(1, ib.getMaxRows() - 1), NUTRITION_INBOX_COLS.length).setNumberFormat('@');
+  }
   var ps = ss.getSheetByName(PROGRAM_SHEET);
   if (!ps) {
     ps = ss.insertSheet(PROGRAM_SHEET, ss.getSheets().length);
@@ -721,7 +1071,7 @@ function formatByHeader_(sh, entity, header, fromRow, numRows) {
     var pos = header.indexOf(c[0]);
     if (pos < 0) return;
     var t = c[2];
-    var fmt = t === 'ms' ? '0' : t === 'text' || t === 'date' || t === 'key' || t === 'json' ? '@' : null;
+    var fmt = t === 'ms' ? '0' : t === 'text' || t === 'date' || t === 'key' || t === 'json' || t === 'obj' ? '@' : null;
     if (fmt) sh.getRange(fromRow, pos + 1, numRows, 1).setNumberFormat(fmt);
   });
 }
@@ -799,6 +1149,7 @@ function toCell_(v, type) {
     case 'ms':
       return Number(v);
     case 'json':
+    case 'obj':
       return JSON.stringify(v);
     case 'text':
       var s = String(v);
@@ -844,6 +1195,14 @@ function fromCell_(v, type) {
         return JSON.parse(v);
       } catch (e) {
         return [];
+      }
+    case 'obj':
+      if (!v) return null;
+      try {
+        var o = JSON.parse(v);
+        return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+      } catch (e) {
+        return null;
       }
     case 'date':
       return v === '' ? null : String(v).slice(0, 10);
@@ -898,6 +1257,9 @@ function sanitize_(entity, rec) {
     } else if (t === 'json') {
       out[f] = Array.isArray(v) ? v : [];
       if (JSON.stringify(out[f]).length > 45000) ok = false;
+    } else if (t === 'obj') {
+      out[f] = v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+      if (out[f] && JSON.stringify(out[f]).length > 5000) ok = false;
     } else {
       out[f] = String(v).slice(0, MAX_TEXT);
     }
@@ -921,6 +1283,16 @@ function sanitize_(entity, rec) {
   if (entity === 'phases') {
     if (!PHASE_MODES[out.mode] || !out.start || (out.end && out.end < out.start)) ok = false;
     else if (out.targetPct == null || Math.abs(out.targetPct) > 2) ok = false;
+  }
+  if (entity === 'nutrition') {
+    if (!out.date || out.id !== 'n:' + out.date || !NUTRITION_STATUS[out.status] || !NUTRITION_SOURCES[out.source]) ok = false;
+    else if (!validRanges_(out.ranges)) ok = false;
+    else if (NUTRITION_FIELDS.some(function (f) { return out[f] != null && out[f] > NUTRITION_LIMITS[f]; })) ok = false;
+    else if (!out.deleted && !NUTRITION_FIELDS.some(function (f) { return out[f] != null || (out.ranges && out.ranges[f]); })) ok = false;
+  }
+  if (entity === 'nutritionGoals') {
+    if (!out.phaseId || !out.from || out.id !== 'g:' + out.phaseId + ':' + out.from) ok = false;
+    else if (out.carbsMode !== 'rest' && out.carbsMode !== 'explicit') ok = false;
   }
   return ok ? out : null;
 }
@@ -1201,6 +1573,7 @@ function onOpen() {
     .addItem('Резервная копия таблицы', 'backupSpreadsheet')
     .addItem('Ключ для «Команд» iPhone', 'showIngestKey')
     .addItem('Сменить ключ для «Команд»', 'rotateIngestKey')
+    .addItem('Принять питание из ChatGPT', 'processNutritionInbox')
     .addToUi();
 }
 

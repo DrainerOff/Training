@@ -91,6 +91,15 @@ export function SetText({ set, category, showRir = true }) {
   return html`<span>${set.drop ? 'дроп ' : ''}${fmtWeight(set.weight, category)}×${set.reps}${showRir && set.rir != null ? html`<sup>${fmtNum(set.rir)}</sup>` : ''}</span>`;
 }
 
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    app.ui.toast('Скопировано');
+  } catch {
+    app.ui.toast('Не удалось скопировать — выделите текст вручную');
+  }
+}
+
 export function Seg({ options, value, onChange, fill = false, label }) {
   return html`<div class=${'seg' + (fill ? ' seg--fill' : '')} role="group" aria-label=${label}>
     ${options.map(

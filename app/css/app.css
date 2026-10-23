@@ -2850,3 +2850,137 @@ button.src {
 .strength--flat {
   color: var(--steel);
 }
+
+/* ---------------------------------------------------------------- nutrition (Тело → Питание) */
+
+.body-seg {
+  margin: 0 0 14px;
+}
+.nutr-today .phase__rate {
+  font-size: 56px;
+}
+.nutr-hero {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 10px;
+}
+.nutr-hero__goal {
+  font-size: 14px;
+  color: var(--steel);
+}
+.nutr-hero__goal b {
+  color: var(--iron);
+}
+.nutr-macros {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.nutr-cell {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--fill);
+}
+.nutr-cell__value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.nutr-cell__goal,
+.nutr-cell__state {
+  font-size: 12px;
+  color: var(--steel);
+  overflow-wrap: anywhere;
+}
+.nutr-cell[data-state='within'] .nutr-cell__state {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.nutr-cell[data-state='below'] .nutr-cell__state,
+.nutr-cell[data-state='above'] .nutr-cell__state {
+  color: var(--iron);
+  font-weight: 600;
+}
+.nutr-actions {
+  margin: -4px 0 16px;
+}
+.nutr-week__cov {
+  font-weight: 600;
+  color: var(--iron) !important;
+}
+.nutr-lines {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--steel);
+}
+.nutr-small {
+  font-size: 13px;
+  margin-top: 6px;
+}
+.nutr-empty {
+  padding: 0 14px;
+}
+.nutr-more,
+.nutr-file {
+  margin-top: 10px;
+}
+.nutr-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  color: var(--steel);
+}
+.nutr-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.nutr-preview {
+  margin-top: 12px;
+}
+.nutr-tag {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--steel);
+  text-align: right;
+}
+.nutr-tag[data-action='create'],
+.nutr-tag[data-action='update'] {
+  color: var(--accent-text);
+}
+.nutr-plan {
+  margin-top: 12px;
+  font-weight: 600;
+}
+.nutr-check {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+}
+.nutr-check input {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  margin-top: 1px;
+}
+textarea.nutr-instr {
+  min-height: 220px;
+  font-size: 14px;
+  margin: 12px 0;
+}
+.report-period {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+.report-part .nutr-lines {
+  color: var(--iron);
+}

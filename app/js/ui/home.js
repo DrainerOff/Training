@@ -82,6 +82,7 @@ export function Home({ syncStatus }) {
     <div class="home-actions">
       <button type="button" class="link" onClick=${() => openStart(plan, days, setPick, false)}>Другой день или неделя</button>
       <button type="button" class="link" onClick=${() => openStart(plan, days, null, true, start)}>Записать прошедшую тренировку</button>
+      <button type="button" class="link" onClick=${() => app.ui.go({ view: { type: 'report' } })}>Отчёт за неделю</button>
     </div>
     <div class="start-bar">
       <button type="button" class="btn btn--primary btn--block btn--big" onClick=${() => start()}>Начать тренировку</button>

@@ -8,8 +8,10 @@ import { normalizeProgram, starterProgram, makeOption, CATEGORY } from '../lib/p
 import { itemsForDay } from '../lib/planner.js';
 import { KINDS, bodyId, parseTime } from '../lib/bodydata.js';
 import { MODES, addDays } from '../lib/phase.js';
+import { FIELDS as NUTRITION_FIELDS, nutritionId, applyExternal, parseDate as parseNutritionDate } from '../lib/nutrition.js';
 
-export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
+export const ENTITIES = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'nutrition', 'nutritionGoals'];
+const MAX_NUTRITION_IMPORTS = 30;
 const MAX_BODY_IMPORTS = 30;
 const DOUBLE_TAP_MS = 1500;
 const MAX_CORRECTIONS = 50;
@@ -27,6 +29,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     body: new Map(), // one real measurement per record (bodydata.js)
     sleep: new Map(), // main sleep per wake date, id `s:<wakeDate>`
     phases: new Map(), // bulk / cut / maintenance periods (lib/phase.js)
+    nutrition: new Map(), // calories and macros per accounting day, id `n:<date>` (lib/nutrition.js)
+    nutritionGoals: new Map(), // goals per phase from a date, id `g:<phaseId>:<from>`
     outbox: new Map(),
     kv: {},
     version: 0,
@@ -132,8 +136,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
   }
 
   async function load() {
-    const [sessions, sets, metrics, records, exercises, body, sleep, phases, outbox, kv] = await Promise.all(
-      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
+    const [sessions, sets, metrics, records, exercises, body, sleep, phases, nutrition, nutritionGoals, outbox, kv] = await Promise.all(
+      ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'nutrition', 'nutritionGoals', 'outbox', 'kv'].map((s) => adapter.getAll(s)),
     );
     for (const r of sessions) state.sessions.set(r.id, r);
     for (const r of sets) putRecord('sets', r);
@@ -143,6 +147,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     for (const r of body) state.body.set(r.id, r);
     for (const r of sleep) state.sleep.set(r.id, r);
     for (const r of phases) state.phases.set(r.id, r);
+    for (const r of nutrition) state.nutrition.set(r.id, r);
+    for (const r of nutritionGoals) state.nutritionGoals.set(r.id, r);
     for (const r of outbox) state.outbox.set(r.key, r);
     for (const r of kv) state.kv[r.k] = r.v;
     // The starter program has updatedAt 0 and is never pushed: a fresh device must not
@@ -580,6 +586,131 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return groups.reduce((n, [, rs]) => n + rs.length, 0);
   }
 
+  // --- nutrition: totals per accounting day ----------------------------------------------------
+  // Entered by hand: the day becomes «вручную». `from` — the date it had, when the date is changed
+  // (the old day is deleted; a day already on the new date is replaced, the screen asks first).
+  // The revision of a ChatGPT entry stays, so the same entry sent again does not undo the edit.
+  async function saveNutrition(values, { from = null } = {}) {
+    const date = parseNutritionDate(values.date, isoDate(new Date(now())));
+    if (!date) throw new Error('Неверная дата');
+    const id = nutritionId(date);
+    const prev = state.nutrition.get(id);
+    const rec = {
+      id,
+      date,
+      ...Object.fromEntries(NUTRITION_FIELDS.map((f) => [f, values[f] ?? null])),
+      ranges: values.ranges && Object.keys(values.ranges).length ? values.ranges : null,
+      approx: !!values.approx,
+      status: values.status === 'final' ? 'final' : 'draft',
+      source: 'manual',
+      comment: String(values.comment || '').trim().slice(0, 300),
+      extRev: prev?.extRev || null,
+      prev: null,
+      updatedAt: stamp(prev),
+      deleted: false,
+    };
+    if (!NUTRITION_FIELDS.some((f) => rec[f] != null || rec.ranges?.[f])) throw new Error('Нет ни одного значения');
+    const out = [rec];
+    const old = from && from !== date ? state.nutrition.get(nutritionId(from)) : null;
+    if (old && !old.deleted) out.push({ ...old, deleted: true, updatedAt: stamp(old) });
+    await save('nutrition', out);
+    return rec;
+  }
+
+  // «Вернуть»: the values entered by hand that a ChatGPT entry replaced.
+  async function revertNutrition(id) {
+    const cur = state.nutrition.get(id);
+    if (!cur?.prev) return null;
+    const p = cur.prev;
+    const rec = {
+      ...cur,
+      ...Object.fromEntries(NUTRITION_FIELDS.map((f) => [f, p[f] ?? null])),
+      ranges: p.ranges || null, approx: !!p.approx, status: p.status || 'draft', comment: p.comment || '',
+      source: 'manual', prev: null, updatedAt: stamp(cur), deleted: false,
+    };
+    await save('nutrition', [rec]);
+    return rec;
+  }
+
+  // «Оставить»: the ChatGPT values stay, the replaced hand-entered values are dropped.
+  async function keepNutrition(id) {
+    const cur = state.nutrition.get(id);
+    if (!cur?.prev) return null;
+    const rec = { ...cur, prev: null, updatedAt: stamp(cur) };
+    await save('nutrition', [rec]);
+    return rec;
+  }
+
+  // Entries from outside — pasted from ChatGPT or imported — by the rules of applyExternal (one day
+  // per date, a repeat changes nothing, a draft never replaces a final day, replaced hand-entered
+  // values kept). `replace`: dates of conflicts the owner chose to overwrite; other conflicts of an
+  // import are left as they are. Undo per batch (kv `nutritionImports`).
+  async function importNutrition(entries, { source = 'chatgpt', batch = uid('nb'), conflicts = 'apply', replace = null, file = '' } = {}) {
+    const out = [];
+    const undo = [];
+    const result = { create: 0, update: 0, same: 0, deleted: 0, draft: 0, kept: 0, batch, dates: [] };
+    const work = new Map(); // the same date twice in one paste: the second applies to the first
+    for (const e of entries) {
+      const id = nutritionId(e.entry.date);
+      const existing = work.get(id) || state.nutrition.get(id);
+      if (existing && !existing.deleted && conflicts === 'ask' && !(replace && replace.has(e.entry.date)) && existing.extRev !== e.rev) {
+        result.kept++;
+        continue;
+      }
+      const r = applyExternal(existing, e.entry, { rev: e.rev, source, at: now() });
+      result[r.action]++;
+      if (!r.rec) continue;
+      const rec = { ...r.rec, batch };
+      if (!work.has(id)) undo.push(state.nutrition.get(id) || null);
+      work.set(id, rec);
+      result.dates.push(e.entry.date);
+    }
+    out.push(...work.values());
+    if (!out.length) return result;
+    const entry = { batch, at: now(), source, file: String(file).slice(0, 80), count: out.length, undone: false, before: undo.map((r, i) => r ? r : { id: out[i].id, none: true }) };
+    await saveAll([['nutrition', out]], { nutritionImports: [...(state.kv.nutritionImports || []), entry].slice(-MAX_NUTRITION_IMPORTS) });
+    return result;
+  }
+
+  // Undo of a paste or an import: each day goes back to what it was (or is deleted if it was new),
+  // unless it was changed again since.
+  async function undoNutritionImport(batch) {
+    const entry = (state.kv.nutritionImports || []).find((e) => e.batch === batch);
+    if (!entry || entry.undone) return 0;
+    const out = [];
+    for (const before of entry.before) {
+      const cur = state.nutrition.get(before.id);
+      if (!cur || cur.batch !== batch) continue;
+      if (before.none) out.push({ ...cur, deleted: true, updatedAt: stamp(cur) });
+      else out.push({ ...before, updatedAt: stamp(cur) });
+    }
+    const imports = (state.kv.nutritionImports || []).map((e) => (e.batch === batch ? { ...e, undone: true } : e));
+    await saveAll([['nutrition', out]], { nutritionImports: imports });
+    return out.length;
+  }
+
+  // Goals of a phase from a date: kcal value or range, protein minimum or range, fat target or range,
+  // carbs explicit or the remainder. A change from another date is a new record (history).
+  async function saveNutritionGoals(g) {
+    if (!g.phaseId || !state.phases.get(g.phaseId)) throw new Error('Нет режима для целей');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(g.from || '')) throw new Error('Не указана дата начала');
+    const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 10) / 10);
+    const rec = { id: `g:${g.phaseId}:${g.from}`, phaseId: g.phaseId, from: g.from };
+    for (const k of ['kcalMin', 'kcalMax', 'proteinMin', 'proteinMax', 'fatMin', 'fatMax', 'carbsMin', 'carbsMax']) rec[k] = num(g[k]);
+    for (const [lo, hi] of [['kcalMin', 'kcalMax'], ['proteinMin', 'proteinMax'], ['fatMin', 'fatMax'], ['carbsMin', 'carbsMax']]) {
+      if (rec[lo] != null && rec[hi] != null && rec[lo] > rec[hi]) throw new Error('Начало диапазона больше конца');
+      if ([rec[lo], rec[hi]].some((v) => v != null && v < 0)) throw new Error('Отрицательная цель');
+    }
+    rec.carbsMode = g.carbsMode === 'rest' ? 'rest' : 'explicit';
+    if (rec.carbsMode === 'rest') rec.carbsMin = rec.carbsMax = null;
+    rec.note = String(g.note || '').slice(0, 300);
+    const prev = state.nutritionGoals.get(rec.id);
+    rec.updatedAt = stamp(prev);
+    rec.deleted = false;
+    await save('nutritionGoals', [rec]);
+    return rec;
+  }
+
   // --- program -------------------------------------------------------------------------
 
   async function saveProgram(program) {
@@ -685,6 +816,8 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       body: [...state.body.values()],
       sleep: [...state.sleep.values()],
       phases: [...state.phases.values()],
+      nutrition: [...state.nutrition.values()],
+      nutritionGoals: [...state.nutritionGoals.values()],
     };
   }
 
@@ -814,6 +947,15 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     restorePhase: (id) => setDeleted('phases')(id, false),
     importBody,
     undoImport,
+    saveNutrition,
+    deleteNutrition: (id) => setDeleted('nutrition')(id, true),
+    restoreNutrition: (id) => setDeleted('nutrition')(id, false),
+    revertNutrition,
+    keepNutrition,
+    importNutrition,
+    undoNutritionImport,
+    saveNutritionGoals,
+    deleteNutritionGoals: (id) => setDeleted('nutritionGoals')(id, true),
     saveProgram,
     importParsedSessions,
     exportAll,

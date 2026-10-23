@@ -9,7 +9,7 @@ const LEGACY_ENTITIES = ['sessions', 'sets', 'metrics'];
 // Entities added after the first release. A device that synced with an older release moved its
 // cursor past their rows without keeping them, so each is pulled once from the very start (the
 // merge is idempotent); `<entity>Pulled` in kv marks it done.
-const CATCH_UP = ['records', 'exercises', 'body', 'sleep', 'phases'];
+const CATCH_UP = ['records', 'exercises', 'body', 'sleep', 'phases', 'nutrition', 'nutritionGoals'];
 // What waits on the phone while the Apps Script doesn't know the entity yet.
 const WAITING_LABEL = {
   records: 'рекорды, добавленные вручную',
@@ -17,10 +17,12 @@ const WAITING_LABEL = {
   body: 'замеры тела',
   sleep: 'сон',
   phases: 'режимы набора и сушки',
+  nutrition: 'питание по дням',
+  nutritionGoals: 'цели по питанию',
 };
 
 // Everything a sync carries, in the order the restore check lists it.
-export const SYNCED = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases'];
+export const SYNCED = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'body', 'sleep', 'phases', 'nutrition', 'nutritionGoals'];
 export const ENTITY_LABEL = {
   sessions: 'тренировки',
   sets: 'подходы',
@@ -30,6 +32,8 @@ export const ENTITY_LABEL = {
   body: 'замеры тела',
   sleep: 'сон',
   phases: 'режимы набора и сушки',
+  nutrition: 'питание по дням',
+  nutritionGoals: 'цели по питанию',
 };
 
 // What a new phone would get from the sheet, compared record by record with this one; read-only on
@@ -176,7 +180,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
 
   async function round(cfg) {
     const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
-    const push = { sessions: [], sets: [], metrics: [], records: [], exercises: [], body: [], sleep: [], phases: [] };
+    const push = Object.fromEntries(SYNCED.map((e) => [e, []]));
     const sent = [];
     for (const e of entries) {
       if (e.entity === 'program') {

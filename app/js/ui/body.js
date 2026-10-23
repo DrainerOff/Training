@@ -2,7 +2,7 @@
 // strength, sleep, recovery), and the raw data behind grouped rows. Device data (App_Body,
 // App_Sleep) wins for its day over a v1.0 check-in, so nothing counts twice.
 
-import { html, useState, app, openSheet, Sheet, Icon, local } from './core.js';
+import { html, useState, app, openSheet, Sheet, Icon, local, Seg } from './core.js';
 import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, fmtTime, sum, plural } from '../lib/util.js';
@@ -12,10 +12,31 @@ import { ImportButton, importFile, openAddBody, openKindHistory, openNights, Sou
 import { PhaseCard, PhaseWeeks } from './phase.js';
 import { MODES, phaseOn, phaseReport, sortedPhases, targetBand, addDays } from '../lib/phase.js';
 import { derived } from './derive.js';
+import { Nutrition, openDay, nutritionToday, bodyTab, rememberBodyTab } from './nutrition.js';
 
 const signed = (n, digits = 2) => `${n >= 0 ? '+' : '−'}${fmtNum(Math.abs(n), digits)}`;
 
 export function Body() {
+  const [tab, setTab] = useState(bodyTab);
+  const pick = (t) => {
+    rememberBodyTab(t);
+    setTab(t);
+  };
+  const seg = html`<${Seg} label="Раздел" fill=${true} value=${tab} onChange=${pick} options=${[{ value: 'body', label: 'Тело' }, { value: 'nutrition', label: 'Питание' }]} />`;
+  if (tab === 'nutrition') {
+    return html`<main class="screen">
+      <header class="topbar topbar--large">
+        <h1>Питание</h1>
+        <button type="button" class="add-btn" aria-label="Записать итог дня" onClick=${() => openDay(nutritionToday())}><${Icon} name="plus" /></button>
+      </header>
+      <div class="body-seg">${seg}</div>
+      <${Nutrition} />
+    </main>`;
+  }
+  return html`<${BodyScreen} seg=${seg} />`;
+}
+
+function BodyScreen({ seg }) {
   const st = app.store.state;
   const today = isoDate();
   const metrics = [...st.metrics.values()].filter((m) => !m.deleted).sort((a, b) => b.date.localeCompare(a.date));
@@ -41,6 +62,7 @@ export function Body() {
       <h1>Тело</h1>
       <button type="button" class="add-btn" aria-label="Добавить: самочувствие, замер или файл" onClick=${() => openAdd(today)}><${Icon} name="plus" /></button>
     </header>
+    <div class="body-seg">${seg}</div>
 
     <${HealthQuiet} />
     <${PhaseCard} phase=${phase} report=${report} />
@@ -122,6 +144,12 @@ export function Body() {
         <span class="row__title">Самочувствие</span>
         <span></span>
         <span class="row__sub">${lastMetric ? `${fmtDay(lastMetric.date)}: ${metricLine(lastMetric) || 'заметка'}` : 'Пока нет записей. Вес лучше записывать утром, натощак.'}</span>
+      </button></li>
+      <li><button type="button" class="row row--icon" onClick=${() => app.ui.go({ view: { type: 'report' } })}>
+        <span class="tile-icon" style="--c:var(--accent)"><${Icon} name="progress" /></span>
+        <span class="row__title">Отчёт за неделю</span>
+        <span></span>
+        <span class="row__sub">тренировки, тело, питание и сон за прошлую неделю, с текстом для ChatGPT</span>
       </button></li>
     </ul>
 

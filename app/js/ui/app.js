@@ -8,6 +8,7 @@ import { ProgressList, ExerciseDetail } from './progress.js';
 import { RecordsDetail } from './records.js';
 import { History } from './history.js';
 import { Body } from './body.js';
+import { Report } from './report.js';
 import { Settings, ProgramEditor, ProgramImport, ResultsImport } from './settings.js';
 
 const TABS = [
@@ -69,6 +70,7 @@ function App() {
   else if (view?.type === 'results-import') screen = html`<${ResultsImport} />`;
   else if (view?.type === 'exercise') screen = html`<${ExerciseDetail} key=${view.key} seriesKey=${view.key} />`;
   else if (view?.type === 'records') screen = html`<${RecordsDetail} key=${view.key} seriesKey=${view.key} />`;
+  else if (view?.type === 'report') screen = html`<${Report} />`;
   else if (view?.type === 'session') {
     const s = st.sessions.get(view.id);
     workout = !!(s && !s.deleted);

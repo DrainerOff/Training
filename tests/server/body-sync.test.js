@@ -181,7 +181,7 @@ test('the sheet refuses broken body and sleep rows', () => {
   const sleepOk = { id: 's:2026-10-18', wakeDate: '2026-10-18', hours: 7, updatedAt: 5 };
   const res = gas.post({ action: 'sync', token, since: 0, push: { body: [ok, ...bad], sleep: [sleepOk, { ...sleepOk, id: 's:2026-10-19' }, { ...sleepOk, hours: 30 }] } });
   assert.equal(res.api, 6);
-  assert.deepEqual(res.ack, { sessions: 0, sets: 0, metrics: 0, records: 0, exercises: 0, body: 1, sleep: 1, phases: 0 });
+  assert.deepEqual(res.ack, { sessions: 0, sets: 0, metrics: 0, records: 0, exercises: 0, body: 1, sleep: 1, phases: 0, nutrition: 0, nutritionGoals: 0 });
   assert.equal(res.rejected.length, 7);
   const owner = rows(gas, 'App_Body')[0];
   assert.equal(owner.value, 80);

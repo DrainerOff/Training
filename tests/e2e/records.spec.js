@@ -204,7 +204,7 @@ test('update from release 7705635: the database gains the records store, workout
       await page.waitForFunction(() => window.__trainer?.store.state.loaded || document.querySelector('.diag'));
     }
     expect(await page.evaluate(() => window.__trainer.build)).toBe('new1');
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 5 }]);
+    expect(await page.evaluate(() => indexedDB.databases())).toEqual([{ name: 'trainer', version: 6 }]);
     expect(await page.evaluate(() => window.__trainer.store.state.sets.size)).toBe(sets);
     await page.evaluate(() => window.__trainer.store.saveRecord({ seriesKey: 'naklonnyy-zhim-hammer-naklon', exercise: 'Наклонный жим: Hammer - наклон', category: 'hammer', date: '2025-04-12', weight: 95, reps: 5 }));
     await page.reload();
