@@ -1,0 +1,8 @@
+{
+  "telegram_token": "123456:ABC-токен-от-BotFather",
+  "allowed_chat_ids": [],
+  "poll_seconds": 3,
+  "open_button_ttl": 180,
+  "call_event_markers": ["call"],
+  "notify_all_events": false
+}

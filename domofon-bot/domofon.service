@@ -1,0 +1,14 @@
+[Unit]
+Description=Домофон Дом.ру → Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/home/pi/domofon-bot
+ExecStart=/usr/bin/python3 /home/pi/domofon-bot/domofon_bot.py run
+Restart=always
+RestartSec=10
+User=pi
+
+[Install]
+WantedBy=multi-user.target
