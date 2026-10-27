@@ -35,3 +35,22 @@ export function describeDelivery(d, { fmt }) {
     .map(([t, at]) => `${TYPES[t] || t} — ${fmt(at)}`);
   return `Данные из «Здоровья» не приходят ${ago}. Последние: ${parts.join(', ')}.`;
 }
+
+// The automation runs, but the sheet refused every line of the last request of a type: a label in
+// the Shortcut broke, or its text changed. From the sheet's log only (API 6), counts and times, no
+// values. [{ type, label, at, lines }], newest first; empty when the last request of each type was
+// accepted (or brought nothing).
+export function healthRefused({ ingest = null } = {}) {
+  const out = [];
+  for (const [type, v] of Object.entries(ingest?.byType || {})) {
+    const lines = Number(v?.lines) || 0;
+    const at = Number(v?.at);
+    if (lines > 0 && (Number(v?.rejected) || 0) >= lines && at > 0) out.push({ type, label: TYPES[type] || type, at, lines });
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+
+// One plain line per refused type. `fmt(ms)` formats a time.
+export function describeRefused(list, { fmt }) {
+  return list.map((r) => `${r.label[0].toUpperCase()}${r.label.slice(1)} — ${fmt(r.at)}: не принята ни одна строка из ${r.lines}.`).join(' ');
+}
