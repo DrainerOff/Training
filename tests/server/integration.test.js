@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGas } from '../helpers/fake-gas.js';
 import { createStore } from '../../app/js/data/store.js';
-import { memoryAdapter } from '../../app/js/data/db.js';
+import { memoryAdapter, StorageError } from '../../app/js/data/db.js';
 import { createSync, SyncError } from '../../app/js/data/sync.js';
 import { parseProgramText } from '../../app/js/lib/program.js';
 
@@ -221,6 +221,31 @@ test('wrong token surfaces a clear error and keeps data queued', async () => {
   assert.equal(st.state, 'error');
   assert.match(st.error, /Ключ доступа/);
   assert.equal(a.store.state.outbox.size, 1);
+});
+
+test('a phone that cannot save what the sheet sent says so, not «Нет связи», and catches up on the next sync', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const net = network(gas);
+  const a = await device(gas, token, net);
+  const b = await device(gas, token, net);
+  await b.store.saveMetric('2026-10-17', { bodyweight: 81.2 });
+  await b.sync.syncNow();
+  const write = a.adapter.write;
+  a.adapter.write = async () => {
+    throw new StorageError('write', 'IndexedDB не ответила за 8 с (запись) (попыток: 2)');
+  };
+  const st = await a.sync.syncNow();
+  assert.equal(st.state, 'error');
+  assert.equal(st.errorCode, 'storage');
+  assert.match(st.error, /телефон не сохранил полученное.*IndexedDB не ответила/);
+  assert.doesNotMatch(st.error, /Нет связи/);
+  assert.equal(a.store.state.metrics.size, 0, 'nothing is shown that the phone did not keep');
+  a.adapter.write = write;
+  const ok = await a.sync.syncNow();
+  assert.equal(ok.state, 'idle');
+  assert.equal(a.store.state.metrics.size, 1);
+  assert.equal(a.store.state.storageError, null, 'the warning goes with the next successful write');
 });
 
 test('body metrics: one record per date, re-saving the same day updates it', async () => {

@@ -97,14 +97,94 @@ test('an open error is reported as a StorageError, not swallowed', async () => {
   await assert.rejects(idbAdapter(), /IndexedDB: открытие базы не удалось — Connection to Indexed Database server lost/);
 });
 
-test('a stalled write is aborted at the deadline, so nothing of it is saved', async () => {
+test('a stalled write is aborted at the deadline, so nothing of it is saved; it fails after a retry on a fresh connection', async () => {
   const log = install((req, l) => {
     req.result = fakeDb({ log: l, tx: () => {} }); // transactions never complete
     later(1, () => req.onsuccess?.());
   });
   const adapter = await idbAdapter();
-  await assert.rejects(adapter.write([{ store: 'sets', value: { id: 'x' } }]), (err) => err.step === 'write' && /не ответила/.test(err.message));
-  assert.equal(log.aborted, 1);
+  await assert.rejects(adapter.write([{ store: 'sets', value: { id: 'x' } }]), (err) => err.step === 'write' && /не ответила.*\(попыток: 2\)/.test(err.message));
+  assert.equal(log.aborted, 2);
+  assert.equal(log.open, 2, 'the database is reopened once');
+  assert.equal(log.closed, 1, 'the stalled connection is closed');
+});
+
+// The iPhone case: back from the background, the old connection answers nothing, a new one works.
+function deadThenFresh(extra = {}) {
+  return install((req, l) => {
+    const n = l.open;
+    req.result = fakeDb({ log: l, tx: n === 1 ? extra.first || (() => {}) : (t) => later(1, () => t.oncomplete?.()) });
+    later(1, () => req.onsuccess?.());
+  });
+}
+
+test('a write stalled on a dead connection is made again on a fresh one and succeeds', async () => {
+  const log = deadThenFresh();
+  const adapter = await idbAdapter();
+  await adapter.write([{ store: 'kv', value: { k: 'cursor', v: 5 } }]);
+  assert.deepEqual([log.open, log.aborted, log.closed], [2, 1, 1]);
+  // Later writes use the fresh connection right away.
+  await adapter.write([{ store: 'kv', value: { k: 'cursor', v: 6 } }]);
+  assert.equal(log.open, 2);
+});
+
+test('a lost connection («Connection to Indexed Database server lost») is reopened and the write made again', async () => {
+  const lost = (t) =>
+    later(1, () => {
+      t.error = Object.assign(new Error('Connection to Indexed Database server lost. Refresh the page to try again'), { name: 'UnknownError' });
+      t.onerror?.();
+    });
+  const log = deadThenFresh({ first: lost });
+  const adapter = await idbAdapter();
+  await adapter.write([{ store: 'sets', value: { id: 'x' } }]);
+  assert.deepEqual([log.open, log.closed], [2, 1]);
+});
+
+test('a refused write (not a connection problem) is reported at once, without a retry', async () => {
+  const log = install((req, l) => {
+    req.result = fakeDb({
+      log: l,
+      tx: (t) =>
+        later(1, () => {
+          t.error = Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+          t.onerror?.();
+        }),
+    });
+    later(1, () => req.onsuccess?.());
+  });
+  const adapter = await idbAdapter();
+  await assert.rejects(adapter.write([{ store: 'sets', value: { id: 'x' } }]), /запись не удалось — quota/);
+  assert.equal(log.open, 1);
+});
+
+test('writes keep their order: one made again after a stall still lands before a later one', async () => {
+  const order = [];
+  // On the dead connection the first write stalls and the second fails at once with a connection
+  // error: run side by side, the second would be made again (and land) first.
+  let made = 0;
+  const dead = (t) => {
+    if (++made === 1) return;
+    later(1, () => {
+      t.error = Object.assign(new Error('lost'), { name: 'UnknownError' });
+      t.onerror?.();
+    });
+  };
+  install((req, l) => {
+    const n = l.open;
+    const db = fakeDb({ log: l, tx: n === 1 ? dead : (t) => later(1, () => t.oncomplete?.()) });
+    const make = db.transaction;
+    db.transaction = (stores, mode) => {
+      const t = make(stores, mode);
+      const store = t.objectStore;
+      t.objectStore = () => ({ ...store(), put: (v) => n > 1 && order.push(v.v) });
+      return t;
+    };
+    req.result = db;
+    later(1, () => req.onsuccess?.());
+  });
+  const adapter = await idbAdapter();
+  await Promise.all([adapter.write([{ store: 'kv', value: { k: 'cursor', v: 1 } }]), adapter.write([{ store: 'kv', value: { k: 'cursor', v: 2 } }])]);
+  assert.deepEqual(order, [1, 2]);
 });
 
 test('a write that is already committing at the deadline still reports its success', async () => {
@@ -129,4 +209,26 @@ test('a read that never answers fails with the step named', async () => {
   });
   const adapter = await idbAdapter();
   await assert.rejects(adapter.getAll('sets'), (err) => err.step === 'read');
+});
+
+test('reads stalled on a dead connection share one reopen and succeed on it', async () => {
+  const log = install((req, l) => {
+    const n = l.open;
+    const db = fakeDb({ log: l });
+    db.transaction = () => ({
+      objectStore: () => ({
+        getAll() {
+          const r = {};
+          if (n > 1) later(1, () => ((r.result = [{ id: 'a' }]), r.onsuccess?.()));
+          return r;
+        },
+      }),
+    });
+    req.result = db;
+    later(1, () => req.onsuccess?.());
+  });
+  const adapter = await idbAdapter();
+  const all = await Promise.all(['sets', 'sessions', 'kv'].map((s) => adapter.getAll(s)));
+  assert.deepEqual(all, [[{ id: 'a' }], [{ id: 'a' }], [{ id: 'a' }]]);
+  assert.equal(log.open, 2, 'one reopen for all three');
 });

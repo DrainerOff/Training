@@ -32,12 +32,14 @@ const OPEN_ATTEMPTS = 2;
 
 // Deadlines are generous: they exist to end a wait that would otherwise never end, not to
 // rush a slow phone. A write gets extra time per record (a backup or a first full download).
-function limit(kind, records = 0) {
+// The first attempt is shorter: a request that stalls is usually stuck on a dead connection
+// (see idbAdapter), and the retry on a fresh one gets the full time.
+function limit(kind, records = 0, attempt = 1) {
   const override = globalThis.__TRAINER_IDB_TIMEOUT_MS; // tests shorten the deadlines
   if (override) return override;
   if (kind === 'open') return 4000;
-  if (kind === 'read') return 15000;
-  return 8000 + 5 * records;
+  if (kind === 'read') return attempt > 1 ? 8000 : 6000;
+  return (attempt > 1 ? 8000 : 3000) + 5 * records;
 }
 
 export class StorageError extends Error {
@@ -60,6 +62,17 @@ function wrapError(step, err) {
   if (err instanceof StorageError) return err;
   const text = err?.message || err?.name || String(err || 'неизвестная ошибка');
   return new StorageError(step, `IndexedDB: ${STEP_TEXT[step]} не удалось — ${text}`, err);
+}
+
+// Failures of the connection rather than of the request: «Connection to Indexed Database server
+// lost» (UnknownError), a connection iOS already closed (InvalidStateError), a transaction
+// aborted when the connection went away (AbortError). Nothing of such a request was saved, so
+// it is safe to make it again.
+const CONNECTION_ERRORS = new Set(['InvalidStateError', 'TransactionInactiveError', 'UnknownError', 'AbortError']);
+
+function retryable(err) {
+  if (err?.retry) return true;
+  return CONNECTION_ERRORS.has(err?.name) || CONNECTION_ERRORS.has(err?.cause?.name);
 }
 
 // Safari 14 workaround: the first request after launch can sit idle until IndexedDB is
@@ -158,10 +171,15 @@ async function openDb(name) {
   throw lastErr;
 }
 
+// iOS can leave the app with a connection that no longer answers: after the app sat in the
+// background, or after the IndexedDB process was restarted, transactions on it neither complete
+// nor fail. Reopening the database fixes it, the old connection never recovers. So a request
+// that stalls or fails with a connection error drops its connection and is made once more on a
+// fresh one; only a second failure reaches the caller.
 export async function idbAdapter(name = 'trainer') {
   let db = await openDb(name);
-  const watch = () => {
-    const current = db;
+  let opening = null;
+  const watch = (current) => {
     current.onclose = () => {
       if (db === current) db = null;
     };
@@ -170,35 +188,65 @@ export async function idbAdapter(name = 'trainer') {
       if (db === current) db = null;
     };
   };
-  watch();
+  watch(db);
 
-  // iOS may close an idle connection while the app sits in the background; reopen once.
-  async function withDb(fn) {
-    if (!db) {
-      db = await openDb(name);
-      watch();
+  // Requests made while the database is being reopened share the one open.
+  async function connection() {
+    if (db) return db;
+    if (!opening) {
+      opening = openDb(name).then(
+        (fresh) => {
+          opening = null;
+          db = fresh;
+          watch(fresh);
+          return fresh;
+        },
+        (err) => {
+          opening = null;
+          throw err;
+        },
+      );
     }
+    return opening;
+  }
+
+  function drop(current) {
+    if (db === current) db = null;
     try {
-      return await fn(db);
-    } catch (err) {
-      if (err && (err.name === 'InvalidStateError' || err.name === 'TransactionInactiveError')) {
-        db = await openDb(name);
-        watch();
-        return fn(db);
-      }
-      throw err;
+      current.close();
+    } catch {
+      // Already closed.
     }
   }
+
+  async function withDb(fn) {
+    for (let attempt = 1; ; attempt++) {
+      const current = await connection();
+      try {
+        return await fn(current, attempt);
+      } catch (err) {
+        if (attempt > 1 || !retryable(err)) {
+          if (attempt > 1 && err instanceof StorageError) err.message += ' (попыток: 2)';
+          throw err;
+        }
+        drop(current);
+      }
+    }
+  }
+
+  // Writes run one after another, so a write made again on a fresh connection can never land
+  // after a newer one and bring back an old value.
+  let queue = Promise.resolve();
 
   return {
     kind: 'indexeddb',
     getAll(store) {
       return withDb(
-        (d) =>
+        (d, attempt) =>
           new Promise((resolve, reject) => {
             const req = d.transaction(store, 'readonly').objectStore(store).getAll();
-            const ms = limit('read');
-            const timer = setTimeout(() => reject(timeoutError('read', ms)), ms);
+            const ms = limit('read', 0, attempt);
+            const timer = setTimeout(() => reject(Object.assign(timeoutError('read', ms), { retry: true })), ms);
             req.onsuccess = () => {
               clearTimeout(timer);
               resolve(req.result);
@@ -211,42 +259,59 @@ export async function idbAdapter(name = 'trainer') {
       );
     },
     // Resolves only after the transaction has committed. A transaction that stalls is
-    // aborted at the deadline, so the outcome is definite: nothing of it was saved.
+    // aborted at the deadline, so the outcome is definite: nothing of it was saved, and it is
+    // made once more on a fresh connection.
     write(ops) {
       if (!ops.length) return Promise.resolve();
       const stores = [...new Set(ops.map((o) => o.store))];
-      return withDb(
-        (d) =>
-          new Promise((resolve, reject) => {
-            const tx = d.transaction(stores, 'readwrite');
-            const ms = limit('write', ops.length);
-            let settled = false;
-            const finish = (fn, value) => {
-              if (settled) return;
-              settled = true;
-              clearTimeout(timer);
-              fn(value);
-            };
-            let timer = setTimeout(() => {
+      const run = queue.then(() =>
+        withDb(
+          (d, attempt) =>
+            new Promise((resolve, reject) => {
+              const tx = d.transaction(stores, 'readwrite');
+              const ms = limit('write', ops.length, attempt);
+              let settled = false;
+              const finish = (fn, value) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                fn(value);
+              };
+              let timer = setTimeout(() => {
+                try {
+                  tx.abort();
+                } catch {
+                  // Already committing: give oncomplete one more period, then stop waiting. The
+                  // outcome is unknown here, so this one is not made again.
+                  timer = setTimeout(() => finish(reject, timeoutError('write', 2 * ms)), ms);
+                  return;
+                }
+                finish(reject, Object.assign(timeoutError('write', ms), { retry: true }));
+              }, ms);
               try {
-                tx.abort();
-              } catch {
-                // Already committing: give oncomplete one more period, then stop waiting.
-                timer = setTimeout(() => finish(reject, timeoutError('write', 2 * ms)), ms);
+                for (const op of ops) {
+                  const os = tx.objectStore(op.store);
+                  if ('delete' in op) os.delete(op.delete);
+                  else os.put(op.value);
+                }
+              } catch (err) {
+                // A record IndexedDB refuses (no key, can't be cloned): none of the write is kept.
+                try {
+                  tx.abort();
+                } catch {
+                  // Not started yet.
+                }
+                finish(reject, wrapError('write', err));
                 return;
               }
-              finish(reject, timeoutError('write', ms));
-            }, ms);
-            for (const op of ops) {
-              const os = tx.objectStore(op.store);
-              if ('delete' in op) os.delete(op.delete);
-              else os.put(op.value);
-            }
-            tx.oncomplete = () => finish(resolve);
-            tx.onerror = () => finish(reject, wrapError('write', tx.error));
-            tx.onabort = () => finish(reject, wrapError('write', tx.error || new Error('запись отменена')));
-          }),
+              tx.oncomplete = () => finish(resolve);
+              tx.onerror = () => finish(reject, wrapError('write', tx.error));
+              tx.onabort = () => finish(reject, wrapError('write', tx.error || new Error('запись отменена')));
+            }),
+        ),
       );
+      queue = run.catch(() => {});
+      return run;
     },
   };
 }

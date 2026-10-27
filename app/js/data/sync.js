@@ -122,7 +122,13 @@ const MESSAGES = {
   http: 'Сервер Google вернул ошибку. Попробуем ещё раз позже.',
   server_error: 'Ошибка в Apps Script.',
   busy: 'Таблица занята другой синхронизацией. Повторим автоматически.',
+  storage: 'Связь с таблицей есть, но телефон не сохранил полученное. Синхронизация повторится сама.',
 };
+
+// A failed write to the phone's storage during a sync is not a network problem.
+function codeOf(err) {
+  return err?.name === 'StorageError' ? 'storage' : err?.code || 'network';
+}
 
 // The owner pastes these on the phone; catch the usual mix-ups before saving.
 export function checkApiUrl(url) {
@@ -142,9 +148,9 @@ export function checkToken(token) {
 }
 
 export function describeError(err) {
-  const code = err?.code || 'network';
+  const code = codeOf(err);
   const base = MESSAGES[code] || MESSAGES.server_error;
-  return code === 'server_error' && err.message ? `${base} ${err.message}` : base;
+  return (code === 'server_error' || code === 'storage') && err.message ? `${base} ${err.message}` : base;
 }
 
 export function createSync(store, { transport = fetchTransport, now = () => Date.now() } = {}) {
@@ -251,7 +257,7 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
         update({ state: 'idle', lastSyncAt: now(), error: null, errorCode: null });
       }
     } catch (err) {
-      const code = err?.code || 'network';
+      const code = codeOf(err);
       update({ state: code === 'network' ? 'offline' : 'error', error: describeError(err), errorCode: code });
     }
     return status;

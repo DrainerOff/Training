@@ -6,7 +6,7 @@ import { html, useState, app, openSheet, Sheet, Icon, local, Seg } from './core.
 import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
 import { isoDate, fmtDay, fmtDayShort, fmtNum, fmtTime, sum, plural } from '../lib/util.js';
-import { healthDelivery, describeDelivery } from '../lib/health.js';
+import { healthDelivery, describeDelivery, healthRefused, describeRefused } from '../lib/health.js';
 import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf } from '../lib/bodydata.js';
 import { ImportButton, importFile, openAddBody, openKindHistory, openNights, Sources, sleepLine } from './bodyentry.js';
 import { PhaseCard, PhaseWeeks } from './phase.js';
@@ -64,6 +64,7 @@ function BodyScreen({ seg }) {
     </header>
     <div class="body-seg">${seg}</div>
 
+    <${HealthRefused} />
     <${HealthQuiet} />
     <${PhaseCard} phase=${phase} report=${report} />
 
@@ -431,6 +432,37 @@ export function HealthQuiet() {
     <p>${describeDelivery(d, { fmt: at })} Если вы взвешивались или спали с часами, проверьте автоматизации.</p>
     <div class="btn-row"><button type="button" class="btn" onClick=${() => openSheet((close) => html`<${HealthCheckSheet} onClose=${close} />`)}>Как проверить</button></div>
   </div>`;
+}
+
+// The automation runs, but the sheet refuses everything it sends for a type: without this the data
+// just never shows up, since a refused request still counts as «arriving».
+const SHORTCUT_OF = { weight: '«Здоровье → таблица»', fat: '«Здоровье → таблица»', waist: '«Здоровье: талия»', sleep: '«Здоровье: сон»' };
+
+export function HealthRefused() {
+  const refused = healthRefused({ ingest: app.store.state.kv.ingest });
+  if (!refused.length) return null;
+  const at = (ms) => `${fmtDay(isoDate(new Date(ms)))}, ${fmtTime(ms)}`;
+  const title = refused.length === 1 ? `Таблица не принимает ${refused[0].type === 'waist' ? 'талию' : refused[0].label} из «Команд»` : 'Таблица не принимает данные из «Команд»';
+  return html`<div class="notice notice--caution" role="status" aria-label="Данные из «Команд» не принимаются">
+    <h3>${title}</h3>
+    <p>${describeRefused(refused, { fmt: at })} Команда запускается, но в строках, которые она отправляет, сбился формат. Пока это не исправлено, новые данные не появятся.</p>
+    <div class="btn-row"><button type="button" class="btn" onClick=${() => openSheet((close) => html`<${HealthRefusedSheet} refused=${refused} onClose=${close} />`)}>Как исправить</button></div>
+  </div>`;
+}
+
+function HealthRefusedSheet({ refused, onClose }) {
+  const names = [...new Set(refused.map((r) => SHORTCUT_OF[r.type] || SHORTCUT_OF.weight))].join(' и ');
+  return html`<${Sheet} title="Исправить команду" onClose=${onClose}>
+    <ol class="steps">
+      <li>Откройте «Команды» и нажмите на ${names}.</li>
+      <li>Внутри «Повторить для каждого объекта» текст должен быть ровно «Объект повтора|Начало|Окончание|Источник»: четыре метки со значком повтора (две стрелки), между ними символ | без пробелов, значение первым. Метка с сердечком («Данные Здоровья») означает весь список, а не текущую запись: пока запись одна, разницы не видно, а со второй строки разваливаются.</li>
+      <li>Неправильный текст проще стереть и набрать заново: над клавиатурой нажмите «Объект повтора», наберите |, снова вставьте «Объект повтора», нажмите на новую метку и выберите «Начало», и так далее.</li>
+      <li>У меток «Начало» и «Окончание»: нажмите на метку → «Формат даты» → «ISO 8601», время включено.</li>
+      <li>Ниже должно стоять «Объединить текст» с «Результатами повторов» и разделителем «Новая строка», а в «Получить содержимое URL» поле lines — «Объединённый текст».</li>
+      <li>Запустите команду вручную и вернитесь в приложение. Вес и талия уходят за 3 последних дня, сон за 14, так что пропущенное за эти дни придёт само. Предупреждение пропадёт после синхронизации.</li>
+    </ol>
+    <p class="muted" style="font-size:13px">Причина отказа записана в таблице: лист App_HealthLog, столбец errors. Значения туда не пишутся. Подробно — docs/SHORTCUTS.md в репозитории.</p>
+  <//>`;
 }
 
 function HealthCheckSheet({ onClose }) {

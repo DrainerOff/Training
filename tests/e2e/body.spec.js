@@ -371,3 +371,34 @@ test('«Команды» went quiet: a calm note on «Тело» with what came 
   await expect(sheet).toContainText('«Автоматизация»');
   await expect(sheet).toContainText('App_HealthLog');
 });
+
+test('«Команды» run but the sheet refuses every weight line: «Тело» says so and how to fix the Shortcut', async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole('status', { name: 'Данные из «Команд» не принимаются' })).toHaveCount(0);
+  await page.evaluate(async () => {
+    const at = Date.now() - 3600000;
+    // What API 6 reports from App_HealthLog: times and counts, no values.
+    await window.__trainer.store.setKV({
+      ingest: { lastAt: at, byType: { weight: { at, lines: 10, added: 0, rejected: 10 }, waist: { at, lines: 2, added: 0, rejected: 0 }, sleep: { at, lines: 312, added: 0, rejected: 0 } } },
+    });
+  });
+  const note = page.getByRole('status', { name: 'Данные из «Команд» не принимаются' });
+  await expect(note).toContainText('Таблица не принимает вес из «Команд»');
+  await expect(note).toContainText('не принята ни одна строка из 10');
+  await expect(note).not.toContainText('Талия');
+  // Not «quiet» at the same time: the requests do arrive.
+  await expect(page.getByRole('status', { name: 'Данные из «Здоровья»' })).toHaveCount(0);
+  await note.getByRole('button', { name: 'Как исправить' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Исправить команду' });
+  await expect(sheet).toContainText('«Здоровье → таблица»');
+  await expect(sheet).toContainText('Объект повтора|Начало|Окончание|Источник');
+  await expect(sheet).toContainText('App_HealthLog');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // The next accepted request clears it.
+  await page.evaluate(async () => {
+    const at = Date.now();
+    await window.__trainer.store.setKV({ ingest: { lastAt: at, byType: { weight: { at, lines: 2, added: 1, rejected: 0 } } } });
+  });
+  await expect(note).toHaveCount(0);
+});

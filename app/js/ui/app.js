@@ -114,7 +114,13 @@ function App() {
           <div class="btn-row"><button type="button" class="btn" onClick=${() => app.leaveTemporary?.()}>Открыть с сохранением</button></div>
         </div>`
       : null}
-    ${st.storageError ? html`<div class="notice notice--caution" style="margin:8px 16px 0"><h3>Ошибка сохранения</h3><p>${st.storageError}</p></div>` : null}
+    ${st.storageError
+      ? html`<div class="notice notice--caution" role="alert" style="margin:8px 16px 0">
+          <h3>Ошибка сохранения</h3>
+          <p>${st.storageError}</p>
+          <p>Если вы что-то вводили в этот момент, это не сохранилось. Если ошибка не уходит, закройте приложение: смахните вверх от нижнего края экрана, задержите палец и смахните карточку «Тренировки» вверх. Затем откройте его снова и повторите ввод.</p>
+        </div>`
+      : null}
     ${screen}
     ${workout || view?.type === 'program' // the editor is left only by «Назад», which guards unsaved changes
       ? null
