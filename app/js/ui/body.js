@@ -1,11 +1,12 @@
-// Body: the phase and its rate, the weight chart, week-to-week change, four scores (waist,
-// strength, sleep, recovery), and the raw data behind grouped rows. Device data (App_Body,
+// Body: the phase and its rate, the weight chart, week-to-week change, three scores (waist,
+// strength, sleep), and the raw data behind grouped rows. An old «Восстановление» score (v1.0–v1.3)
+// stays in its record and in the sheet but is no longer asked for or shown. Device data (App_Body,
 // App_Sleep) wins for its day over a v1.0 check-in, so nothing counts twice.
 
 import { html, useState, app, openSheet, Sheet, Icon, local, Seg } from './core.js';
 import { MetricFields } from './workout.js';
 import { weightTrend, rollingAverage } from '../lib/plateau.js';
-import { isoDate, fmtDay, fmtDayShort, fmtNum, fmtTime, sum, plural } from '../lib/util.js';
+import { isoDate, fmtDay, fmtDayShort, fmtNum, fmtTime } from '../lib/util.js';
 import { healthDelivery, describeDelivery, healthRefused, describeRefused } from '../lib/health.js';
 import { KINDS, GIRTHS, dailyWeights, sleepNights, sleepAverage, latestOf } from '../lib/bodydata.js';
 import { ImportButton, importFile, openAddBody, openKindHistory, openNights, Sources, sleepLine } from './bodyentry.js';
@@ -43,8 +44,6 @@ function BodyScreen({ seg }) {
   const body = [...st.body.values()];
   const { days } = dailyWeights(body, metrics);
   const trend = weightTrend(days, { today });
-  const recent = metrics.filter((m) => m.recovery != null).slice(0, 7);
-  const recAvg = recent.length ? sum(recent.map((m) => m.recovery)) / recent.length : null;
   const { nights } = sleepNights(st.sleep.values(), metrics);
   const s7 = sleepAverage(nights, today, 7);
   const lastNight = nights[nights.length - 1] || null;
@@ -54,13 +53,13 @@ function BodyScreen({ seg }) {
   const nothing = !metrics.length && !body.some((r) => !r.deleted) && !nights.length;
   const phase = phaseOn(st.phases.values(), today);
   const report = phase ? phaseReport(phase, { days, body, nights, series: derived().series, shareOf: derived().shareOf, today }) : null;
-  const lastMetric = metrics[0];
+  const lastMetric = metrics.find(shown);
   const week7 = Array.from({ length: 7 }, (_, i) => nights.find((n) => n.date === addDays(today, i - 6))?.hours ?? null);
 
   return html`<main class="screen">
     <header class="topbar topbar--large">
       <h1>Тело</h1>
-      <button type="button" class="add-btn" aria-label="Добавить: самочувствие, замер или файл" onClick=${() => openAdd(today)}><${Icon} name="plus" /></button>
+      <button type="button" class="add-btn" aria-label="Добавить: вес и сон за день, замер или файл" onClick=${() => openAdd(today)}><${Icon} name="plus" /></button>
     </header>
     <div class="body-seg">${seg}</div>
 
@@ -106,11 +105,6 @@ function BodyScreen({ seg }) {
         </span>
         <span class="tile__sub">${s7.nights ? `весь сон за сутки, ${s7.nights} из 7 дней` : 'нет данных за 7 дней'}${report?.sleep.nights ? html`<br />за режим ${fmtNum(report.sleep.avg, 1)} ч` : null}</span>
       </button>
-      <button type="button" class="tile" onClick=${() => openMetrics()}>
-        <span class="tile__label">Восстановление</span>
-        <span class="num tile__value">${recAvg != null ? html`${fmtNum(recAvg, 1)}<small> / 5</small>` : '–'}</span>
-        <span class="tile__sub">${recent.length ? `последние ${recent.length} ${plural(recent.length, 'запись', 'записи', 'записей')}` : 'нет записей'}</span>
-      </button>
     </section>
     <p class="phase__text body-note">Цифры показывают, что происходило, но не почему. Процент жира с весов — оценка и в расчёт не входит.</p>
 
@@ -122,7 +116,7 @@ function BodyScreen({ seg }) {
         <span class="num body-value">${weighIns.length ? `${fmtNum(weighIns[0].value, 2)} кг` : ''}</span>
         <span class="row__sub">${weighIns.length
           ? `${weighIns.length} · последнее ${fmtDayShort(weighIns[0].date)}, ${weighIns[0].measuredAt.slice(11, 16)}${weighIns[0].source ? ` · ${weighIns[0].source}` : ''}`
-          : 'Взвешиваний из «Здоровья» пока нет. Вес из записей самочувствия учитывается в среднем и темпе.'}</span>
+          : 'Взвешиваний из «Здоровья» пока нет. Вес, записанный вручную, учитывается в среднем и темпе.'}</span>
       </button></li>
       <li><button type="button" class="row row--icon" onClick=${() => openGirths()}>
         <span class="tile-icon" style="--c:var(--cut)"><${Icon} name="ruler" /></span>
@@ -142,7 +136,7 @@ function BodyScreen({ seg }) {
       </button></li>
       <li><button type="button" class="row row--icon" onClick=${() => openMetrics()}>
         <span class="tile-icon" style="--c:var(--plate-1)"><${Icon} name="pulse" /></span>
-        <span class="row__title">Самочувствие</span>
+        <span class="row__title">Вес и сон за день</span>
         <span></span>
         <span class="row__sub">${lastMetric ? `${fmtDay(lastMetric.date)}: ${metricLine(lastMetric) || 'заметка'}` : 'Пока нет записей. Вес лучше записывать утром, натощак.'}</span>
       </button></li>
@@ -162,9 +156,10 @@ function BodyScreen({ seg }) {
 
 const metricLine = (m) => [
   m.bodyweight != null ? `${fmtNum(m.bodyweight, 1)} кг` : null,
-  m.recovery != null ? `восстановление ${m.recovery}/5` : null,
   m.sleep != null ? `сон ${fmtNum(m.sleep, 1)} ч` : null,
 ].filter(Boolean).join(', ');
+// A day record with something still shown: weight, sleep or a note (not only an old recovery score).
+const shown = (m) => m.bodyweight != null || m.sleep != null || !!m.note;
 
 // 7 days of sleep, all sleep of each day (the same hours the average counts); a gap is a day
 // without data.
@@ -184,8 +179,8 @@ function openAdd(today) {
     <ul class="rows">
       <li><button type="button" class="row row--icon" onClick=${() => { close(); openEntry(today); }}>
         <span class="tile-icon" style="--c:var(--plate-1)"><${Icon} name="pulse" /></span>
-        <span class="row__title">Записать самочувствие</span><span></span>
-        <span class="row__sub">восстановление, сон и вес за день</span>
+        <span class="row__title">Записать вес и сон</span><span></span>
+        <span class="row__sub">вес, сон и заметка за день</span>
       </button></li>
       <li><button type="button" class="row row--icon" onClick=${() => { close(); openAddBody(); }}>
         <span class="tile-icon" style="--c:var(--cut)"><${Icon} name="ruler" /></span>
@@ -230,9 +225,9 @@ function openMetrics() {
 }
 
 function MetricsSheet({ onClose }) {
-  const metrics = [...app.store.state.metrics.values()].filter((m) => !m.deleted).sort((a, b) => b.date.localeCompare(a.date));
-  return html`<${Sheet} title="Самочувствие" onClose=${onClose}>
-    <button type="button" class="btn btn--primary btn--block" onClick=${() => openEntry(isoDate())}>Записать самочувствие</button>
+  const metrics = [...app.store.state.metrics.values()].filter((m) => !m.deleted && shown(m)).sort((a, b) => b.date.localeCompare(a.date));
+  return html`<${Sheet} title="Вес и сон за день" onClose=${onClose}>
+    <button type="button" class="btn btn--primary btn--block" onClick=${() => openEntry(isoDate())}>Записать вес и сон</button>
     ${metrics.length
       ? html`<ul class="rows" style="margin-top:12px">
           ${metrics.slice(0, 90).map(
@@ -240,7 +235,6 @@ function MetricsSheet({ onClose }) {
               <span class="row__title">${fmtDay(m.date)}</span>
               <span class="num body-value">${m.bodyweight != null ? fmtNum(m.bodyweight, 1) + ' кг' : ''}</span>
               <span class="row__sub">${[
-                m.recovery != null ? `восстановление ${m.recovery}/5` : null,
                 m.sleep != null ? `сон ${fmtNum(m.sleep, 1)} ч` : null,
                 m.note || null,
               ].filter(Boolean).join(', ')}</span>
@@ -384,30 +378,38 @@ function recordOf(date) {
   const prev = date && app.store.state.metrics.get(`m${date}`);
   return prev && !prev.deleted ? prev : null;
 }
+// An old «Восстановление» score of the day is not part of the form: saving keeps it (saveMetric
+// merges fields), «Удалить» clears what the form shows and keeps it.
 function valuesOf(live) {
-  return { recovery: live?.recovery ?? null, sleep: live?.sleep ?? null, bodyweight: live?.bodyweight ?? null, note: live?.note || '' };
+  return { sleep: live?.sleep ?? null, bodyweight: live?.bodyweight ?? null, note: live?.note || '' };
 }
 
 function EntrySheet({ date, onClose }) {
   const [d, setD] = useState(date);
   const [start, setStart] = useState(() => valuesOf(recordOf(date)));
   const [v, setV] = useState(start);
-  const live = recordOf(d);
+  const rec = recordOf(d);
+  const live = rec && shown(rec) ? rec : null;
   const pick = (day) => {
     const s = valuesOf(recordOf(day));
     setD(day);
     setStart(s);
     setV(s);
   };
-  const empty = v.recovery == null && v.sleep == null && v.bodyweight == null && !v.note;
+  const empty = v.sleep == null && v.bodyweight == null && !v.note;
   const save = async () => {
     await app.store.saveMetric(d, v);
     onClose();
   };
+  const remove = async () => {
+    if (live.recovery != null) await app.store.saveMetric(d, { sleep: null, bodyweight: null, note: '' });
+    else await app.store.deleteMetric(live.id);
+    onClose();
+  };
   const footer = html`
-    ${live ? html`<button type="button" class="btn btn--danger" onClick=${async () => { await app.store.deleteMetric(live.id); onClose(); }}>Удалить</button>` : null}
+    ${live ? html`<button type="button" class="btn btn--danger" onClick=${remove}>Удалить</button>` : null}
     <button type="button" class="btn btn--primary" disabled=${!d || empty} onClick=${save}>Сохранить</button>`;
-  return html`<${Sheet} title="Самочувствие и вес" onClose=${onClose} footer=${footer} dirty=${JSON.stringify(v) !== JSON.stringify(start)}>
+  return html`<${Sheet} title="Вес и сон за день" onClose=${onClose} footer=${footer} dirty=${JSON.stringify(v) !== JSON.stringify(start)}>
     <div class="sheet__section">
       <div class="sheet__label">Дата</div>
       <input class="input" type="date" value=${d} max=${isoDate()} onInput=${(e) => pick(e.currentTarget.value)} />

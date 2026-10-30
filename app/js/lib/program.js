@@ -90,7 +90,7 @@ export function exerciseCatalog(program) {
       const key = s.options[0].key;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ name: s.options[0].name, category: s.category, alts: s.options.slice(1).map((o) => o.name) });
+      out.push({ key, name: s.options[0].name, category: s.category, step: s.step, alts: s.options.slice(1).map((o) => o.name) });
     }
   }
   return out;
@@ -259,12 +259,13 @@ export function fmtOverride(o) {
 }
 
 // Options of one slot edited by name (main first). A name that matches an existing option keeps
-// its key, so history stays linked; a renamed main exercise keeps the old main key only if that
-// exercise is not still listed under its own name. Keys never repeat within a slot: two variants
-// with one key would merge their series.
-export function optionsFromNames(names, old = []) {
-  const known = new Map(old.map((o) => [normName(o.name), o.key]));
-  const keys = names.map((n) => known.get(normName(n)) || null);
+// its key, so history stays linked; so does a name of an exercise done elsewhere (`known`: name ->
+// key, lib/exercises.js knownKeys) — it joins that series. A renamed main exercise keeps the old
+// main key only if the new name is not a known exercise and the old one is not still listed under
+// its own name. Keys never repeat within a slot: two variants with one key would merge their series.
+export function optionsFromNames(names, old = [], known = null) {
+  const own = new Map(old.map((o) => [normName(o.name), o.key]));
+  const keys = names.map((n) => own.get(normName(n)) || known?.get(normName(n)) || null);
   if (!keys[0] && old[0] && !keys.includes(old[0].key)) keys[0] = old[0].key;
   const used = new Set();
   const out = names.map((n, i) => {
@@ -283,11 +284,12 @@ export function optionsFromNames(names, old = []) {
 }
 
 // Keeps series keys stable when a program is re-imported or edited: an option whose name
-// matches an existing option reuses that key, so history stays linked.
-export function reuseKeys(program, previous) {
+// matches an existing option (or a known exercise, `extra`: name -> key) reuses that key, so
+// history stays linked.
+export function reuseKeys(program, previous, extra = null) {
   const known = new Map(allOptions(previous).map((o) => [normName(o.name), o.key]));
   for (const d of program.days) for (const s of d.slots) for (const o of s.options) {
-    const k = known.get(normName(o.name));
+    const k = known.get(normName(o.name)) || extra?.get(normName(o.name));
     if (k) o.key = k;
   }
   return program;

@@ -6,6 +6,8 @@ import { allOptions } from '../lib/program.js';
 import { performances, buildRecordBook } from '../lib/records.js';
 import { dailyWeights } from '../lib/bodydata.js';
 import { bodyweightLookup, loadShare } from '../lib/bodyweight.js';
+import { exerciseIndex } from '../lib/exercises.js';
+import { SAME_EXERCISE } from '../data/fixes.js';
 
 let cache = { v: -1 };
 
@@ -27,6 +29,17 @@ export function derived() {
   const shareOf = (key, category = categories.get(key)) => loadShare(category, setups.get(key));
   cache = { v: st.version, series, metricsByDate, sessions, categories, bodyweightAt, shareOf };
   return cache;
+}
+
+// Every known exercise (program variants and series with sets) for search, lib/exercises.js.
+let indexCache = { v: -1 };
+export function exercisesNow() {
+  const st = app.store.state;
+  if (indexCache.v !== st.version) {
+    const { series, sessions } = derived();
+    indexCache = { v: st.version, index: exerciseIndex({ program: st.program, series, sessions, aliases: SAME_EXERCISE }) };
+  }
+  return indexCache.index;
 }
 
 // Latest day's weight: weigh-ins of that day (median) or, for a day without any, the check-in.

@@ -4,12 +4,13 @@ import {
   html, useState, useEffect, app, Icon, WeekMark, Sheet, openSheet, NumberPad, Stepper, RirPicker, Toggle, Seg,
   fmtWeight, SyncBadge, useNow, local, confirmSheet,
 } from './core.js';
-import { derived, latestBodyweight, recordsDerived } from './derive.js';
+import { derived, latestBodyweight, recordsDerived, exercisesNow } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures } from '../lib/plateau.js';
-import { recommend, fmtLoad } from '../lib/recommend.js';
-import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, normName, isoDate } from '../lib/util.js';
+import { recommend, fmtLoad, BASIS } from '../lib/recommend.js';
+import { searchExercises, findExact, setMainOption } from '../lib/exercises.js';
+import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, isoDate } from '../lib/util.js';
 import { describeComparison } from './describe.js';
 import { SETUP_MAX } from '../data/store.js';
 
@@ -285,7 +286,11 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const [dropMode, setDropMode] = useState(dropDue);
   const prevRef = prevs.samePhase || prevs.latest;
   const otherPhase = !prevs.samePhase && !!prevs.latest;
-  const sug = suggestNext({ todaySets: sets, prev: prevRef, target, step: item.step, drop: dropMode });
+  let sug = suggestNext({ todaySets: sets, prev: prevRef, target, step: item.step, drop: dropMode });
+  // A light week not done yet: the heavy week's weight would be far too heavy, so the first set
+  // starts from the approximate «Ориентир» (lib/recommend.js) instead.
+  const lightHint = row.rec?.basis === 'light' && row.rec.weight != null ? row.rec : null;
+  if (lightHint && !dropMode && sug.source !== 'today') sug = { weight: lightHint.weight, reps: lightHint.reps?.[0] ?? sug.reps, source: 'estimate' };
   if (sug.weight == null && category === 'pullup') sug.weight = 0;
   // Another week's result is a weight reference only; reps follow today's target.
   if (sug.source === 'prev' && otherPhase && target.reps && sug.reps != null) {
@@ -295,6 +300,7 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const fresh = () => ({ weight: sug.weight, reps: sug.reps, rir: null, touchedW: false, touchedR: false });
   const [v, setV] = useState(() => local.get(draftKey) || fresh());
   const [busy, setBusy] = useState(false);
+  const [rirMissing, setRirMissing] = useState(false);
   useEffect(() => setV(local.get(draftKey) || fresh()), [dropMode]);
 
   const update = (patch) =>
@@ -316,11 +322,19 @@ function Dock({ row, session, live, onLogged, justLogged }) {
     ? ''
     : sug.source === 'prev'
       ? otherPhase ? 'из другой фазы' : 'как в прошлый раз'
-      : sug.source === 'today' ? `как подход ${n - 1}` : sug.source === 'drop' ? '≈70% веса' : '';
+      : sug.source === 'estimate' ? 'ориентир, ≈'
+        : sug.source === 'today' ? `как подход ${n - 1}` : sug.source === 'drop' ? '≈70% веса' : '';
   const canLog = v.weight != null && v.reps != null && v.reps > 0 && !busy;
 
   const log = async () => {
     if (!canLog) return;
+    // RIR is part of every set (0 is a value): without it the set is not recorded, the weight and
+    // reps stay as typed. One short notice, nothing to confirm.
+    if (v.rir == null) {
+      setRirMissing(true);
+      app.ui.toast('Не указан RIR', { ms: 2500 });
+      return;
+    }
     setBusy(true);
     try {
       const { set, duplicate } = await app.store.logSet(session.id, item.slotId, { weight: v.weight, reps: v.reps, rir: v.rir, drop: dropMode });
@@ -358,17 +372,17 @@ function Dock({ row, session, live, onLogged, justLogged }) {
     <div class="dock__grid">
       <div>
         <div class="field__label"><span>${category === 'pullup' ? 'Доп. вес, кг' : 'Вес, кг'}</span><span class="field__hint">${weightHint}</span></div>
-        <${Stepper} label="Вес" value=${v.weight} step=${item.step || 2.5} suggested=${sug.source === 'prev' && !v.touchedW}
+        <${Stepper} label="Вес" value=${v.weight} step=${item.step || 2.5} suggested=${(sug.source === 'prev' || sug.source === 'estimate') && !v.touchedW}
           display=${v.weight != null && category === 'pullup' && v.weight === 0 ? 'СВ' : null}
           onChange=${(w) => update({ weight: w, touchedW: true })} onTap=${padWeight} />
       </div>
       <div>
         <div class="field__label"><span>Повторения</span>${target.reps ? html`<span class="field__hint">цель ${target.reps[0] === target.reps[1] ? target.reps[0] : `${target.reps[0]}–${target.reps[1]}`}</span>` : null}</div>
-        <${Stepper} label="Повторения" value=${v.reps} step=${1} suggested=${sug.source === 'prev' && !v.touchedR}
+        <${Stepper} label="Повторения" value=${v.reps} step=${1} suggested=${(sug.source === 'prev' || sug.source === 'estimate') && !v.touchedR}
           onChange=${(r) => update({ reps: r, touchedR: true })} onTap=${padReps} />
       </div>
     </div>
-    <${RirPicker} value=${v.rir} target=${target.rir} onChange=${(rir) => update({ rir })} />
+    <${RirPicker} value=${v.rir} target=${target.rir} missing=${rirMissing && v.rir == null} onChange=${(rir) => update({ rir })} />
     <div class="dock__log">
       <button type="button" class="btn btn--primary btn--block btn--big" disabled=${!canLog} onClick=${log}>
         ${v.weight == null ? 'Введите вес' : v.reps == null ? 'Введите повторения' : html`Записать <span class="num">${fmtWeight(v.weight, category)} × ${v.reps}</span>`}
@@ -400,17 +414,25 @@ function LastTime({ prevs, category, index, drop }) {
 }
 
 // Today's weight, one compact line under «Прошлый раз»: what and why (ⓘ), and «Использовать» to put
-// it into the weight field. Nothing changes until that tap. Not shown for a drop set.
+// it into the weight field. Nothing changes until that tap. Not shown for a drop set. A «Ориентир»
+// from another week is always shown as approximate: «≈» and «приблизительно».
 function Recommendation({ rec, category, current, onUse }) {
   if (!rec) return null;
   const info = () => openSheet((close) => html`<${RecommendationSheet} rec=${rec} category=${category} onClose=${close} />`);
   const has = rec.weight != null;
-  const tag = rec.kind === 'up' ? (rec.conditional ? 'условно' : 'повысить') : rec.kind === 'hold' ? 'закрепить' : '';
-  const said = has ? `Рекомендуем сегодня: ${fmtLoad(rec.weight, category)}, ${rec.label.toLowerCase()}${rec.conditional ? ', условно' : ''}` : `Рекомендация: ${rec.label.toLowerCase()}`;
-  return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
+  const approx = rec.kind === 'estimate';
+  const tag = rec.kind === 'up' ? (rec.conditional ? 'условно' : 'повысить') : rec.kind === 'hold' ? 'закрепить' : approx ? 'примерно' : '';
+  const weight = `${approx ? '≈' : ''}${fmtLoad(rec.weight, category)}`;
+  const span = approx && rec.range ? ` (от ${fmtLoad(rec.range[0], category)} до ${fmtLoad(rec.range[1], category)})` : '';
+  const said = !has
+    ? `Рекомендация: ${rec.label.toLowerCase()}`
+    : approx
+      ? `Ориентир на сегодня, приблизительно: ${fmtLoad(rec.weight, category)}${span}`
+      : `Рекомендуем сегодня: ${fmtLoad(rec.weight, category)}, ${rec.label.toLowerCase()}${rec.conditional ? ', условно' : ''}`;
+  return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '') + (approx ? ' dock__rec--approx' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
     <button type="button" class="dock__rec-why" onClick=${info} aria-label=${said + '. Почему'}>
       ${has
-        ? html`<span class="dock__rec-label">Сегодня:</span><b class="num">${fmtLoad(rec.weight, category)}</b><span class="dock__rec-tag">· ${tag}</span>`
+        ? html`<span class="dock__rec-label">${approx ? 'Ориентир:' : 'Сегодня:'}</span><b class="num">${weight}</b><span class="dock__rec-tag">· ${tag}</span>`
         : html`<span class="dock__rec-label dock__rec-label--keep">Рекомендация:</span><span class="dock__rec-tag">недостаточно данных</span>`}
       <${Icon} name="info" />
     </button>
@@ -421,11 +443,17 @@ function Recommendation({ rec, category, current, onUse }) {
 }
 
 function RecommendationSheet({ rec, category, onClose }) {
-  const head = rec.weight != null ? `${rec.label}: ${fmtLoad(rec.weight, category)}${rec.conditional ? ' (условно)' : ''}` : rec.label;
+  const approx = rec.kind === 'estimate';
+  const head = rec.weight == null
+    ? rec.label
+    : approx
+      ? `${rec.label}: ≈${fmtLoad(rec.weight, category)}${rec.range ? ` (от ${fmtLoad(rec.range[0], category)} до ${fmtLoad(rec.range[1], category)})` : ''}`
+      : `${rec.label}: ${fmtLoad(rec.weight, category)}${rec.conditional ? ' (условно)' : ''}`;
   return html`<${Sheet} title="Рекомендация на сегодня" onClose=${onClose}>
     <p class="rec-sheet__head"><b>${head}</b></p>
+    ${rec.basis ? html`<p class="rec-sheet__basis">${BASIS[rec.basis]}</p>` : null}
     <ul class="rec-sheet__why">${rec.reasons.map((r) => html`<li>${r.replace(/ кг/g, '\u00a0кг')}</li>`)}</ul>
-    <p class="muted" style="font-size:13px">Это подсказка по вашим прошлым подходам, а не обещание результата. Вес в поле меняется, только если нажать «Использовать». Сравнение — только с той же неделей цикла.</p>
+    <p class="muted" style="font-size:13px">Это подсказка по вашим прошлым подходам, а не обещание результата. Вес в поле меняется, только если нажать «Использовать». «Повысить» и «закрепить» — только по той же неделе цикла. Ориентир по другой неделе — приблизительный расчёт: проверьте его первым подходом.</p>
     <div class="btn-row"><button type="button" class="btn btn--block" onClick=${onClose}>Понятно</button></div>
   <//>`;
 }
@@ -482,28 +510,89 @@ function openSwap(session, item) {
   openSheet((close) => html`<${SwapSheet} session=${session} item=${item} onClose=${close} />`);
 }
 
+// One line under a found exercise: category, where it is in the program, when it was done last.
+function entryLine(e) {
+  const main = e.where.filter((w) => w.main).map((w) => w.day);
+  const alt = e.where.filter((w) => !w.main).map((w) => w.day);
+  const days = (list) => `${list.length > 1 ? 'дни' : 'день'} ${list.join(', ')}`;
+  return [
+    CATEGORY[e.category]?.label,
+    e.matched ? `записывалось как «${e.matched}»` : null,
+    main.length ? days(main) : alt.length ? `альтернатива, ${days(alt)}` : null,
+    e.last ? `${fmtDay(e.last.date)}, ${fmtWeight(e.last.weight, e.category)}${e.category === 'pullup' && e.last.weight ? ' кг доп.' : ' кг'}` : 'ещё не выполнялось',
+  ].filter(Boolean).join(' · ');
+}
+
+// Search over the program and the whole history, and a new exercise when nothing fits.
+// `onPick({ option, category, step })`: a found exercise keeps its series, category and weight step.
+// `idle`: shown under the field while nothing is typed.
+function ExerciseSearch({ exclude = [], category: startCategory = 'iso', createLabel, onPick, idle = null }) {
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState(startCategory);
+  const index = exercisesNow();
+  const q = query.trim();
+  const found = searchExercises(index, q, { exclude });
+  const exact = q ? findExact(index, q) : null;
+  return html`<div class="sheet__section ex-search">
+    <input class="input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Найти в программе и истории" aria-label="Найти упражнение"
+      value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} />
+    ${found.map((e) => html`<button type="button" class="choice" key=${e.key}
+        onClick=${() => onPick({ option: { key: e.key, name: e.name }, category: e.category, step: e.step })}>
+      <span class="choice__main">${e.name}<span class="choice__sub">${entryLine(e)}</span></span>
+    </button>`)}
+    ${q && !found.length && !exact ? html`<p class="muted ex-search__none">В программе и истории такого нет.</p>` : null}
+    ${q && exact && exclude.includes(exact.key) ? html`<p class="muted ex-search__none">Это упражнение уже выбрано.</p>` : null}
+    ${q && !exact
+      ? html`<div class="ex-search__new">
+          <div class="sheet__label">Новое упражнение — отдельная серия, история с нуля</div>
+          ${found.length ? html`<p class="muted ex-search__hint">Если это ${found.length > 1 ? 'одно из упражнений выше' : `«${found[0].name}»`}, выберите его — история будет общей.</p>` : null}
+          <${Seg} label="Категория" value=${category} onChange=${setCategory} options=${CATEGORY_KEYS.map((k) => ({ value: k, label: CATEGORY[k].label }))} />
+          <button type="button" class="btn btn--block" style="margin-top:10px" onClick=${() => onPick({ option: makeOption(q), category, step: null })}>${createLabel(q)}</button>
+        </div>`
+      : null}
+    ${q ? null : idle}
+  </div>`;
+}
+
 function SwapSheet({ session, item, onClose }) {
   const { series } = derived();
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState(item.category);
+  const program = app.store.state.program;
+  const slot = item.adhoc ? null : program?.days.flatMap((d) => d.slots.map((s) => ({ ...s, day: d.day }))).find((s) => s.id === item.slotId) || null;
+  // «Изменить программу на будущее»: the choice becomes the slot's main variant from the next workout.
+  const [forever, setForever] = useState(false);
+  const [keepOld, setKeepOld] = useState(true);
   // Sets already recorded under the current variant: were they really done on it?
   const [asking, setAsking] = useState(null);
   const logged = app.store.setsOf(session.id, item.slotId).filter((x) => x.seriesKey === item.seriesKey);
-  const choose = async (opt) => {
-    if (logged.length && opt.key !== item.seriesKey) {
-      setAsking(opt);
+  const choose = async (pick) => {
+    if (logged.length && pick.option.key !== item.seriesKey) {
+      setAsking(pick);
       return;
     }
-    await app.store.swapVariant(session.id, item.slotId, opt);
-    onClose();
+    await finish(pick, false);
   };
-  const finish = async (move) => {
+  const finish = async (pick, move) => {
+    const opt = pick.option;
     try {
       if (move) {
-        const { moved } = await app.store.reassignVariant(session.id, item.slotId, asking);
-        app.ui.toast(`${moved} ${plural(moved, 'подход перенесён', 'подхода перенесены', 'подходов перенесены')} в «${asking.name}»`);
+        const { moved } = await app.store.reassignVariant(session.id, item.slotId, opt);
+        app.ui.toast(`${moved} ${plural(moved, 'подход перенесён', 'подхода перенесены', 'подходов перенесены')} в «${opt.name}»`);
       } else {
-        await app.store.swapVariant(session.id, item.slotId, asking);
+        await app.store.swapVariant(session.id, item.slotId, opt);
+      }
+      const patch = {};
+      if (pick.category && pick.category !== item.category) patch.category = pick.category;
+      if (pick.step && pick.step !== item.step) patch.step = pick.step;
+      if (Object.keys(patch).length) await app.store.updateItem(session.id, item.slotId, patch);
+      if (forever && slot) {
+        const now = app.store.state.program;
+        const next = setMainOption(now, slot.id, opt, { keepOld, category: pick.category, step: pick.step });
+        const before = now.days.flatMap((d) => d.slots).find((s) => s.id === slot.id);
+        const after = next?.days.flatMap((d) => d.slots).find((s) => s.id === slot.id);
+        if (after && JSON.stringify([after.options, after.category, after.step]) !== JSON.stringify([before.options, before.category, before.step])) {
+          await app.store.saveProgram(next);
+          app.ui.toast(`Программа, день ${slot.day}: основное — «${opt.name}»`);
+        }
       }
       onClose();
     } catch (err) {
@@ -513,42 +602,47 @@ function SwapSheet({ session, item, onClose }) {
   if (asking) {
     const n = logged.length;
     const sets = logged.map((x) => `${fmtWeight(x.weight, item.category)}×${x.reps}`).join(', ');
-    return html`<${Sheet} title=${`«${asking.name}»`} onClose=${onClose}>
+    return html`<${Sheet} title=${`«${asking.option.name}»`} onClose=${onClose}>
       <p class="muted" style="font-size:14px">Уже ${plural(n, 'записан', 'записано', 'записано')} ${n} ${plural(n, 'подход', 'подхода', 'подходов')} на «${item.name}»: ${sets}.</p>
       <div class="sheet__section">
-        <button type="button" class="choice" onClick=${() => finish(true)}>
-          <span class="choice__main">Записал не то упражнение — перенести их<span class="choice__sub">Подходы перейдут в серию «${asking.name}». Веса, повторения, RIR и дата не меняются.</span></span>
+        <button type="button" class="choice" onClick=${() => finish(asking, true)}>
+          <span class="choice__main">Записал не то упражнение — перенести их<span class="choice__sub">Подходы перейдут в серию «${asking.option.name}». Веса, повторения, RIR и дата не меняются.</span></span>
         </button>
-        <button type="button" class="choice" onClick=${() => finish(false)}>
-          <span class="choice__main">Дальше делаю «${asking.name}»<span class="choice__sub">Записанные подходы остаются в «${item.name}» — они сделаны на нём.</span></span>
+        <button type="button" class="choice" onClick=${() => finish(asking, false)}>
+          <span class="choice__main">Дальше делаю «${asking.option.name}»<span class="choice__sub">Записанные подходы остаются в «${item.name}» — они сделаны на нём.</span></span>
         </button>
       </div>
     <//>`;
   }
+  const main = slot?.options[0];
   return html`<${Sheet} title="Заменить упражнение" onClose=${onClose}>
     <p class="muted" style="font-size:14px">Каждый вариант — отдельная силовая серия. Результаты разных вариантов не сравниваются между собой.</p>
+    ${slot
+      ? html`<div class="sheet__section">
+          <button type="button" class="choice" aria-pressed=${String(forever)} onClick=${() => setForever(!forever)}>
+            <span class="choice__main">Изменить программу на будущее<span class="choice__sub">${forever ? `Выбранное станет основным в дне ${slot.day}, следующие тренировки начнутся с него.` : 'Выключено: замена только на эту тренировку.'}</span></span>
+            <span class="toggle" aria-hidden="true" aria-pressed=${String(forever)}>${forever ? 'да' : 'нет'}</span>
+          </button>
+          ${forever
+            ? html`<button type="button" class="choice" aria-pressed=${String(keepOld)} onClick=${() => setKeepOld(!keepOld)}>
+                <span class="choice__main">Оставить «${main.name}» альтернативой<span class="choice__sub">${keepOld ? 'Его история сохраняется в любом случае.' : 'Уберётся из программы, история сохранится.'}</span></span>
+                <span class="toggle" aria-hidden="true" aria-pressed=${String(keepOld)}>${keepOld ? 'да' : 'нет'}</span>
+              </button>`
+            : null}
+        </div>`
+      : null}
     <div class="sheet__section">
       ${item.options.map((o) => {
         const list = series.get(o.key);
         const last = list && list.filter((e) => e.sessionId !== session.id).pop();
-        return html`<button type="button" class="choice" onClick=${() => choose(o)}>
+        return html`<button type="button" class="choice" onClick=${() => choose({ option: o })}>
           <span class="choice__main">${o.name}<span class="choice__sub">${last ? `последний раз ${fmtDay(last.date)}` : 'ещё не выполнялось'}</span></span>
           ${o.key === item.seriesKey ? html`<span class="choice__mark"><${Icon} name="check" label="Сейчас" /></span>` : null}
         </button>`;
       })}
     </div>
-    <div class="sheet__section">
-      <div class="sheet__label">Другое упражнение</div>
-      <input class="input" placeholder="Название" value=${name} onInput=${(e) => setName(e.currentTarget.value)} />
-      <div style="margin-top:8px">
-        <${Seg} label="Категория" value=${category} onChange=${setCategory} options=${CATEGORY_KEYS.map((k) => ({ value: k, label: CATEGORY[k].label }))} />
-      </div>
-      <button type="button" class="btn btn--block" style="margin-top:10px" disabled=${!name.trim()}
-        onClick=${async () => {
-          if (category !== item.category) await app.store.updateItem(session.id, item.slotId, { category });
-          await choose(makeOption(name.trim()));
-        }}>Заменить на «${name.trim() || '…'}»</button>
-    </div>
+    <div class="sheet__label" style="margin-top:14px">Другое упражнение</div>
+    <${ExerciseSearch} exclude=${item.options.map((o) => o.key)} category=${item.category} createLabel=${(q) => `Заменить на новое «${q}»`} onPick=${choose} />
   <//>`;
 }
 
@@ -586,30 +680,22 @@ function openAddItem(session, setActive) {
 }
 
 function AddItemSheet({ session, onClose, onAdded }) {
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState('iso');
-  const present = new Set(session.items.flatMap((i) => i.options.map((o) => normName(o.name))));
-  const picks = exerciseCatalog(app.store.state.program).filter((k) => !present.has(normName(k.name)));
-  const add = async (n, c) => {
-    const item = await app.store.addItem(session.id, { name: n, category: c });
+  const present = new Set(session.items.flatMap((i) => i.options.map((o) => o.key)));
+  const picks = exerciseCatalog(app.store.state.program).filter((k) => !present.has(k.key));
+  const add = async ({ option, category, step }) => {
+    const item = await app.store.addItem(session.id, { name: option.name, key: option.key, category, step: step || 2.5 });
     onClose();
     if (item) onAdded(item.slotId);
   };
   return html`<${Sheet} title="Добавить упражнение" onClose=${onClose}>
     <p class="muted" style="font-size:14px">Только в эту тренировку. Чтобы упражнение было всегда, добавьте его в программу.</p>
-    <div class="sheet__section">
-      <input class="input" placeholder="Название" value=${name} onInput=${(e) => setName(e.currentTarget.value)} />
-      <div style="margin-top:8px">
-        <${Seg} label="Категория" value=${category} onChange=${setCategory} options=${CATEGORY_KEYS.map((k) => ({ value: k, label: CATEGORY[k].label }))} />
-      </div>
-      <button type="button" class="btn btn--primary btn--block" style="margin-top:10px" disabled=${!name.trim()} onClick=${() => add(name.trim(), category)}>Добавить</button>
-    </div>
-    ${picks.length
-      ? html`<div class="sheet__section"><div class="sheet__label">Из вашей программы</div>
-          ${picks.map((k) => html`<button type="button" class="choice" onClick=${() => add(k.name, k.category)}>
-            <span class="choice__main">${k.name}<span class="choice__sub">${CATEGORY[k.category].label}</span></span></button>`)}
-        </div>`
-      : null}
+    <${ExerciseSearch} exclude=${[...present]} createLabel=${(q) => `Добавить новое «${q}»`} onPick=${add}
+      idle=${picks.length
+        ? html`<div class="sheet__section"><div class="sheet__label">Из вашей программы</div>
+            ${picks.map((k) => html`<button type="button" class="choice" onClick=${() => add({ option: { key: k.key, name: k.name }, category: k.category, step: k.step })}>
+              <span class="choice__main">${k.name}<span class="choice__sub">${CATEGORY[k.category].label}</span></span></button>`)}
+          </div>`
+        : null} />
   <//>`;
 }
 
@@ -631,7 +717,7 @@ function openSessionMenu(session, mode) {
     <button type="button" class="choice" onClick=${() => { close(); openSessionEdit(session); }}>
       <span class="choice__main">Изменить день, неделю, цикл или дату</span></button>
     <button type="button" class="choice" onClick=${() => { close(); openCheckin(session.date); }}>
-      <span class="choice__main">Самочувствие и вес тела<span class="choice__sub">за ${fmtDay(session.date)}</span></span></button>
+      <span class="choice__main">Вес тела и сон<span class="choice__sub">за ${fmtDay(session.date)}</span></span></button>
     ${mode === 'live'
       ? html`<button type="button" class="choice" onClick=${() => { close(); openFinish(session, buildRows(session)); }}>
           <span class="choice__main">Завершить тренировку</span></button>`
@@ -697,10 +783,10 @@ export function openCheckin(date) {
 
 function CheckinSheet({ date, onClose }) {
   const prev = app.store.state.metrics.get(`m${date}`);
-  // Bodyweight is NOT pre-filled from an older weigh-in: saving recovery alone must not
-  // invent a measurement. The last value is shown as a hint and as the ± starting point.
+  // Bodyweight is NOT pre-filled from an older weigh-in: saving sleep alone must not invent a
+  // measurement. The last value is shown as a hint and as the ± starting point. An old «Восстановление»
+  // score of this day is not shown and stays as it is (saveMetric merges fields).
   const [start] = useState(() => ({
-    recovery: prev?.recovery ?? null,
     sleep: prev?.sleep ?? null,
     bodyweight: prev?.bodyweight ?? null,
   }));
@@ -710,7 +796,7 @@ function CheckinSheet({ date, onClose }) {
     onClose();
     app.ui.toast('Сохранено');
   };
-  return html`<${Sheet} title=${`Самочувствие, ${fmtDay(date)}`} onClose=${onClose} dirty=${JSON.stringify(v) !== JSON.stringify(start)}
+  return html`<${Sheet} title=${`Вес тела и сон, ${fmtDay(date)}`} onClose=${onClose} dirty=${JSON.stringify(v) !== JSON.stringify(start)}
     footer=${html`<button type="button" class="btn btn--primary" onClick=${save}>Сохранить</button>`}>
     <${MetricFields} v=${v} setV=${setV} />
   <//>`;
@@ -719,12 +805,6 @@ function CheckinSheet({ date, onClose }) {
 export function MetricFields({ v, setV }) {
   const lastWeight = latestBodyweight();
   return html`
-    <div class="sheet__section">
-      <div class="sheet__label">Восстановление: 1 — разбит, 5 — отлично</div>
-      <div class="scale" role="group" aria-label="Восстановление">
-        ${[1, 2, 3, 4, 5].map((n) => html`<button type="button" aria-pressed=${String(v.recovery === n)} onClick=${() => setV({ ...v, recovery: v.recovery === n ? null : n })}>${n}</button>`)}
-      </div>
-    </div>
     <div class="form-grid">
       <div>
         <div class="field__label"><span>Вес тела, кг</span>${v.bodyweight == null && lastWeight ? html`<span class="field__hint">был ${fmtNum(lastWeight, 1)}</span>` : null}</div>

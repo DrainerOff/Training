@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
 import { startPages, APP, RELEASES, ROOT } from '../helpers/pages-server.js';
-import { ready, dock, logButton, connectSync, seedOwner } from './helpers.js';
+import { ready, dock, logButton, connectSync, seedOwner, pickRir } from './helpers.js';
 
 const API1 = fs.readFileSync(path.join(ROOT, 'tests/fixtures/apps-script/Code.api1.gs'), 'utf8');
 const HAMMER = 'Наклонный жим: Hammer - наклон';
@@ -94,6 +94,7 @@ test('a record set in a workout is detected right away; earlier achievements sta
   await expect(logButton(page)).toContainText('85 × 10'); // last time, same week
   await page.getByRole('button', { name: 'Увеличить: Вес' }).click();
   await expect(logButton(page)).toContainText('87,5 × 10');
+  await pickRir(page);
   await logButton(page).click();
   await expect(dock(page)).toContainText('Новый рекорд: 87,5×10');
 

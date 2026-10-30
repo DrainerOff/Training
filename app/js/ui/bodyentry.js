@@ -265,7 +265,7 @@ async function undo(e) {
 // than one part, the line names the main sleep (longest part of 2 h+) and that the time and the
 // stages belong to it. Core is «базовый», as the Health app calls it, so «основной» means one thing.
 export function sleepLine(n) {
-  if (n.from !== 'sleep') return 'из записи самочувствия';
+  if (n.from !== 'sleep') return 'из записи «Вес и сон за день»';
   const r = n.rec;
   const parts = r.total > 0 ? r.episodes || 1 : 1;
   const split = parts > 1 || (r.hours > 0 && r.total - r.hours > 0.05);

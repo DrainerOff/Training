@@ -279,14 +279,15 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     return { moved: sets.length, backup };
   }
 
-  async function addItem(sessionId, { name, category = 'iso' }) {
+  // `key`: an exercise found by search keeps its series; `step` its weight step.
+  async function addItem(sessionId, { name, key = null, category = 'iso', step = 2.5 }) {
     const s = state.sessions.get(sessionId);
     if (!s) return null;
-    const opt = makeOption(name);
+    const opt = makeOption(name, key);
     const item = {
       slotId: uid('sl'),
       category: CATEGORY[category] ? category : 'iso',
-      step: 2.5,
+      step: Number(step) > 0 ? Number(step) : 2.5,
       options: [opt],
       overrides: {},
       seriesKey: opt.key,
@@ -386,7 +387,7 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       date,
       bodyweight: null,
       sleep: null,
-      recovery: null,
+      recovery: null, // no longer asked for (v1.4); an old score stays in its record and the sheet
       note: '',
       ...(prev && !prev.deleted ? prev : {}), // a deleted entry is not resurrected field by field
       ...patch,

@@ -3,7 +3,7 @@
 // settings of each exercise variant in the program editor, the same records as the workout line.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
-import { ready, connectSync, logButton, seedOwner } from './helpers.js';
+import { ready, connectSync, logButton, seedOwner, pickRir } from './helpers.js';
 
 const HAMMER = 'Наклонный жим: Hammer - наклон';
 const DUMBBELLS = 'Наклонный жим: Гантели - наклон';
@@ -205,6 +205,7 @@ test('variant settings in the program editor: one per variant, the same as in th
 test('the same pinned header and footer in the other long sheets (320 px), with the question before dropping edits', async ({ browser }) => {
   const { context, page } = await phone(browser, SCREENS[0]);
   await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 2, day: 1 }));
+  await pickRir(page);
   await logButton(page).click();
   const pinned = async (dialog, action) => {
     await settled(dialog);
@@ -266,6 +267,7 @@ test('double taps: «Готово» adds a new exercise once and stays in the ed
   await page.getByRole('dialog', { name: 'Выйти без сохранения программы?' }).getByRole('button', { name: 'Выйти' }).click();
   await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 2, day: 1 }));
   await page.evaluate(() => import('./js/ui/core.js').then(({ app }) => app.ui.go({ tab: 'today', view: null })));
+  await pickRir(page);
   await logButton(page).click();
   await page.locator('.panel').getByRole('button', { name: /^Подход 1: .* Изменить$/ }).click();
   const edit = page.getByRole('dialog', { name: /^Подход 1:/ });
@@ -284,6 +286,7 @@ test('double taps: «Готово» adds a new exercise once and stays in the ed
   expect(sets).toEqual([7]);
   // A tap elsewhere right after is not swallowed.
   await page.waitForTimeout(500);
+  await pickRir(page);
   await logButton(page).click();
   await expect.poll(() => page.evaluate(() => {
     const { store } = window.__trainer;
@@ -307,12 +310,12 @@ test('settings typed for a variant follow it when it is renamed; text fields are
   await context.close();
 });
 
-test('«Самочувствие и вес» (Тело): × with changes asks; «Сохранить» is pinned at the bottom', async ({ browser }) => {
+test('«Вес и сон за день» (Тело): × with changes asks; «Сохранить» is pinned at the bottom', async ({ browser }) => {
   const { context, page } = await phone(browser, SCREENS[0]);
   await page.locator('.tabbar').getByRole('button', { name: 'Тело' }).click();
-  await page.getByRole('button', { name: 'Добавить: самочувствие, замер или файл' }).click();
-  await page.getByRole('dialog', { name: 'Добавить' }).getByRole('button', { name: /Записать самочувствие/ }).click();
-  const sheet = page.getByRole('dialog', { name: 'Самочувствие и вес' });
+  await page.getByRole('button', { name: 'Добавить: вес и сон за день, замер или файл' }).click();
+  await page.getByRole('dialog', { name: 'Добавить' }).getByRole('button', { name: /Записать вес и сон/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Вес и сон за день' });
   await settled(sheet);
   await expect(sheet.locator('.sheet__foot').getByRole('button', { name: 'Сохранить' })).toBeVisible();
   await sheet.getByLabel('Заметка').fill('устал');

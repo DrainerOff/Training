@@ -38,11 +38,12 @@ export async function walkScreens(page, url, visit) {
   await page.evaluate(({ program, sessions, sets }) => window.__trainer.store.applyRemote({ program, sessions, sets }), { program: owner.program, sessions: [...owner.sessions, session1018()], sets: [...owner.sets, ...sets1018()] });
   await page.getByText('Исправить тренировку 18 октября').waitFor();
   await visit('home (correction card)');
-  await page.getByRole('button', { name: 'Позже' }).click();
+  while (await page.getByRole('button', { name: 'Позже' }).count()) await page.getByRole('button', { name: 'Позже' }).first().click();
 
   await page.getByRole('button', { name: 'Начать тренировку' }).click();
   await page.locator('.dock').waitFor();
   await visit('workout');
+  await page.locator('.dock').getByRole('group', { name: 'Фактический RIR' }).getByRole('button', { name: '2', exact: true }).click();
   await page.locator('.dock .btn--primary').click();
   await page.waitForTimeout(300);
   await visit('workout after a set (undo toast)');
@@ -55,8 +56,10 @@ export async function walkScreens(page, url, visit) {
   await page.getByRole('button', { name: 'Заменить' }).first().click();
   await page.getByRole('dialog').waitFor();
   await visit('swap sheet');
-  await page.getByRole('dialog').getByPlaceholder('Название').fill('Жим в Смите');
-  await page.getByRole('dialog').getByRole('button', { name: 'Заменить на «Жим в Смите»' }).click();
+  await page.getByRole('dialog').getByRole('searchbox', { name: 'Найти упражнение' }).fill('жим');
+  await visit('swap sheet: search results');
+  await page.getByRole('dialog').getByRole('searchbox', { name: 'Найти упражнение' }).fill('Жим в Смите');
+  await page.getByRole('dialog').getByRole('button', { name: 'Заменить на новое «Жим в Смите»' }).click();
   await page.getByText('Записал не то упражнение').waitFor();
   await visit('swap: move the recorded sets?');
   await page.keyboard.press('Escape');

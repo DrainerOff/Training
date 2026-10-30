@@ -1210,6 +1210,16 @@ p {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* «Ориентир» from another week: «примерно» is never cut — the label gives way first. */
+.dock__rec--approx .dock__rec-tag {
+  flex: none;
+}
+.dock__rec--approx .dock__rec-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* 320 pt: the weight, the verdict, ⓘ and «Использовать» first; the word «Сегодня» goes. */
 @media (max-width: 359px) {
   .dock__rec-label:not(.dock__rec-label--keep) {
@@ -1242,6 +1252,11 @@ p {
 .rec-sheet__head {
   margin: 0 0 8px;
   font-size: 17px;
+}
+.rec-sheet__basis {
+  margin: -4px 0 8px;
+  font-size: 14px;
+  color: var(--ghost);
 }
 .rec-sheet__why {
   margin: 0 0 12px;
@@ -1357,6 +1372,13 @@ p {
 .rir button.is-target {
   color: var(--iron);
   box-shadow: inset 0 0 0 1.5px var(--accent-dim);
+}
+.rir--missing .rir__label {
+  color: var(--bad);
+  font-weight: 700;
+}
+.rir.rir--missing button {
+  box-shadow: inset 0 0 0 1.5px var(--bad);
 }
 .rir button[aria-pressed='true'] {
   background: var(--accent);
@@ -2776,6 +2798,10 @@ button.src {
   gap: 10px;
   margin-top: 14px;
 }
+/* An odd tile at the end takes the whole row instead of leaving a hole. */
+.tiles > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
 .tile {
   display: flex;
   flex-direction: column;
@@ -2984,3 +3010,9 @@ textarea.nutr-instr {
 .report-part .nutr-lines {
   color: var(--iron);
 }
+
+/* exercise search in «Заменить» / «Добавить упражнение» */
+.ex-search .input + .choice { margin-top: 4px; }
+.ex-search__none { font-size: 13px; margin-top: 8px; }
+.ex-search__new { margin-top: 14px; }
+.ex-search__hint { font-size: 13px; margin-bottom: 8px; }
