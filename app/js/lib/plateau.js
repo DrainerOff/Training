@@ -79,7 +79,6 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
           baseline: !!item?.flags?.baseline,
         },
         note: item?.note || '',
-        recovery: m?.recovery ?? null,
         sleep: m?.sleep ?? null,
         // Body weight on the day of the workout (lib/bodyweight.js), or null: context for
         // exercises where the body is part of the load. Never stored with the sets.
@@ -289,7 +288,6 @@ export function seriesStatus(exposures, opts = {}) {
   if (v[0] === 'down') {
     const e = last.exposure;
     if (e.flags.technique) result.reasons.push('В этой тренировке отмечено ухудшение техники.');
-    if (e.recovery != null && e.recovery <= 2) result.reasons.push(`Восстановление в этот день: ${e.recovery} из 5.`);
     if (e.sleep != null && e.sleep < 6) result.reasons.push(`Сон: ${e.sleep} ч.`);
   }
   return result;

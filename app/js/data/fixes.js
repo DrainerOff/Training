@@ -98,7 +98,62 @@ export const FIX_2026_10_22 = {
   ],
 };
 
-export const FIXES = [FIX_2026_10_18, FIX_2026_10_22];
+// 20.10.2026 (cycle 1, week 2, day 3): the abs machine was recorded as «Скручивания в тренажере»,
+// a series of its own, while days 1 and 3 since then use «Пресс в тренажере» — the same machine
+// (confirmed by the owner). The three sets join the press series, so the history, «Прошлый раз»,
+// records and the recommendation see every press workout on any day; the day 3 slot gets the press
+// as its main variant, the prayer crunch stays an alternative. `sameExercise`: the old name is
+// then found by search as the press (lib/exercises.js) and never starts a new series again.
+export const FIX_2026_10_20 = {
+  id: 'fix-2026-10-20-press',
+  sessionId: 'ssmvgz3a8z32faa37f54050404',
+  date: '2026-10-20',
+  day: 3,
+  title: 'Объединить пресс',
+  label: 'Объединение пресса',
+  why: '«Скручивания в тренажере» 20 октября и «Пресс в тренажере» — один и тот же тренажёр, но 20 октября подходы записаны в отдельную серию. Они перейдут в серию «Пресс в тренажере»: история, «Прошлый раз», рекорды и рекомендация в любой день программы будут видеть все тренировки пресса.',
+  programText: 'Программа, день 3: основным станет «Пресс в тренажере», «Скручивание на блоке («молитва»)» останется альтернативой.',
+  moves: [
+    {
+      slotId: 'D3-07',
+      from: { key: 'skruchivaniya-v-trenazhere', name: 'Скручивания в тренажере' },
+      to: { key: 'press-v-trenazhere', name: 'Пресс в тренажере' },
+      setIds: ['stmvh3hfdxb01ee9bcad06bd12', 'stmvh3l4mnaa50e967260ed2fd', 'stmvh3palpabfa791fcf2db56e'],
+      sameExercise: true,
+    },
+  ],
+  program: [
+    {
+      has: 'skruchivanie-na-bloke-molitva',
+      options: [
+        { key: 'press-v-trenazhere', name: 'Пресс в тренажере' },
+        { key: 'skruchivanie-na-bloke-molitva', name: 'Скручивание на блоке («молитва»)' },
+      ],
+    },
+  ],
+};
+
+// 30.10.2026: dumbbells go up by 1 kg (lateral raise) and 2 kg (concentration curl), not by the
+// 2.5 kg of a machine stack; the owner chose these two steps. Program only, no sets change. A slot
+// is changed only while its main variant is still that exercise with the old step; the other
+// exercises (rear-delt dumbbells too) keep theirs until the owner checks them in the editor.
+export const FIX_2026_10_30_STEPS = {
+  id: 'fix-2026-10-30-steps',
+  title: 'Шаг веса для гантелей',
+  label: 'Шаг веса для гантелей',
+  why: 'Гантели в зале идут с шагом не 2,5 кг. Кнопки «+» и «−», рекомендация и ориентир будут предлагать веса с вашим шагом.',
+  programText: 'Программа: «Разведения гантелей в стороны» — шаг 1 кг, «Концентрированное сгибание на бицепс» — шаг 2 кг. У остальных упражнений шаг не меняется, его можно задать в программе («Шаг веса»).',
+  moves: [],
+  steps: [
+    { day: 2, has: 'razvedeniya-ganteley-v-storony', from: 2.5, step: 1 },
+    { day: 3, has: 'koncentrirovannoe-sgibanie-na-biceps', from: 2.5, step: 2 },
+  ],
+};
+
+export const FIXES = [FIX_2026_10_18, FIX_2026_10_20, FIX_2026_10_22, FIX_2026_10_30_STEPS];
+
+// Names confirmed as the same exercise as another series (moves with `sameExercise`).
+export const SAME_EXERCISE = FIXES.flatMap((f) => f.moves.filter((m) => m.sameExercise).map((m) => ({ name: m.from.name, key: m.to.key, fromKey: m.from.key })));
 
 // What `fix` would change on this device now:
 //   moves:   [{ …move, sessionId, date, item, sets }] — `sets` are the listed sets still on `from`
@@ -111,9 +166,15 @@ export const FIXES = [FIX_2026_10_18, FIX_2026_10_22];
 // fix has `to` as the main variant and is never offered.
 // The program part is offered with a move, or when the program has lost the variants the moved
 // sets now belong to — not when the owner later changed that day in some other way.
+// A program-only fix (`steps`, no workout) is offered until it is applied on this device, while the
+// program still has something to change.
 export function planFix(state, fix) {
-  const session = state.sessions.get(fix.sessionId);
   const out = { moves: [], skipped: [], program: null };
+  if (!fix.sessionId) {
+    if (!state.kv?.fixes?.[fix.id]) out.program = programAfterFix(state.program, fix);
+    return out;
+  }
+  const session = state.sessions.get(fix.sessionId);
   if (!session || session.deleted) return out;
   const liveSets = [...state.sets.values()].filter((x) => !x.deleted);
   for (const m of fix.moves) {
@@ -152,13 +213,20 @@ export function programAfterFix(program, fix) {
   const next = structuredClone(program);
   let changed = false;
   const day = next.days.find((d) => d.day === fix.day);
-  for (const spec of fix.program) {
+  for (const spec of fix.program || []) {
     const slot = day?.slots.find((s) => s.options.some((o) => o.key === spec.has));
     if (!slot) continue;
     const wanted = spec.options.map((o) => slot.options.find((x) => x.key === o.key) || { ...o });
     const options = [...wanted, ...slot.options.filter((o) => !wanted.some((w) => w.key === o.key))];
     if (options.map((o) => o.key).join('|') !== slot.options.map((o) => o.key).join('|')) {
       slot.options = options;
+      changed = true;
+    }
+  }
+  for (const st of fix.steps || []) {
+    const slot = next.days.find((d) => d.day === st.day)?.slots.find((s) => s.options[0]?.key === st.has);
+    if (slot && slot.step === st.from) {
+      slot.step = st.step;
       changed = true;
     }
   }

@@ -263,8 +263,8 @@ export function Stepper({ value, step, min = 0, start = null, onChange, onTap, l
   </div>`;
 }
 
-export function RirPicker({ value, target, onChange, label = 'RIR' }) {
-  return html`<div class="rir" role="group" aria-label="Фактический RIR">
+export function RirPicker({ value, target, onChange, label = 'RIR', missing = false }) {
+  return html`<div class=${'rir' + (missing ? ' rir--missing' : '')} role="group" aria-label="Фактический RIR" aria-invalid=${missing ? 'true' : null}>
     <span class="rir__label">${label}</span>
     ${[0, 1, 2, 3, 4, 5].map((n) => {
       const inTarget = target && n >= target[0] && n <= target[1];

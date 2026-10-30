@@ -6,10 +6,12 @@ import {
   fmtOverride, targetFor, fmtTarget, reuseKeys,
 } from '../lib/program.js';
 import { parseResultsText } from '../lib/textimport.js';
-import { fmtDay, fmtTime, fmtNum, parseNum, uid } from '../lib/util.js';
+import { fmtDay, fmtTime, fmtNum, parseNum, uid, plural } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { SETUP_MAX } from '../data/store.js';
 import { findSameSlotSession } from '../lib/planner.js';
+import { knownKeys } from '../lib/exercises.js';
+import { exercisesNow } from './derive.js';
 
 const ORIGINAL_PROGRAM_URL = 'https://docs.google.com/spreadsheets/d/1uiEDiFZYKHKUqVUqPT4HrZlBR8fqNGYr/edit';
 const CURRENT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/10jlAOVqpZbhSr_-v5Ahz83oHcJFXZnz187nspKKlVkg/edit';
@@ -355,7 +357,10 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   }));
   const [v, setV] = useState(start);
   const [typed, setTyped] = useState({}); // series key -> settings typed here
-  const optionsFor = (x) => (x.name.trim() ? optionsFromNames([x.name.trim(), ...x.alts.split('\n').map((n) => n.trim()).filter(Boolean)], slot?.options || []) : []);
+  // A name of an exercise done elsewhere (program or history) joins that series.
+  const index = exercisesNow();
+  const known = knownKeys(index);
+  const optionsFor = (x) => (x.name.trim() ? optionsFromNames([x.name.trim(), ...x.alts.split('\n').map((n) => n.trim()).filter(Boolean)], slot?.options || [], known) : []);
   // Renaming a variant gives it a new key: settings typed for it here move along with it.
   const up = (p) => {
     const before = optionsFor(v);
@@ -373,6 +378,8 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
   // The variants as they will be saved (same keys as on «Готово»), each with its settings
   // (App_Exercises by series key — the same records the workout's «Настройки» line edits).
   const options = optionsFor(v);
+  const own = new Set((slot?.options || []).map((o) => o.key));
+  const joined = options.filter((o) => !own.has(o.key)).map((o) => ({ o, e: index.find((x) => x.key === o.key) })).filter((x) => x.e && (x.e.count || x.e.inProgram));
   const setupText = (key) => (key in typed ? typed[key] : app.store.setupOf(key));
   // The lifted part of the body weight, typed in %; '' = by category (pull-ups 100 %, others 0).
   const [shares, setShares] = useState({});
@@ -420,6 +427,7 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
       <div class="sheet__label">Название</div>
       <input class="input" value=${v.name} onInput=${(e) => up({ name: e.currentTarget.value })} />
       ${!isNew ? html`<p class="muted" style="font-size:12px;margin-top:4px">Переименование сохраняет историю. Для другого упражнения добавьте новое.</p>` : null}
+      ${joined.map(({ o, e }) => html`<p class="muted" style="font-size:12px;margin-top:4px">«${o.name}» уже есть${e.count ? ` (${e.count} ${plural(e.count, 'тренировка', 'тренировки', 'тренировок')}, последняя ${fmtDay(e.last.date)})` : ' в программе'}: история будет общей.</p>`)}
     </div>
     <div class="sheet__section">
       <div class="sheet__label">Альтернативы, по одной в строке (каждая — отдельная серия)</div>
@@ -479,7 +487,7 @@ export function ProgramImport() {
       okLabel: 'Заменить',
     });
     if (!yes) return;
-    await app.store.saveProgram(reuseKeys(parsed.program, app.store.state.program));
+    await app.store.saveProgram(reuseKeys(parsed.program, app.store.state.program, knownKeys(exercisesNow())));
     app.ui.toast('Программа сохранена');
     app.ui.back();
   };

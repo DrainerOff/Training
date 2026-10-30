@@ -77,7 +77,7 @@ test('as recorded: one exercise in two series — 18.10 under «в Смите»,
   assert.equal(plan.skipped.length, 0);
   assert.ok(plan.program);
   // The 18.10 correction is done: only this one is offered.
-  assert.deepEqual(pendingFixes(st).map((x) => x.fix.id), [FIX.id]);
+  assert.deepEqual(pendingFixes(st).map((x) => x.fix.id).filter((id) => id !== 'fix-2026-10-30-steps'), [FIX.id]);
 });
 
 test('apply: the three sets join the Smith series; every fact, id and the other sets stay; day 4 gets Smith as main, barbell as alternative', async () => {

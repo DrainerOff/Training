@@ -19,7 +19,6 @@ export function Home({ syncStatus }) {
   const items = itemsForDay(st.program, plan.day);
   const dup = findSameSlotSession(sessions, plan);
   const today = isoDate();
-  const metricToday = st.metrics.get(`m${today}`);
 
   const start = async (p = plan) => {
     const s = await app.store.startSession(p);
@@ -71,14 +70,6 @@ export function Home({ syncStatus }) {
       })}
     </ul>
 
-    <div class="sheet__section">
-      <div class="sheet__label">Восстановление сегодня (необязательно)</div>
-      <div class="scale" role="group" aria-label="Восстановление сегодня">
-        ${[1, 2, 3, 4, 5].map((n) => html`<button type="button" aria-pressed=${String(metricToday?.recovery === n)}
-          onClick=${() => app.store.saveMetric(today, { recovery: metricToday?.recovery === n ? null : n })}>${n}</button>`)}
-      </div>
-    </div>
-
     <div class="home-actions">
       <button type="button" class="link" onClick=${() => openStart(plan, days, setPick, false)}>Другой день или неделя</button>
       <button type="button" class="link" onClick=${() => openStart(plan, days, null, true, start)}>Записать прошедшую тренировку</button>
@@ -127,7 +118,7 @@ function FixNotice({ fix, plan }) {
     try {
       const res = await applyFix(app.store, fix);
       if (res) {
-        const what = [res.sets ? `${res.sets} ${plural(res.sets, 'подход', 'подхода', 'подходов')}` : '', res.program ? `программа дня ${fix.day}` : ''].filter(Boolean).join(', ');
+        const what = [res.sets ? `${res.sets} ${plural(res.sets, 'подход', 'подхода', 'подходов')}` : '', res.program ? (fix.day ? `программа дня ${fix.day}` : 'программа') : ''].filter(Boolean).join(', ');
         app.ui.toast(`Исправлено: ${what}`, {
           ms: 15000,
           action: { label: 'Отменить', fn: () => revertFix(app.store, fix).catch((err) => app.ui.toast(`Не удалось отменить: ${err.message}`)) },
@@ -143,15 +134,15 @@ function FixNotice({ fix, plan }) {
   const many = new Set(plan.moves.map((m) => m.sessionId)).size > 1;
   return html`<div class="notice notice--caution fix" aria-label=${fix.label}>
     <h3>${fix.title}</h3>
-    ${plan.moves.length
-      ? html`<p>${fix.why} Веса, повторения, RIR и дата не меняются.</p>`
+    ${plan.moves.length || !fix.moves.length
+      ? html`<p>${fix.why}${plan.moves.length ? ' Веса, повторения, RIR и дата не меняются.' : ''}</p>`
       : html`<p>Подходы уже перенесены, но в программе нет этих вариантов — вероятно, программу изменили на другом устройстве до синхронизации.</p>`}
-    <ul class="fix__list">
+    ${plan.moves.length ? html`<ul class="fix__list">
       ${plan.moves.map((m) => html`<li>
         <span class="fix__what">${many ? html`<span class="fix__date">${fmtDay(m.date)}: </span>` : null}<span class="fix__from">${m.from.name}</span> → <b>${m.to.name}</b></span>
         <span class="fix__sets">${m.sets.length ? m.sets.map((x) => `${fmtWeight(x.weight, m.item.category)}×${x.reps}`).join(', ') : 'подходы уже перенесены, осталось название упражнения'}</span>
       </li>`)}
-    </ul>
+    </ul>` : null}
     ${plan.skipped.map((m) => html`<p>«${m.from.name}»: в этом упражнении есть подходы, записанные после тренировки, — его не трогаю. При необходимости — «Заменить» в этой тренировке.</p>`)}
     ${plan.program ? html`<p>${fix.programText}</p>` : null}
     <p>Перед изменением на телефоне сохраняется резервная копия, после — можно отменить.</p>
