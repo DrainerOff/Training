@@ -5,7 +5,7 @@
 // are in normal flow, the tab bar is hidden during a workout.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
-import { ready, seedOwner } from './helpers.js';
+import { ready, seedOwner, pickRir } from './helpers.js';
 
 let web;
 let base;
@@ -191,6 +191,7 @@ for (const screen of SCREENS) {
     for (const sel of controls) expect(await reachable(page, sel), sel).toBe('ok');
 
     // Record a set: still whole; the number pad opens as a sheet fully on screen.
+    await pickRir(page);
     await page.locator('.dock__log .btn').click();
     await page.waitForTimeout(200);
     expect((await geometry(page)).dock.bottom).toBe(g.vh);

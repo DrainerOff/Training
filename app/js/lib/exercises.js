@@ -132,10 +132,11 @@ function scoreName(query, name) {
 
 // Entries matching `query`, best first: [{ ...entry, score, matched }] — `matched` is the name
 // that matched when it is not the entry's own. Ties: in the program first, then done most recently.
+// Synonyms and typos are a fallback: shown only when nothing matches the words themselves.
 export function searchExercises(index, query, { exclude = [], limit = 8 } = {}) {
   if (!normName(query)) return [];
   const skip = new Set(exclude);
-  const out = [];
+  let out = [];
   for (const e of index) {
     if (skip.has(e.key)) continue;
     let best = 0;
@@ -149,6 +150,8 @@ export function searchExercises(index, query, { exclude = [], limit = 8 } = {}) 
     }
     if (best) out.push({ ...e, score: best, matched: normName(matched) === normName(e.name) ? null : matched });
   }
+  const direct = out.some((e) => e.score >= 40);
+  out = direct ? out.filter((e) => e.score >= 40) : out;
   out.sort((a, b) => b.score - a.score || Number(b.inProgram) - Number(a.inProgram) || (b.last?.date || '').localeCompare(a.last?.date || '') || a.name.localeCompare(b.name, 'ru'));
   return out.slice(0, limit);
 }

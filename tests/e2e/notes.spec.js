@@ -3,7 +3,7 @@
 // double tap on the last set of an exercise.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic, startFakeGas } from '../helpers/servers.js';
-import { ready, connectSync, logButton, seedOwner } from './helpers.js';
+import { ready, connectSync, logButton, seedOwner, pickRir } from './helpers.js';
 
 const HAMMER = 'Наклонный жим: Hammer - наклон';
 const DUMBBELLS = 'Наклонный жим: Гантели - наклон';
@@ -111,6 +111,7 @@ test('three levels of notes stay apart: a note on a set (icon), a comment for th
   await gym(page);
   await openExercise(page, HAMMER);
   const panel = page.locator('.panel');
+  await pickRir(page);
   await logButton(page).click();
   await expect(panel.locator('.set__nums')).toHaveCount(1);
 
@@ -148,8 +149,10 @@ test('wrong variant recorded: «Заменить» can move the recorded sets, o
   await gym(page);
   await openExercise(page, HAMMER);
   const panel = page.locator('.panel');
+  await pickRir(page);
   await logButton(page).click();
   await page.waitForTimeout(1600); // a real second set, not a double tap
+  await pickRir(page);
   await logButton(page).click();
   await expect(panel.locator('.set__nums')).toHaveCount(2);
   const numbers = await activeSets(page);
@@ -176,10 +179,12 @@ test('double tap on the last set of an exercise: the next exercise gets no set',
   await gym(page);
   const panel = page.locator('.panel');
   for (let i = 0; i < 2; i++) {
+    await pickRir(page);
     await logButton(page).click();
     await page.waitForTimeout(1600);
   }
   await expect(page.locator('.dock')).toContainText('Подход 3 из 3');
+  await pickRir(page);
   const box = await logButton(page).boundingBox();
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;

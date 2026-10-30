@@ -49,7 +49,7 @@ async function weighIns(page) {
   return page.getByRole('dialog', { name: 'Вес' }).first(); // a weigh-in opens over it, also named «Вес»
 }
 async function addMenu(page, item) {
-  await page.getByRole('button', { name: 'Добавить: самочувствие, замер или файл' }).click();
+  await page.getByRole('button', { name: 'Добавить: вес и сон за день, замер или файл' }).click();
   await page.getByRole('dialog', { name: 'Добавить' }).getByRole('button', { name: item }).click();
 }
 const waistTile = (page) => page.locator('.tile', { hasText: 'Талия' });

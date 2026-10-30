@@ -80,10 +80,7 @@ test('as recorded: one machine in two series; the card names exactly the 20.10 s
   // Until the owner confirms, «Скручивания в тренажере» is its own exercise in search.
   const index = indexOf(st);
   assert.equal(findExact(index, 'Скручивания в тренажере').key, CRUNCH.key);
-  const found = searchExercises(index, 'скручивания');
-  assert.deepEqual(found.slice(0, 2).map((e) => e.key).sort(), [CRUNCH.key, PRAYER.key].sort());
-  // The press is only suggested lower, as a synonym (abs), never joined with them.
-  assert.ok(found.findIndex((e) => e.key === PRESS.key) >= 2);
+  assert.deepEqual(searchExercises(index, 'скручивания').map((e) => e.key).sort(), [CRUNCH.key, PRAYER.key].sort());
 });
 
 test('apply: the three sets join the press series; every fact, id and the other sets stay; day 3 gets the press as main, the prayer crunch as alternative', async () => {

@@ -83,10 +83,11 @@ test('search: one typo and synonyms only rank results; they rank below real matc
   // A wrong ending is the same word: ranked with the real matches.
   assert.equal(searchExercises(idx, 'гиперэкстензя')[0].score, 60);
   assert.equal(searchExercises(idx, 'концентрированое')[0].key, 'koncentrirovannoe-sgibanie-na-biceps');
-  // «бицепс» finds the curl by its name; «пресс» finds the crunch only as a synonym, below the press.
+  // «бицепс» finds the curl by its name; a synonym shows up only when nothing matches the words.
   assert.equal(searchExercises(idx, 'бицепс')[0].key, 'koncentrirovannoe-sgibanie-na-biceps');
-  const abs = searchExercises(idx, 'пресс');
-  assert.deepEqual(abs.map((e) => [e.key, e.score]), [['press-v-trenazhere', 80], ['skruchivanie-na-bloke-molitva', 30]]);
+  assert.deepEqual(searchExercises(idx, 'пресс').map((e) => [e.key, e.score]), [['press-v-trenazhere', 80]]);
+  assert.deepEqual(searchExercises(idx, 'абс скручивания').map((e) => e.key), []);
+  assert.deepEqual(searchExercises(idx, 'пресс на блоке').map((e) => [e.key, e.score]), [['skruchivanie-na-bloke-molitva', 30]]);
   // Short words are not «corrected»: no match for an unrelated name.
   assert.deepEqual(searchExercises(idx, 'жимм'), []);
 });

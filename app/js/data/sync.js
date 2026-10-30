@@ -26,7 +26,7 @@ export const SYNCED = ['sessions', 'sets', 'metrics', 'records', 'exercises', 'b
 export const ENTITY_LABEL = {
   sessions: 'тренировки',
   sets: 'подходы',
-  metrics: 'самочувствие и вес (записи до v1.1)',
+  metrics: 'вес и сон за день (записи до v1.1)',
   records: 'рекорды, добавленные вручную',
   exercises: 'настройки упражнений',
   body: 'замеры тела',

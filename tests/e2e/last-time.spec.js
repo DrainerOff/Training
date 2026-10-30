@@ -4,7 +4,7 @@
 // Variants never mix: Hammer vs dumbbells, barbell incline vs flat, pull-up grips.
 import { test, expect, devices } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
-import { ready, dock, logButton, seedOwner } from './helpers.js';
+import { ready, dock, logButton, seedOwner, pickRir } from './helpers.js';
 
 let web;
 let base;
@@ -45,6 +45,7 @@ test('same week of the cycle: last time for this exact variant, the current set 
   await expect(prev(page).locator('.is-now')).toHaveCount(1);
   await expect(prev(page).locator('.dock__prev-sets > span').nth(0)).toHaveClass('is-now');
   await expect(dock(page)).toContainText('как в прошлый раз');
+  await pickRir(page);
   await logButton(page).click();
   await expect(prev(page).locator('.dock__prev-sets > span').nth(1)).toHaveClass('is-now'); // set 2 ↔ last time's set 2
 

@@ -217,21 +217,21 @@ const calves = (specs) => history(specs, { key: 'calves', category: 'calves' });
 const calfTarget = (week) => targetFor({ category: 'calves', overrides: { 1: { sets: 3, reps: [10, 12] }, 2: { sets: 3, reps: [10, 12] }, 3: { sets: 3, reps: [10, 12] } } }, week);
 
 test('regression: one heavy set below the range, the rest lighter → hold the lighter working weight', () => {
-  const s = calves([{ date: '2026-11-06', week: 2, sets: [[180, 8, 1], [170, 11, 0], [170, 10, 0]] }]);
+  const s = calves([{ date: '2026-11-06', week: 2, sets: [[150, 8, 1], [140, 11, 0], [140, 10, 0]] }]);
   const r = recommend({ list: s.get('calves'), session: today(2), target: calfTarget(2), category: 'calves', step: 2.5 });
-  assert.deepEqual([r.kind, r.weight, r.basis], ['hold', 170, 'same']);
-  assert.match(r.reasons.join(' '), /По 180 кг — 180×8 \(RIR 1\): ниже диапазона 10–12, поэтому рабочий вес — 170 кг \(2 подхода в диапазоне\)/);
-  assert.match(r.reasons.join(' '), /во всех подходах по 170 кг/);
+  assert.deepEqual([r.kind, r.weight, r.basis], ['hold', 140, 'same']);
+  assert.match(r.reasons.join(' '), /По 150 кг — 150×8 \(RIR 1\): ниже диапазона 10–12, поэтому рабочий вес — 140 кг \(2 подхода в диапазоне\)/);
+  assert.match(r.reasons.join(' '), /во всех подходах по 140 кг/);
 });
 
 test('regression: the heavy set below the range and no lighter weight done twice → the heaviest done in range', () => {
-  let s = calves([{ date: '2026-11-06', week: 2, sets: [[180, 8, 1], [175, 11, 0], [170, 10, 0]] }]);
+  let s = calves([{ date: '2026-11-06', week: 2, sets: [[150, 8, 1], [145, 11, 0], [140, 10, 0]] }]);
   let r = recommend({ list: s.get('calves'), session: today(2), target: calfTarget(2), category: 'calves', step: 2.5 });
-  assert.deepEqual([r.kind, r.weight], ['hold', 175]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 145]);
   // Nothing reached the range: the lightest weight done.
-  s = calves([{ date: '2026-11-06', week: 2, sets: [[180, 8, 1], [175, 9, 0], [170, 9, 0]] }]);
+  s = calves([{ date: '2026-11-06', week: 2, sets: [[150, 8, 1], [145, 9, 0], [140, 9, 0]] }]);
   r = recommend({ list: s.get('calves'), session: today(2), target: calfTarget(2), category: 'calves', step: 2.5 });
-  assert.deepEqual([r.kind, r.weight], ['hold', 170]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 140]);
   // A heavy set in range is still the weight to hold (unchanged).
   s = history([{ date: '2026-11-06', week: 2, sets: [[95, 9, 2], [90, 10, 2], [90, 10, 2], [90, 10, 2]] }]);
   assert.deepEqual([rec(s, { week: 2 }).kind, rec(s, { week: 2 }).weight], ['hold', 95]);

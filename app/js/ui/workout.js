@@ -421,7 +421,7 @@ function Recommendation({ rec, category, current, onUse }) {
   const info = () => openSheet((close) => html`<${RecommendationSheet} rec=${rec} category=${category} onClose=${close} />`);
   const has = rec.weight != null;
   const approx = rec.kind === 'estimate';
-  const tag = rec.kind === 'up' ? (rec.conditional ? 'условно' : 'повысить') : rec.kind === 'hold' ? 'закрепить' : approx ? 'приблизительно' : '';
+  const tag = rec.kind === 'up' ? (rec.conditional ? 'условно' : 'повысить') : rec.kind === 'hold' ? 'закрепить' : approx ? 'примерно' : '';
   const weight = `${approx ? '≈' : ''}${fmtLoad(rec.weight, category)}`;
   const span = approx && rec.range ? ` (от ${fmtLoad(rec.range[0], category)} до ${fmtLoad(rec.range[1], category)})` : '';
   const said = !has
@@ -429,7 +429,7 @@ function Recommendation({ rec, category, current, onUse }) {
     : approx
       ? `Ориентир на сегодня, приблизительно: ${fmtLoad(rec.weight, category)}${span}`
       : `Рекомендуем сегодня: ${fmtLoad(rec.weight, category)}, ${rec.label.toLowerCase()}${rec.conditional ? ', условно' : ''}`;
-  return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
+  return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '') + (approx ? ' dock__rec--approx' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
     <button type="button" class="dock__rec-why" onClick=${info} aria-label=${said + '. Почему'}>
       ${has
         ? html`<span class="dock__rec-label">${approx ? 'Ориентир:' : 'Сегодня:'}</span><b class="num">${weight}</b><span class="dock__rec-tag">· ${tag}</span>`
@@ -525,14 +525,14 @@ function entryLine(e) {
 
 // Search over the program and the whole history, and a new exercise when nothing fits.
 // `onPick({ option, category, step })`: a found exercise keeps its series, category and weight step.
-function ExerciseSearch({ exclude = [], category: startCategory = 'iso', createLabel, onPick }) {
+// `idle`: shown under the field while nothing is typed.
+function ExerciseSearch({ exclude = [], category: startCategory = 'iso', createLabel, onPick, idle = null }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState(startCategory);
   const index = exercisesNow();
   const q = query.trim();
   const found = searchExercises(index, q, { exclude });
   const exact = q ? findExact(index, q) : null;
-  const close = found.filter((e) => e.score >= 60);
   return html`<div class="sheet__section ex-search">
     <input class="input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Найти в программе и истории" aria-label="Найти упражнение"
       value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} />
@@ -545,11 +545,12 @@ function ExerciseSearch({ exclude = [], category: startCategory = 'iso', createL
     ${q && !exact
       ? html`<div class="ex-search__new">
           <div class="sheet__label">Новое упражнение — отдельная серия, история с нуля</div>
-          ${close.length ? html`<p class="muted ex-search__hint">Если это ${close.length > 1 ? 'одно из упражнений выше' : `«${close[0].name}»`}, выберите его — история будет общей.</p>` : null}
+          ${found.length ? html`<p class="muted ex-search__hint">Если это ${found.length > 1 ? 'одно из упражнений выше' : `«${found[0].name}»`}, выберите его — история будет общей.</p>` : null}
           <${Seg} label="Категория" value=${category} onChange=${setCategory} options=${CATEGORY_KEYS.map((k) => ({ value: k, label: CATEGORY[k].label }))} />
           <button type="button" class="btn btn--block" style="margin-top:10px" onClick=${() => onPick({ option: makeOption(q), category, step: null })}>${createLabel(q)}</button>
         </div>`
       : null}
+    ${q ? null : idle}
   </div>`;
 }
 
@@ -688,13 +689,13 @@ function AddItemSheet({ session, onClose, onAdded }) {
   };
   return html`<${Sheet} title="Добавить упражнение" onClose=${onClose}>
     <p class="muted" style="font-size:14px">Только в эту тренировку. Чтобы упражнение было всегда, добавьте его в программу.</p>
-    <${ExerciseSearch} exclude=${[...present]} createLabel=${(q) => `Добавить новое «${q}»`} onPick=${add} />
-    ${picks.length
-      ? html`<div class="sheet__section"><div class="sheet__label">Из вашей программы</div>
-          ${picks.map((k) => html`<button type="button" class="choice" onClick=${() => add({ option: { key: k.key, name: k.name }, category: k.category, step: k.step })}>
-            <span class="choice__main">${k.name}<span class="choice__sub">${CATEGORY[k.category].label}</span></span></button>`)}
-        </div>`
-      : null}
+    <${ExerciseSearch} exclude=${[...present]} createLabel=${(q) => `Добавить новое «${q}»`} onPick=${add}
+      idle=${picks.length
+        ? html`<div class="sheet__section"><div class="sheet__label">Из вашей программы</div>
+            ${picks.map((k) => html`<button type="button" class="choice" onClick=${() => add({ option: { key: k.key, name: k.name }, category: k.category, step: k.step })}>
+              <span class="choice__main">${k.name}<span class="choice__sub">${CATEGORY[k.category].label}</span></span></button>`)}
+          </div>`
+        : null} />
   <//>`;
 }
 

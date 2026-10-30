@@ -58,7 +58,15 @@ export function state(page) {
 export const dock = (page) => page.locator('.dock');
 export const logButton = (page) => page.locator('.dock .btn--primary');
 
-export async function logSet(page) {
+// RIR is required since v1.4: pick one in the dock unless one is chosen already.
+export async function pickRir(page, rir = 2) {
+  const group = page.locator('.dock').getByRole('group', { name: 'Фактический RIR' });
+  if (await group.locator('button[aria-pressed="true"]').count()) return;
+  await group.getByRole('button', { name: String(rir), exact: true }).click();
+}
+
+export async function logSet(page, { rir = 2 } = {}) {
+  await pickRir(page, rir);
   await logButton(page).click();
   // wait for the dock to re-mount with the next set number
   await page.waitForTimeout(120);
