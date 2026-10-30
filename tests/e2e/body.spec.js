@@ -68,6 +68,8 @@ test('without measurements the tab explains where they come from', async ({ page
 });
 
 test('import with a preview; re-import adds nothing; undo removes the whole import', async ({ page }) => {
+  // The 4-week rate needs the 1–6.10 weigh-ins inside its window; a fixed «today» keeps it there.
+  await page.clock.setFixedTime(new Date('2026-10-20T12:00:00+03:00'));
   await open(page);
   let sheet = await upload(page, 'weight.csv', WEIGHT);
   await expect(sheet).toContainText('Вес из «Здоровья» (Zepp Life)');
