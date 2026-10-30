@@ -5,34 +5,13 @@ import {
   CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeSlot, optionsFromNames, parseProgramText, programToText, parseOverride,
   fmtOverride, targetFor, fmtTarget, reuseKeys,
 } from '../lib/program.js';
-import { parseResultsText } from '../lib/textimport.js';
+import { parseResultsText, PROGRAM_PROMPT, resultsPrompt } from '../lib/textimport.js';
 import { fmtDay, fmtTime, fmtNum, parseNum, uid, plural } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { SETUP_MAX } from '../data/store.js';
 import { findSameSlotSession } from '../lib/planner.js';
 import { knownKeys } from '../lib/exercises.js';
 import { exercisesNow } from './derive.js';
-
-const ORIGINAL_PROGRAM_URL = 'https://docs.google.com/spreadsheets/d/1uiEDiFZYKHKUqVUqPT4HrZlBR8fqNGYr/edit';
-const CURRENT_SHEET_URL = 'https://docs.google.com/spreadsheets/d/10jlAOVqpZbhSr_-v5Ahz83oHcJFXZnz187nspKKlVkg/edit';
-
-export const PROGRAM_PROMPT = `Открой Google Таблицу с исходной программой тренировок: ${ORIGINAL_PROGRAM_URL}
-Перепиши программу строго в этом текстовом формате, ничего не меняя в составе упражнений и порядке:
-
-День 1: <название дня, если есть>
-- <Упражнение> [категория] / <альтернатива> / <альтернатива>
-
-Категории: [base] — базовые (жим штанги, маятниковый присед, горизонтальные и вертикальные тяги), [hammer] — Hammer, [pullup] — подтягивания, [iso] — изоляция и пресс, [calves] — икры.
-Если в программе для упражнения указаны свои подходы/повторения по неделям, добавь в строку н1=3x10-12@4-5 н2=... н3=... (подходы x повторения @ RIR). Если не указаны — не добавляй.
-Выведи только текст программы, без пояснений.`;
-
-export const RESULTS_PROMPT = `Открой Google Таблицу: ${CURRENT_SHEET_URL}
-Выпиши ВСЕ фактически выполненные тренировки — только реально записанные результаты, не план и не расчётные значения — в формате:
-
-16.10.2026 цикл 1 неделя 1 день 1
-Название упражнения: 60x10@4, 60x10@4, 60x9@3
-
-Правила: вес в кг (дробные через запятую), «x» между весом и повторениями, «@RIR» только если фактический RIR записан. Подтягивания без веса — «св x6». Дроп-сет — «дроп 70x10». Названия упражнений — как в таблице. Ничего не придумывай: если значение не записано, пропусти подход.`;
 
 async function copy(text) {
   try {
@@ -176,7 +155,7 @@ export function Settings({ syncStatus }) {
     <h2 class="section-title">Прошлые тренировки</h2>
     <div class="settings-group">
       <button type="button" class="choice" onClick=${() => app.ui.go({ view: { type: 'results-import' } })}>
-        <span class="choice__main">Перенести из текста<span class="choice__sub">например, тренировку 16.10 из старой таблицы</span></span></button>
+        <span class="choice__main">Перенести из текста<span class="choice__sub">например, прошлый цикл из заметок или старой таблицы</span></span></button>
     </div>
 
     <h2 class="section-title">Резервная копия</h2>
@@ -493,7 +472,7 @@ export function ProgramImport() {
   };
   return html`<main class="screen">
     <${Back} title="Программа текстом" />
-    <p class="muted" style="font-size:14px">Самый быстрый способ перенести исходную программу: попросите ChatGPT (у него есть доступ к вашему Google Drive) переписать её в формате ниже и вставьте результат.</p>
+    <p class="muted" style="font-size:14px">Скопируйте программу текстом с другого телефона («Скопировать программу как текст») или попросите ChatGPT переписать её в формате ниже из таблицы, фото или заметок, и вставьте результат.</p>
     <div class="sheet__section">
       <button type="button" class="btn btn--block" onClick=${() => copy(PROGRAM_PROMPT)}>Скопировать запрос для ChatGPT</button>
     </div>
@@ -531,9 +510,9 @@ export function ResultsImport() {
   };
   return html`<main class="screen">
     <${Back} title="Перенос тренировок" />
-    <p class="muted" style="font-size:14px">Вставьте результаты текстом — вручную или попросив ChatGPT выписать их из старой таблицы. Перед сохранением вы увидите всё, что будет записано. Ничего не дописывается автоматически.</p>
+    <p class="muted" style="font-size:14px">Вставьте результаты текстом — вручную или попросив ChatGPT выписать их из ваших записей: таблицы, заметок или фото. Перед сохранением вы увидите всё, что будет записано. Ничего не дописывается автоматически.</p>
     <div class="sheet__section">
-      <button type="button" class="btn btn--block" onClick=${() => copy(RESULTS_PROMPT)}>Скопировать запрос для ChatGPT</button>
+      <button type="button" class="btn btn--block" onClick=${() => copy(resultsPrompt(app.store.state.program))}>Скопировать запрос для ChatGPT</button>
     </div>
     <div class="code">16.10.2026 цикл 1 неделя 1 день 1${'\n'}Подтягивания прямым хватом: св x6 x3${'\n'}Жим штанги под наклоном: 60x10@4, 60x10@4, 62,5x9@3${'\n'}Икры в жиме ногами: 100x12, 100x12, дроп 70x10</div>
     <div class="sheet__section">
