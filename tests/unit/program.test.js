@@ -1,14 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { targetFor, parseProgramText, programToText, starterProgram, normalizeProgram, findOptionByName } from '../../app/js/lib/program.js';
+import { targetFor, parseProgramText, programToText, starterProgram, normalizeProgram, findOptionByName, phaseSummary, fmtTarget } from '../../app/js/lib/program.js';
 
-test('light week: 3 sets for everything, RIR 4–5', () => {
-  for (const category of ['base', 'hammer', 'iso', 'calves']) {
+test('light week: 3 sets for everything, RIR 2–3', () => {
+  for (const category of ['base', 'hammer', 'pullup', 'iso', 'calves']) {
     const t = targetFor({ category }, 1);
     assert.equal(t.sets, 3, category);
-    assert.deepEqual(t.rir, [4, 5]);
+    assert.deepEqual(t.rir, [2, 3]);
     assert.equal(t.drop, 0);
   }
+  assert.equal(phaseSummary(1), '3 подхода, RIR\u00a02–\u20603');
+  assert.equal(fmtTarget(targetFor({ category: 'base' }, 1)), '3 подхода, RIR\u00a02–\u20603');
+  // Calves keep their own reps on week 1, the RIR comes from the week.
+  assert.equal(fmtTarget(targetFor({ category: 'calves', overrides: { 1: { sets: 3, reps: [10, 12] } } }, 1)), '3 × 10–\u206012, RIR\u00a02–\u20603');
+});
+
+test('the number of sets in rows does not change: base 4 on heavy weeks, pull-ups 3×6', () => {
+  for (const w of [2, 3]) {
+    assert.equal(targetFor({ category: 'base' }, w).sets, 4);
+    assert.deepEqual([targetFor({ category: 'pullup' }, w).sets, targetFor({ category: 'pullup' }, w).reps], [3, [6, 6]]);
+  }
+  assert.equal(targetFor({ category: 'iso' }, 2).sets, 3);
 });
 
 test('heavy weeks: base 4 sets, hammer/pull-ups/isolation 3 sets', () => {

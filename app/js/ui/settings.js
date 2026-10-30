@@ -514,7 +514,7 @@ export function ResultsImport() {
     <div class="sheet__section">
       <button type="button" class="btn btn--block" onClick=${() => copy(resultsPrompt(app.store.state.program))}>Скопировать запрос для ChatGPT</button>
     </div>
-    <div class="code">16.10.2026 цикл 1 неделя 1 день 1${'\n'}Подтягивания прямым хватом: св x6 x3${'\n'}Жим штанги под наклоном: 60x10@4, 60x10@4, 62,5x9@3${'\n'}Икры в жиме ногами: 100x12, 100x12, дроп 70x10</div>
+    <div class="code">16.10.2026 цикл 1 неделя 1 день 1${'\n'}Подтягивания прямым хватом: св x6 x3${'\n'}Жим штанги под наклоном: 60x10@3, 60x10@3, 62,5x9@2${'\n'}Икры в жиме ногами: 100x12, 100x12, дроп 70x10</div>
     <div class="sheet__section">
       <textarea class="input" placeholder="Вставьте тренировки" value=${text} onInput=${(e) => setText(e.currentTarget.value)}></textarea>
     </div>

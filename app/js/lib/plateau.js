@@ -14,7 +14,7 @@
 //  * sessions marked with pain are not counted; a gain made with degraded technique
 //    is not counted as progress; a "new baseline" mark (stricter technique, new machine
 //    settings) starts a fresh comparison segment;
-//  * the light week (RIR 4–5) is shown but never used to diagnose plateau/regress.
+//  * the light week (week 1) is shown but never used to diagnose plateau/regress.
 
 import { median, sum } from './util.js';
 

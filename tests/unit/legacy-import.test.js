@@ -47,9 +47,9 @@ test('program: sets and reps of every slot equal the sheet for all three weeks',
   }
 });
 
-test('program: RIR per week follows the cycle (4–5, 1–2, 0–1), including pull-ups', () => {
+test('program: RIR per week follows the cycle rules (2–3 since v1.4.2, 1–2, 0–1), including pull-ups', () => {
   const pull = data.program.days[0].slots[0];
-  assert.deepEqual([1, 2, 3].map((w) => targetFor(pull, w).rir), [[4, 5], [1, 2], [0, 1]]);
+  assert.deepEqual([1, 2, 3].map((w) => targetFor(pull, w).rir), [[2, 3], [1, 2], [0, 1]]);
 });
 
 test('program: calves get the single drop set on week 3 only', () => {

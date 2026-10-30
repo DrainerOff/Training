@@ -28,8 +28,12 @@
 //    least two; their median by Epley. One strong set decides nothing.
 //  * Heavy week: the weight on the owner's grid (source weight ± steps) nearest to the middle of the
 //    week's window of reps to failure, with at least half a rep above its bottom — so it errs light.
-//  * Light week (10–12 reps at RIR 4–5) from a heavy one is a long way to recount: Epley and Brzycki
-//    differ by 8–13% there, so the hint is «≈ weight (from–to)» between the two.
+//  * Light week (10–12 reps at the RIR of its target, lib/program.js PHASE[1]) from a heavy one is a
+//    long way to recount: Epley and Brzycki differ by 3–9% there, so the hint is
+//    «≈ weight (from–to)» between the two. At the same strength it is never heavier than week 2: its
+//    window of reps to failure lies above week 2's, and both formulas give less load for more reps.
+//    Where one step is over ~10% of the weight (light dumbbells), the nearest weight can be the week 2
+//    one.
 //  * Pull-ups: the whole load (body + added). A body-weight difference below one step is weigh-in
 //    noise and is not recounted (the same threshold as above).
 //  * Today's first working set corrects it by one step: below the window → a step down, two or more
@@ -38,8 +42,8 @@
 import { daysBetween, fmtDay, fmtNum, median, plural } from './util.js';
 
 export const STALE_DAYS = 56;
-// Week 1 (light, RIR 4–5) in the owner's scheme is 10–12 reps. The program keeps no rep range for it
-// (targets are unchanged by v1.3), so the range is used here only.
+// Week 1 (light, RIR of its target) in the owner's scheme is 10–12 reps. The program keeps no rep
+// range for it (targets are unchanged by v1.3), so the range is used here only.
 export const LIGHT_REPS = [10, 12];
 
 export const KIND = {
@@ -344,7 +348,7 @@ function estimate({
   reasons.push(...notes);
   const down = Math.max(0, round(weight - step));
   reasons.push(light
-    ? 'Это приблизительная оценка по другой неделе. Если первый подход тяжелее RIR 4 — снизьте вес.'
+    ? `Это приблизительная оценка по другой неделе. Если первый подход тяжелее RIR ${fmtNum(rir[0])} — снизьте вес.`
     : `Это приблизительный расчёт по другой неделе, а не результат той же недели. Если первый подход пойдёт тяжелее плана — следующий ${load(down)}.`);
 
   // Today's first working set (with RIR) corrects the hint by one step.
