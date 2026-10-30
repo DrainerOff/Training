@@ -9,7 +9,7 @@ import { mount } from './ui/app.js';
 import { app } from './ui/core.js';
 import { applyTheme } from './ui/settings.js';
 
-export const VERSION = '1.4.1';
+export const VERSION = '1.4.2';
 // Replaced with the commit hash on deploy (same as in sw.js) — shown in Settings.
 export const BUILD = '__BUILD__';
 

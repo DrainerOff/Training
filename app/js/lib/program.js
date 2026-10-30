@@ -16,7 +16,7 @@ export const CATEGORY = {
 export const CATEGORY_KEYS = Object.keys(CATEGORY);
 
 export const PHASE = {
-  1: { title: 'Лёгкая неделя', reps: null, rir: [4, 5] },
+  1: { title: 'Лёгкая неделя', reps: null, rir: [2, 3] },
   2: { title: 'Тяжёлая неделя', reps: [8, 10], rir: [1, 2] },
   3: { title: 'Тяжёлая неделя', reps: [6, 8], rir: [0, 1] },
 };
@@ -30,7 +30,7 @@ export function phaseSummary(week) {
 }
 
 // Target for a slot in a given week of the 3-week cycle.
-// Light week: 3 working sets for everything, RIR 4–5.
+// Light week: 3 working sets for everything, RIR of PHASE[1].
 // Heavy weeks: base lifts 4 sets, Hammer / pull-ups / isolation 3 sets.
 // Pull-ups are always 3×6 strict. Calves get one extra drop set on week 3.
 export function targetFor(slot, week) {
