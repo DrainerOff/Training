@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildExposures, compareExposures, seriesStatus, overview, previousExposures, weightTrend } from '../../app/js/lib/plateau.js';
+import { buildExposures, compareExposures, seriesStatus, overview, previousExposures, weightDrop, weightTrend } from '../../app/js/lib/plateau.js';
 
 // Fixture builder. `spec` = { cycle, week, day, date, sets: [[w, r, rir?], ...], key?, flags?, drop? }
 function fixture(specs) {
@@ -208,6 +208,110 @@ test('previous-result hint prefers the same week of the cycle', () => {
   const p = previousExposures(list, { week: 2, sessionId: 'new', date: '2026-11-13' });
   assert.equal(p.samePhase.date, '2026-10-23');
   assert.equal(p.latest.date, '2026-10-30');
+});
+
+// ---- «новая точка отсчёта»: everything is counted from the mark (v1.5.0)
+
+const markedRow = [
+  { cycle: 1, week: 2, date: '2026-10-20', sets: [[100, 8, 2], [100, 8, 2], [100, 8, 1], [100, 8, 1]] },
+  { cycle: 1, week: 3, date: '2026-10-29', sets: [[110, 6, 1], [110, 6, 1], [110, 6, 1], [110, 7, 0]] },
+  { cycle: 2, week: 1, date: '2026-11-03', sets: [[75, 12, 3], [75, 12, 3], [75, 12, 3]], flags: { baseline: true } },
+  { cycle: 2, week: 2, date: '2026-11-10', sets: [[90, 8, 2], [90, 8, 2], [90, 8, 1], [90, 8, 1]] },
+  { cycle: 2, week: 3, date: '2026-11-17', sets: [[95, 6, 1], [95, 6, 1], [95, 6, 1], [95, 6, 0]] },
+];
+
+test('a deliberate drop without the mark reads as a dip, then a regress', () => {
+  const r = status(markedRow.map((x) => ({ ...x, flags: {} })));
+  assert.equal(r.status, 'regress');
+});
+
+test('with the mark the drop is no regress: nothing to compare with until the week repeats after it', () => {
+  const r = status(markedRow);
+  assert.equal(r.status, 'insufficient');
+  assert.equal(r.baseline, '2026-11-03');
+  assert.match(r.reasons[0], /^После новой точки отсчёта \(3 ноября\) сравнивать пока не с чем/);
+  const later = status([...markedRow, { cycle: 3, week: 2, date: '2026-12-01', sets: [[92.5, 8, 2], [92.5, 8, 2], [92.5, 8, 1], [92.5, 8, 1]] }]);
+  assert.equal(later.status, 'progress');
+});
+
+test('the status counts only the current segment: an old regress or a flat run does not carry over the mark', () => {
+  const old = [
+    { cycle: 1, week: 2, date: '2026-09-01', sets: [[100, 10], [100, 10], [100, 9], [100, 9]] },
+    { cycle: 2, week: 2, date: '2026-09-22', sets: [[95, 9], [95, 9], [95, 8], [95, 8]] },
+    { cycle: 3, week: 2, date: '2026-10-13', sets: [[90, 9], [90, 8], [90, 8], [90, 8]] },
+  ];
+  assert.equal(status(old).status, 'regress');
+  const marked = status([...old, { cycle: 4, week: 2, date: '2026-11-03', sets: [[80, 10], [80, 10], [80, 9], [80, 9]], flags: { baseline: true } }]);
+  assert.equal(marked.status, 'insufficient');
+  assert.equal(marked.counted.length, 0);
+
+  const flat = [
+    { cycle: 1, week: 2, date: '2026-09-01', sets: [[80, 10], [80, 10]] },
+    { cycle: 2, week: 2, date: '2026-09-22', sets: [[80, 10], [80, 10]] },
+    { cycle: 3, week: 2, date: '2026-10-13', sets: [[80, 10], [80, 10]] },
+    { cycle: 4, week: 2, date: '2026-11-03', sets: [[80, 10], [80, 10]] },
+  ];
+  assert.equal(status(flat).status, 'plateau');
+  const afterMark = status([
+    ...flat.slice(0, 3),
+    { cycle: 4, week: 2, date: '2026-11-03', sets: [[70, 10], [70, 10]], flags: { baseline: true } },
+    { cycle: 5, week: 2, date: '2026-11-24', sets: [[70, 10], [70, 10]] },
+  ]);
+  assert.equal(afterMark.counted.length, 1);
+  assert.equal(afterMark.status, 'stable');
+});
+
+const prevOf = (specs, args) => {
+  const { sessions, sets } = fixture(specs);
+  return previousExposures(buildExposures(sessions, sets).get('press'), { sessionId: 'new', ...args });
+};
+
+test('last time after a mark: only results since it; what was before comes back as «old», the same week first', () => {
+  // Week 2 after a mark on the light week: no week 2 since the mark.
+  let p = prevOf(markedRow.slice(0, 3), { week: 2, date: '2026-11-10' });
+  assert.equal(p.samePhase, null);
+  assert.equal(p.latest.date, '2026-11-03'); // the light week, new technique
+  assert.equal(p.old.date, '2026-10-20'); // week 2 before the mark
+  assert.equal(p.mark, '2026-11-03');
+  // Week 3: week 2 since the mark is the latest; week 3 before it is «old».
+  p = prevOf(markedRow.slice(0, 4), { week: 3, date: '2026-11-17' });
+  assert.equal(p.samePhase, null);
+  assert.equal(p.latest.date, '2026-11-10');
+  assert.equal(p.old.date, '2026-10-29');
+  // Once the week repeats after the mark, it is «Прошлый раз» again, and nothing is cut.
+  p = prevOf(markedRow, { week: 2, date: '2026-12-01' });
+  assert.equal(p.samePhase.date, '2026-11-10');
+  assert.equal(p.old, null);
+  assert.equal(p.mark, null);
+  // The marked workout itself is the reference of its week.
+  p = prevOf(markedRow.slice(0, 3), { week: 1, date: '2026-11-24' });
+  assert.equal(p.samePhase.date, '2026-11-03');
+});
+
+test('last time when today is marked: everything before is «old»; without history nothing is cut', () => {
+  const p = prevOf(markedRow.slice(0, 2), { week: 1, date: '2026-11-03', baseline: true });
+  assert.equal(p.samePhase, null);
+  assert.equal(p.latest, null);
+  assert.equal(p.old.date, '2026-10-29'); // no week 1 before: the latest
+  assert.equal(p.mark, '2026-11-03');
+  const none = prevOf([], { week: 1, date: '2026-11-03', baseline: true });
+  assert.deepEqual([none.samePhase, none.latest, none.old, none.mark], [null, null, null, null]);
+});
+
+test('weight drop: asked at 10% below the same week last time, not for less, pain, worse technique, a mark or pull-ups', () => {
+  const ref = { date: '2026-10-29', sets: [{ weight: 110, reps: 6 }, { weight: 110, reps: 7 }] };
+  const d = weightDrop({ ref, todaySets: [{ weight: 95, reps: 7 }] });
+  assert.deepEqual(d, { was: 110, now: 95, pct: 14, date: '2026-10-29' });
+  assert.ok(weightDrop({ ref, todaySets: [{ weight: 99, reps: 7 }] })); // exactly 10%
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 100, reps: 7 }] }), null); // 9%
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 95, reps: 7 }, { weight: 105, reps: 6 }] }), null); // the heaviest set counts
+  assert.equal(weightDrop({ ref, todaySets: [] }), null);
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 50, reps: 8, drop: true }] }), null);
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 95, reps: 7, pain: true }] }), null);
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 95, reps: 7 }], flags: { technique: true } }), null);
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 95, reps: 7 }], flags: { baseline: true } }), null);
+  assert.equal(weightDrop({ ref: null, todaySets: [{ weight: 95, reps: 7 }] }), null);
+  assert.equal(weightDrop({ ref: { date: 'x', sets: [{ weight: 10, reps: 6 }] }, todaySets: [{ weight: 0, reps: 6 }], category: 'pullup' }), null);
 });
 
 test('overview puts problems first', () => {

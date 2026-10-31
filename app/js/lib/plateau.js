@@ -16,7 +16,7 @@
 //    settings) starts a fresh comparison segment;
 //  * the light week (week 1) is shown but never used to diagnose plateau/regress.
 
-import { median, sum } from './util.js';
+import { fmtDay, median, sum } from './util.js';
 
 export const EPS = 0.01; // 1% — below this a change is noise
 const HEAVY = new Set([2, 3]);
@@ -244,15 +244,21 @@ function bestBefore(comparisons, entry, opts) {
 
 export function seriesStatus(exposures, opts = {}) {
   const comps = seriesComparisons(exposures, opts);
-  const counted = comps.filter((c) => c.counted);
+  // Only the current segment counts: after a «новая точка отсчёта» neither the old status nor a run
+  // of results without gain carries over.
+  const segment = comps.length ? comps[comps.length - 1].segment : 0;
+  const mark = segment > 0 ? comps.findLast((c) => c.exposure.flags.baseline)?.exposure || null : null;
+  const counted = comps.filter((c) => c.counted && c.segment === segment);
   const last = counted[counted.length - 1];
-  const result = { comparisons: comps, counted, status: 'insufficient', reasons: [] };
+  const result = { comparisons: comps, counted, status: 'insufficient', reasons: [], baseline: mark ? mark.date : null };
   if (!last) {
     const heavy = exposures.some((e) => HEAVY.has(e.week));
     result.reasons.push(
-      heavy
-        ? 'Сравнение появится, когда вы повторите эту неделю цикла в следующем цикле.'
-        : 'Пока есть только лёгкие недели — по ним плато не оценивается.',
+      mark
+        ? `После новой точки отсчёта (${fmtDay(mark.date)}) сравнивать пока не с чем: сравнение появится, когда эта неделя цикла повторится.`
+        : heavy
+          ? 'Сравнение появится, когда вы повторите эту неделю цикла в следующем цикле.'
+          : 'Пока есть только лёгкие недели — по ним плато не оценивается.',
     );
     return result;
   }
@@ -315,20 +321,50 @@ export function overview(seriesMap, { nameOf = (k, list) => list[list.length - 1
   return rows;
 }
 
-// Previous result hints for a series: same week of the cycle first, otherwise the latest of any week.
-export function previousExposures(list, { week, sessionId, date, startedAt = Infinity }) {
+// Previous result hints for a series: same week of the cycle first, otherwise the latest of any week —
+// both only since the latest «новая точка отсчёта» (`baseline`: today's workout is marked itself).
+// What came before the mark is `old` (the same week first, else the latest): shown for reference,
+// never a weight to start from. `mark` — the date of the mark that cut the history, or null.
+export function previousExposures(list, { week, sessionId, date, startedAt = Infinity, baseline = false }) {
   let samePhase = null;
   let latest = null;
+  let mark = baseline ? date : null;
+  let old = null;
   for (let i = (list?.length || 0) - 1; i >= 0; i--) {
     const e = list[i];
     if (e.sessionId === sessionId) continue;
     if (e.date > date || (e.date === date && e.startedAt >= startedAt)) continue;
     if (!e.sets.length) continue;
-    if (!latest) latest = e;
-    if (!samePhase && e.week === week) samePhase = e;
-    if (latest && samePhase) break;
+    if (mark == null) {
+      if (!latest) latest = e;
+      if (!samePhase && e.week === week) samePhase = e;
+      if (samePhase) break;
+      if (e.flags?.baseline) mark = e.date;
+      continue;
+    }
+    if (e.week === week) {
+      old = e;
+      break;
+    }
+    if (!old) old = e;
   }
-  return { samePhase, latest };
+  return { samePhase, latest, old, mark: old ? mark : null };
+}
+
+// A drop worth asking about: today's heaviest working set at least 10% below the heaviest set of the
+// same week last time (since the latest mark). It may be meant — stricter technique, a full range,
+// other settings — and then a «новая точка отсчёта» keeps it from reading as a dip or a regress.
+// Not asked once today is marked, with pain or worse technique, or for pull-ups (added weight).
+export const DROP_ASK = 0.1;
+
+export function weightDrop({ todaySets = [], ref = null, category = null, flags = {} }) {
+  if (!ref || flags.baseline || flags.pain || flags.technique || category === 'pullup') return null;
+  const today = todaySets.filter((s) => !s.deleted && !s.drop && s.reps > 0);
+  if (!today.length || today.some((s) => s.pain || s.technique)) return null;
+  const was = Math.max(0, ...ref.sets.map((s) => s.weight || 0));
+  const now = Math.max(...today.map((s) => s.weight || 0));
+  if (!(was > 0) || now > was * (1 - DROP_ASK) + 1e-9) return null;
+  return { was, now, pct: Math.round((1 - now / was) * 100), date: ref.date };
 }
 
 // --- body metrics -------------------------------------------------------------------
