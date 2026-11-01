@@ -86,8 +86,11 @@ export function programFromSnapshot(snap = SNAPSHOT) {
       note: notes.join(' '),
     };
     // Category rules give the defaults; whatever the sheet states differently becomes an override.
+    // Week 1 «не задано» is the sheet's «выбирай по упражнению» (its footnote): since v1.6.0 that is the
+    // app's light-week rule by category (lib/program.js lightReps), not an override.
     for (const w of [1, 2, 3]) {
       const def = targetFor({ category }, w);
+      if (w === 1 && sheet[1].reps == null) sheet[1].reps = def.reps;
       if (def.sets !== sheet[w].sets || !sameRange(def.reps, sheet[w].reps)) {
         slot.overrides[w] = { sets: sheet[w].sets, reps: sheet[w].reps };
       }

@@ -31,10 +31,11 @@
 //    But not by a whole window: where one step is large for the weight (12 → 14,5 kg is +21%) and that
 //    weight lands above the window (too light, reps to spare), the next step up is taken when it misses
 //    the window by less and by at most one rep below it. The ⓘ says so.
-//  * Light week (10–12 reps at the RIR of its target, lib/program.js PHASE[1]) from a heavy one is a
-//    long way to recount: Epley and Brzycki differ by 3–9% there, so the hint is
-//    «≈ weight (from–to)» between the two. At the same strength it is never heavier than week 2: its
-//    window of reps to failure lies above week 2's, and both formulas give less load for more reps.
+//  * Light week (its target: base lifts and Hammer 10–12, isolation 12–15, at the RIR of PHASE[1];
+//    lib/program.js CATEGORY lightReps) from a heavy one is a long way to recount: Epley and Brzycki
+//    differ by 3–8% there for 10–12 and by 8–13% for 12–15, so the hint is «≈ weight (from–to)»
+//    between the two. At the same strength it is never heavier than week 2: its window of reps to
+//    failure lies above week 2's, and both formulas give less load for more reps.
 //    Where one step is over ~10% of the weight (light dumbbells), the nearest weight can be the week 2
 //    one.
 //  * Pull-ups: the whole load (body + added). A body-weight difference below one step is weigh-in
@@ -45,9 +46,6 @@
 import { daysBetween, fmtDay, fmtNum, median, plural } from './util.js';
 
 export const STALE_DAYS = 56;
-// Week 1 (light, RIR of its target) in the owner's scheme is 10–12 reps. The program keeps no rep
-// range for it (targets are unchanged by v1.3), so the range is used here only.
-export const LIGHT_REPS = [10, 12];
 
 export const KIND = {
   up: 'Можно повысить',
@@ -100,7 +98,7 @@ function sameWeek({
 }) {
   step = step > 0 ? step : 2.5;
   const week = session.week;
-  const reps = target?.reps || (week === 1 ? LIGHT_REPS : null);
+  const reps = target?.reps || null;
   const rir = target?.rir || null;
   const load = (w) => fmtLoad(w, category);
   const out = (kind, weight, reasons, extra = {}) => ({ kind, label: KIND[kind], weight, conditional: false, reasons, ref: null, basis: kind === 'none' ? null : 'same', approx: false, ...extra });
@@ -263,7 +261,7 @@ function estimate({
   step = step > 0 ? step : 2.5;
   const week = session.week;
   const light = week === 1;
-  const reps = target?.reps || (light ? LIGHT_REPS : null);
+  const reps = target?.reps || null;
   const rir = target?.rir || null;
   const load = (w) => fmtLoad(w, category);
   const none = (why) => ({ weight: null, reasons: why ? [why] : [] });

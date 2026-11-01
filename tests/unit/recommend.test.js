@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildExposures } from '../../app/js/lib/plateau.js';
-import { recommend, LIGHT_REPS } from '../../app/js/lib/recommend.js';
+import { recommend } from '../../app/js/lib/recommend.js';
 import { targetFor } from '../../app/js/lib/program.js';
 
 // `specs`: { date, week, day?, key?, sets: [[w, r, rir?, extra?]], flags?, bw? } in order.
@@ -153,15 +153,25 @@ test('a clear surplus with RIR in every set → two steps, when that is still a 
   assert.equal(rec(s, { week: 2, category: 'iso' }).weight, 27.5);
 });
 
-test('week 1 uses 10–12 reps inside the recommendation; the program target is unchanged', () => {
-  assert.deepEqual(LIGHT_REPS, [10, 12]);
-  assert.equal(targetFor({ category: 'base' }, 1).reps, null);
+test('week 1 uses the target of the category: base 10–12, isolation 12–15', () => {
   let s = history([{ date: '2026-11-06', week: 1, sets: [[70, 12, 2], [70, 12, 2], [70, 12, 2]] }]);
   assert.deepEqual([rec(s, { week: 1 }).kind, rec(s, { week: 1 }).weight], ['up', 72.5]);
   s = history([{ date: '2026-11-06', week: 1, sets: [[70, 11, 2], [70, 12, 2], [70, 12, 2]] }]);
-  const r = rec(s, { week: 1 });
+  let r = rec(s, { week: 1 });
   assert.equal(r.kind, 'hold');
   assert.match(r.reasons.join(' '), /Цель — 12 повторений при RIR 2–3 во всех подходах по 70 кг/);
+  // Isolation: 12 reps is the bottom of 12–15, not the top — hold; 15 in every set — up.
+  s = history([{ date: '2026-11-06', week: 1, sets: [[30, 12, 2], [30, 12, 2], [30, 12, 2]] }], { category: 'iso' });
+  r = rec(s, { week: 1, category: 'iso' });
+  assert.deepEqual([r.kind, r.weight], ['hold', 30]);
+  assert.match(r.reasons.join(' '), /До верха диапазона 12–15 не дошли/);
+  assert.match(r.reasons.join(' '), /Цель — 15 повторений при RIR 2–3 во всех подходах по 30 кг/);
+  s = history([{ date: '2026-11-06', week: 1, sets: [[30, 15, 2], [30, 15, 3], [30, 14, 3]] }], { category: 'iso' });
+  r = rec(s, { week: 1, category: 'iso' });
+  assert.deepEqual([r.kind, r.weight], ['up', 32.5]);
+  // No target → no range, nothing invented.
+  r = recommend({ list: s.get('press'), session: today(1), target: null, category: 'iso', step: 2.5 });
+  assert.deepEqual([r.kind, r.weight], ['none', null]);
 });
 
 test('a break of more than 8 weeks → the old weight first', () => {
@@ -299,8 +309,9 @@ test('light week from a heavy one: «≈ weight (from–to)», marked as an appr
   assert.doesNotMatch(r.reasons.join(' '), /RIR 4/);
 });
 
-// Synthetic cycle: week 2 and week 3 from the same strength, then the light week (10–12 at RIR 2–3).
-// Its window of reps to failure (12–15) lies above week 2's (9–12), so the hint is lighter than week 2.
+// Synthetic cycle: week 2 and week 3 from the same strength, then the light week at RIR 2–3 with the reps
+// of the category (base 10–12, isolation 12–15). Its window of reps to failure (12–15 or 14–18) lies
+// above week 2's (9–12), so the hint is lighter than week 2.
 const cycle = (w2, w3, step, category = 'iso') => {
   const s = history([
     { date: '2026-11-03', week: 2, sets: w2 },
@@ -314,31 +325,41 @@ test('light week at RIR 2–3: heavier than at RIR 4–5, still below the week 2
   let r = cycle([[100, 10, 2], [100, 10, 1], [100, 9, 1], [100, 9, 1]], [[105, 7, 1], [105, 7, 1], [105, 6, 1], [105, 6, 0]], 2.5, 'base');
   assert.deepEqual([r.basis, r.weight, r.range], ['light', 87.5, [82.5, 90]]);
   assert.ok(r.weight < 100 && r.range[1] < 100);
-  // Isolation 40 kg: ≈ 35 (from 35 to 37,5), below 40.
+  // Isolation 40 kg, 12–15 since v1.6.0: ≈ 32,5 (from 30 to 35), below 40 (at 10–12 it was ≈ 35).
   r = cycle([[40, 10, 2], [40, 10, 1], [40, 9, 1]], [[42.5, 8, 1], [42.5, 7, 1], [42.5, 7, 0]], 2.5);
+  assert.deepEqual([r.weight, r.range], [32.5, [30, 35]]);
+  assert.match(r.reasons.join(' '), /Цель лёгкой недели — 12–15 при RIR 2–3\./);
+  // The same numbers on a base lift (10–12): heavier than isolation, still below week 2.
+  r = cycle([[40, 10, 2], [40, 10, 1], [40, 9, 1]], [[42.5, 8, 1], [42.5, 7, 1], [42.5, 7, 0]], 2.5, 'base');
   assert.deepEqual([r.weight, r.range], [35, [35, 37.5]]);
+  assert.match(r.reasons.join(' '), /Цель лёгкой недели — 10–12 при RIR 2–3\./);
 });
 
 test('light week never heavier than week 2 at the same strength; equal only where one step is over ~10% of the weight', () => {
   const grid = (w, s) => Math.round(w / s) * s;
   let n = 0;
-  for (const step of [1, 2, 2.5, 5]) {
-    for (let w2 = step * 3; w2 <= 200; w2 += step) {
-      for (const [r2, i2, r3, i3] of [[10, 2, 7, 1], [9, 1, 8, 0], [8, 2, 6, 1], [10, 1, 7, 0]]) {
-        const cap = w2 * (1 + (r2 + i2) / 30); // the same strength on week 3
-        const w3 = grid(cap / (1 + (r3 + i3) / 30), step);
-        const r = cycle([[w2, r2, i2], [w2, r2, i2], [w2, r2, i2]], [[w3, r3, i3], [w3, r3, i3], [w3, r3, i3]], step);
-        if (r.weight == null) continue;
-        n++;
-        assert.ok(r.weight <= w2, `step ${step}: week 2 ${w2}, light ${r.weight}`);
-        if (step / w2 < 0.1) assert.ok(r.weight < w2, `step ${step}: week 2 ${w2}, light ${r.weight}`);
+  for (const category of ['iso', 'base']) {
+    for (const step of [1, 2, 2.5, 5]) {
+      for (let w2 = step * 3; w2 <= 200; w2 += step) {
+        for (const [r2, i2, r3, i3] of [[10, 2, 7, 1], [9, 1, 8, 0], [8, 2, 6, 1], [10, 1, 7, 0]]) {
+          const cap = w2 * (1 + (r2 + i2) / 30); // the same strength on week 3
+          const w3 = grid(cap / (1 + (r3 + i3) / 30), step);
+          const r = cycle([[w2, r2, i2], [w2, r2, i2], [w2, r2, i2]], [[w3, r3, i3], [w3, r3, i3], [w3, r3, i3]], step, category);
+          if (r.weight == null) continue;
+          n++;
+          assert.ok(r.weight <= w2, `${category}, step ${step}: week 2 ${w2}, light ${r.weight}`);
+          if (step / w2 < 0.1) assert.ok(r.weight < w2, `${category}, step ${step}: week 2 ${w2}, light ${r.weight}`);
+        }
       }
     }
   }
-  assert.ok(n > 1000);
-  // Light dumbbells, step 2: week 2 14×10, week 3 16×7 → the nearest dumbbell is 14 again (range 12–14).
-  const r = cycle([[14, 10, 2], [14, 10, 1], [14, 9, 1]], [[16, 7, 1], [16, 7, 1], [16, 6, 0]], 2);
-  assert.deepEqual([r.weight, r.range], [14, [12, 14]]);
+  assert.ok(n > 2000);
+  // Light dumbbells, step 2: week 2 14×10, week 3 16×7. Isolation at 12–15 → 12 (range 12–14); a base
+  // lift at 10–12 → the nearest dumbbell is 14 again (one step is 14% of the weight).
+  let r = cycle([[14, 10, 2], [14, 10, 1], [14, 9, 1]], [[16, 7, 1], [16, 7, 1], [16, 6, 0]], 2);
+  assert.deepEqual([r.weight, r.range], [12, [12, 14]]);
+  r = cycle([[14, 10, 2], [14, 10, 1], [14, 9, 1]], [[16, 7, 1], [16, 7, 1], [16, 6, 0]], 2, 'base');
+  assert.equal(r.weight, 14);
 });
 
 test('pull-ups: whole load; a body-weight difference below a step is not recounted, a bigger one is', () => {
