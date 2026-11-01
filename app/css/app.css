@@ -3023,3 +3023,6 @@ textarea.nutr-instr {
 .ex-search__none { font-size: 13px; margin-top: 8px; }
 .ex-search__new { margin-top: 14px; }
 .ex-search__hint { font-size: 13px; margin-bottom: 8px; }
+.quick-pick .input { margin-bottom: 8px; }
+.quick-pick .choice[aria-pressed='true'] .choice__main { color: var(--accent-text); font-weight: 600; }
+.quick-pick .choice[aria-pressed='true'] .choice__sub { font-weight: 400; }

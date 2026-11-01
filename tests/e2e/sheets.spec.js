@@ -252,7 +252,7 @@ test('double taps: «Готово» adds a new exercise once and stays in the ed
   await page.getByRole('button', { name: 'Добавить упражнение' }).click();
   const sheet = page.getByRole('dialog', { name: 'Новое упражнение' });
   await settled(sheet);
-  await sheet.locator('.sheet__body input').first().fill('Жим в Смите');
+  await sheet.getByRole('textbox', { name: 'Название', exact: true }).fill('Жим в Смите');
   await sheet.getByLabel('Настройки: Жим в Смите').fill('скамья 3');
   const done = await sheet.getByRole('button', { name: 'Готово' }).boundingBox();
   await page.mouse.click(done.x + done.width / 2, done.y + done.height / 2);

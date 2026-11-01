@@ -343,7 +343,12 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       updatedAt: t,
       deleted: false,
     };
-    await save('sets', [rec]);
+    // A set logged on an exercise marked «Пропустить» (a superset done out of order, a stray tap):
+    // it is no longer skipped. Same write, so the mark and the set never disagree.
+    if (it.skipped) {
+      const items = s.items.map((x) => (x.slotId === slotId ? { ...x, skipped: false } : x));
+      await saveAll([['sets', [rec]], ['sessions', [{ ...s, items, updatedAt: stamp(s) }]]]);
+    } else await save('sets', [rec]);
     return { set: rec, duplicate: false };
   }
 

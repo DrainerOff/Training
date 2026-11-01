@@ -164,3 +164,21 @@ test('a set from a device whose clock runs ahead does not block logging here', a
   const r = await store.logSet(s.id, s.items[1].slotId, { weight: 90, reps: 9 });
   assert.equal(r.duplicate, false);
 });
+
+test('a set logged on an exercise marked «Пропустить» clears the mark in the same write (superset out of order)', async () => {
+  const { store, s, tick } = await setup();
+  const [, press, row] = s.items;
+  await store.updateItem(s.id, row.slotId, { skipped: true });
+  assert.equal(store.state.sessions.get(s.id).items[2].skipped, true);
+  tick(60_000);
+  await store.logSet(s.id, row.slotId, { weight: 70, reps: 10, rir: 1 });
+  const after = store.state.sessions.get(s.id);
+  assert.equal(after.items[2].skipped, false);
+  assert.equal(store.setsOf(s.id, row.slotId).length, 1);
+  // Queued for the sheet together with the set; other exercises untouched.
+  assert.equal(store.state.outbox.get(`sessions:${s.id}`)?.updatedAt, after.updatedAt);
+  assert.equal(after.items[1].skipped, undefined);
+  tick(60_000);
+  await store.logSet(s.id, press.slotId, { weight: 90, reps: 9, rir: 1 });
+  assert.equal(store.state.sessions.get(s.id).items[1].skipped, undefined, 'a set on a not skipped exercise does not rewrite the workout');
+});

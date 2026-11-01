@@ -28,6 +28,9 @@
 //    least two; their median by Epley. One strong set decides nothing.
 //  * Heavy week: the weight on the owner's grid (source weight ± steps) nearest to the middle of the
 //    week's window of reps to failure, with at least half a rep above its bottom — so it errs light.
+//    But not by a whole window: where one step is large for the weight (12 → 14,5 kg is +21%) and that
+//    weight lands above the window (too light, reps to spare), the next step up is taken when it misses
+//    the window by less and by at most one rep below it. The ⓘ says so.
 //  * Light week (10–12 reps at the RIR of its target, lib/program.js PHASE[1]) from a heavy one is a
 //    long way to recount: Epley and Brzycki differ by 3–9% there, so the hint is
 //    «≈ weight (from–to)» between the two. At the same strength it is never heavier than week 2: its
@@ -312,6 +315,7 @@ function estimate({
 
   let weight = null;
   let span = null;
+  let coarse = null;
   if (light) {
     const ep = EPLEY.load(C, aim) - body;
     const bz = aim < 30 ? BRZYCKI.load(cap(BRZYCKI), aim) - body : ep;
@@ -319,15 +323,34 @@ function estimate({
     span = [grid(Math.min(ep, bz)), grid(Math.max(ep, bz))];
     if (span[0] === span[1]) span = null;
   } else {
-    let best = null;
+    const cands = [];
     for (let k = -12; k <= 12; k++) {
       const w = round(top + k * step);
       if (w < 0 || (share === 0 && w <= 0)) continue;
-      const r = rtfAt(w);
-      if (r < lo + 0.5) continue;
-      if (!best || Math.abs(r - aim) < Math.abs(best.r - aim)) best = { w, r };
+      cands.push({ w, r: rtfAt(w) });
+    }
+    let best = null;
+    for (const c of cands) {
+      if (c.r < lo + 0.5) continue;
+      if (!best || Math.abs(c.r - aim) < Math.abs(best.r - aim)) best = c;
     }
     if (!best) return none();
+    // A step that is large for the weight (light dumbbells): the nearest allowed weight can land well
+    // above the window — reps to spare, no target hit. Then the next step up is taken when it is at most
+    // one rep below the window and misses it by over a rep less than the lighter one overshoots it (the
+    // lighter weight keeps one rep of advantage: it still errs light, just not by the whole window).
+    if (best.r > hi + 1) {
+      const up = cands.find((c) => c.w === round(best.w + step));
+      if (up) {
+        const n = (c) => fmtNum(Math.max(0, c.r), 0);
+        if (up.r >= lo - 1 && Math.max(0, lo - up.r) + 1 < best.r - hi) {
+          coarse = `Шаг ${fmtNum(step)} кг для этого веса крупный: при ${load(best.w)} выходит около ${n(best)} повторений до отказа — легче цели, при ${load(up.w)} — около ${n(up)}. Взят ${load(up.w)}: он ближе к цели.`;
+          best = up;
+        } else {
+          coarse = `Шаг ${fmtNum(step)} кг для этого веса крупный: при ${load(up.w)} выходит около ${n(up)} повторений до отказа — тяжелее цели, поэтому ${load(best.w)}.`;
+        }
+      }
+    }
     weight = best.w;
   }
 
@@ -344,6 +367,7 @@ function estimate({
     reasons.push(`Цель лёгкой недели — ${goal}. Такой пересчёт неточен: ${span ? `формулы дают от ${load(span[0])} до ${load(span[1])}, ` : ''}ошибка около ±10%.`);
   } else {
     reasons.push(`По этим подходам при ${load(weight)} выходит около ${fmtNum(rtfAt(weight), 0)} повторений до отказа (повторения + RIR); цель недели — ${goal}.`);
+    if (coarse) reasons.push(coarse);
   }
   reasons.push(...notes);
   const down = Math.max(0, round(weight - step));
