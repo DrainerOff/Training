@@ -752,6 +752,9 @@ p {
   flex-wrap: wrap;
   gap: 6px;
 }
+.prev__label--old {
+  margin-top: 10px;
+}
 .ghost {
   display: inline-flex;
   align-items: baseline;
@@ -1199,6 +1202,10 @@ p {
 }
 .dock__rec--up .dock__rec-why b {
   color: var(--accent-text);
+}
+/* A weight drop: «нарочно?» in place of the recommendation, until answered. */
+.dock__ask .dock__rec-why b {
+  color: var(--caution);
 }
 .dock__rec-label,
 .dock__rec-why b {

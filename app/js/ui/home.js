@@ -59,12 +59,14 @@ export function Home({ syncStatus }) {
     <ul class="plan-list" aria-label="Упражнения">
       ${items.map((it) => {
         const p = previousExposures(series.get(it.seriesKey), { week: plan.week, sessionId: '', date: plan.date });
-        const ref = p.samePhase || p.latest;
+        // Since the latest «новая точка отсчёта»; what was before it only when nothing since.
+        const ref = p.samePhase || p.latest || p.old;
+        const what = p.samePhase ? 'прошлый раз на этой неделе' : p.latest ? `последний раз (неделя ${ref.week})` : `до новой точки отсчёта (неделя ${ref?.week})`;
         return html`<li>
           <span class="plan-list__name">${it.name}</span>
           <span class="plan-list__target">${fmtTarget(itemTarget(it, plan.week))}</span>
           <span class="plan-list__prev">${ref
-            ? `${p.samePhase ? 'прошлый раз на этой неделе' : `последний раз (неделя ${ref.week})`}: ${ref.sets.map((s) => `${fmtWeight(s.weight, it.category)}×${s.reps}`).join(', ')}`
+            ? `${what}: ${ref.sets.map((s) => `${fmtWeight(s.weight, it.category)}×${s.reps}`).join(', ')}`
             : 'ещё не выполнялось'}</span>
         </li>`;
       })}

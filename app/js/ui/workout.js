@@ -7,7 +7,7 @@ import {
 import { derived, latestBodyweight, recordsDerived, exercisesNow } from './derive.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
-import { previousExposures, compareExposures } from '../lib/plateau.js';
+import { previousExposures, compareExposures, weightDrop } from '../lib/plateau.js';
 import { recommend, fmtLoad, BASIS } from '../lib/recommend.js';
 import { searchExercises, findExact, setMainOption } from '../lib/exercises.js';
 import { fmtNum, fmtDay, fmtDayShort, fmtDuration, plural, isoDate } from '../lib/util.js';
@@ -27,6 +27,7 @@ function buildRows(session) {
       sessionId: session.id,
       date: session.date,
       startedAt: session.startedAt,
+      baseline: !!item.flags?.baseline,
     });
     // A suggestion beside «Прошлый раз», never written into the composer by itself.
     const rec = recommend({
@@ -163,18 +164,25 @@ function ExerciseRow({ row, onOpen }) {
 
 function PrevHint({ prevs, session, category }) {
   const p = prevs.samePhase || prevs.latest;
-  if (!p) return html`<div class="prev"><div class="prev__label">Это упражнение ещё не выполнялось — начните с комфортного веса.</div></div>`;
-  const where = prevs.samePhase
-    ? p.cycle !== session.cycle
-      ? `Цикл ${p.cycle}, та же неделя, ${fmtDay(p.date)}`
-      : `Неделя ${p.week}, ${fmtDay(p.date)}`
-    : `Последний раз — неделя ${p.week} (другая фаза), ${fmtDay(p.date)}`;
+  // Before a «новая точка отсчёта»: shown for reference when this week has no result since the mark.
+  const old = !prevs.samePhase ? prevs.old : null;
+  if (!p && !old) return html`<div class="prev"><div class="prev__label">Это упражнение ещё не выполнялось — начните с комфортного веса.</div></div>`;
+  const sets = (e) => html`<div class="prev__sets" aria-label="Прошлый результат, подсказка">
+    ${e.sets.map((s) => html`<span class="ghost">${fmtWeight(s.weight, category)}×${s.reps}${s.rir != null ? html`<small>RIR ${fmtNum(s.rir)}</small>` : null}</span>`)}
+    ${e.drops.map((s) => html`<span class="ghost"><small>дроп</small> ${fmtWeight(s.weight, category)}×${s.reps}</span>`)}
+  </div>`;
+  const where = !p
+    ? null
+    : prevs.samePhase
+      ? p.cycle !== session.cycle
+        ? `Цикл ${p.cycle}, та же неделя, ${fmtDay(p.date)}`
+        : `Неделя ${p.week}, ${fmtDay(p.date)}`
+      : `Последний раз — неделя ${p.week} (другая фаза), ${fmtDay(p.date)}`;
   return html`<div class="prev">
-    <div class="prev__label">${where}</div>
-    <div class="prev__sets" aria-label="Прошлый результат, подсказка">
-      ${p.sets.map((s) => html`<span class="ghost">${fmtWeight(s.weight, category)}×${s.reps}${s.rir != null ? html`<small>RIR ${fmtNum(s.rir)}</small>` : null}</span>`)}
-      ${p.drops.map((s) => html`<span class="ghost"><small>дроп</small> ${fmtWeight(s.weight, category)}×${s.reps}</span>`)}
-    </div>
+    ${p ? html`<div class="prev__label">${where}</div>${sets(p)}` : null}
+    ${old
+      ? html`<div class=${'prev__label' + (p ? ' prev__label--old' : '')}>До новой точки отсчёта (${prevs.mark === session.date ? 'отмечена сегодня' : `с ${fmtDay(prevs.mark)}`}): ${old.week !== session.week ? `неделя ${old.week}, ` : ''}${fmtDay(old.date)} — только для справки</div>${sets(old)}`
+      : null}
   </div>`;
 }
 
@@ -284,13 +292,16 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const category = item.category;
   const dropDue = target.drop > 0 && working >= target.sets && drops < target.drop;
   const [dropMode, setDropMode] = useState(dropDue);
-  const prevRef = prevs.samePhase || prevs.latest;
+  // After a «новая точка отсчёта» without a result of this week since, nothing from before the mark
+  // (nor another week) is a weight to start from: the «Ориентир» if there is one, else an empty field.
+  const cut = !!prevs.mark && !prevs.samePhase;
+  const prevRef = cut ? null : prevs.samePhase || prevs.latest;
   const otherPhase = !prevs.samePhase && !!prevs.latest;
   let sug = suggestNext({ todaySets: sets, prev: prevRef, target, step: item.step, drop: dropMode });
   // A light week not done yet: the heavy week's weight would be far too heavy, so the first set
   // starts from the approximate «Ориентир» (lib/recommend.js) instead.
-  const lightHint = row.rec?.basis === 'light' && row.rec.weight != null ? row.rec : null;
-  if (lightHint && !dropMode && sug.source !== 'today') sug = { weight: lightHint.weight, reps: lightHint.reps?.[0] ?? sug.reps, source: 'estimate' };
+  const hint = row.rec?.kind === 'estimate' && row.rec.weight != null && (row.rec.basis === 'light' || cut) ? row.rec : null;
+  if (hint && !dropMode && sug.source !== 'today') sug = { weight: hint.weight, reps: hint.reps?.[0] ?? sug.reps, source: 'estimate' };
   if (sug.weight == null && category === 'pullup') sug.weight = 0;
   // Another week's result is a weight reference only; reps follow today's target.
   if (sug.source === 'prev' && otherPhase && target.reps && sug.reps != null) {
@@ -314,6 +325,20 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const lastAt = allSets.length ? Math.max(...allSets.map((s) => s.createdAt)) : null;
   const now = useNow(1000, live && !!lastAt);
   const rest = live && lastAt && now - lastAt < 30 * 60 * 1000 ? fmtDuration((now - lastAt) / 1000) : null;
+
+  // Today's weight 10%+ below the same week last time: was it meant? Asked in place of the
+  // recommendation line (which would say «закрепить» the old weight) until answered.
+  const askKey = `drop-ask:${session.id}:${item.slotId}`;
+  const [noAskYet, setNoAskYet] = useState(() => !local.get(askKey));
+  const drop = noAskYet ? weightDrop({ todaySets: sets, ref: prevs.samePhase, category, flags: item.flags || {} }) : null;
+  const markBaseline = async () => {
+    await app.store.updateItem(session.id, item.slotId, { flags: { baseline: true } });
+    app.ui.toast('Отмечено: новая точка отсчёта');
+  };
+  const noAsk = () => {
+    local.set(askKey, true);
+    setNoAskYet(false);
+  };
 
   const n = sets.length + 1;
   // Set number first: on a narrow screen the exercise name is what gets truncated.
@@ -368,7 +393,11 @@ function Dock({ row, session, live, onLogged, justLogged }) {
       ${rest ? html`<span class="dock__rest" aria-label=${'Отдых ' + rest}>отдых ${rest}</span>` : null}
     </div>
     <${LastTime} prevs=${prevs} category=${category} index=${working} drop=${dropMode} />
-    ${dropMode ? null : html`<${Recommendation} rec=${row.rec} category=${category} current=${v.weight} onUse=${(w) => update({ weight: w, touchedW: true })} />`}
+    ${dropMode
+      ? null
+      : drop
+        ? html`<${DropAsk} drop=${drop} item=${item} onMark=${markBaseline} onNo=${noAsk} />`
+        : html`<${Recommendation} rec=${row.rec} category=${category} current=${v.weight} onUse=${(w) => update({ weight: w, touchedW: true })} />`}
     <div class="dock__grid">
       <div>
         <div class="field__label"><span>${category === 'pullup' ? 'Доп. вес, кг' : 'Вес, кг'}</span><span class="field__hint">${weightHint}</span></div>
@@ -396,20 +425,49 @@ function Dock({ row, session, live, onLogged, justLogged }) {
 // another week, marked as another phase — a reference for the weight, not a comparison.
 // Nothing is invented when there is no history.
 function LastTime({ prevs, category, index, drop }) {
-  const p = prevs.samePhase || prevs.latest;
+  const p = prevs.samePhase || prevs.latest || prevs.old;
   if (!p) {
     return html`<div class="dock__prev" role="note" data-kind="first"><span class="dock__prev-label">Первое выполнение</span></div>`;
   }
-  const other = !prevs.samePhase;
+  // Before a «новая точка отсчёта» — only when nothing since the mark: a reference, not a target.
+  const kind = prevs.samePhase ? 'same' : prevs.latest ? 'other' : 'before';
   const list = drop && p.drops.length ? p.drops : p.sets;
   const now = drop ? (p.drops.length ? 0 : -1) : index;
   const sets = list.map((s) => `${fmtWeight(s.weight, category)}×${s.reps}`);
-  const label = other ? `Другая фаза, неделя ${p.week}` : 'Прошлый раз';
-  return html`<div class=${'dock__prev' + (other ? ' dock__prev--other' : '')} role="note" data-kind=${other ? 'other' : 'same'}
+  const label = kind === 'same' ? 'Прошлый раз' : kind === 'other' ? `Другая фаза, неделя ${p.week}` : `До новой точки отсчёта, неделя ${p.week}`;
+  return html`<div class=${'dock__prev' + (kind !== 'same' ? ' dock__prev--other' : '')} role="note" data-kind=${kind}
     aria-label=${`${label}, ${fmtDay(p.date)}: ${sets.join(', ')}`}>
-    <span class="dock__prev-label">${other ? `Другая фаза · нед. ${p.week}` : 'Прошлый раз'}</span>
+    <span class="dock__prev-label">${kind === 'same' ? 'Прошлый раз' : kind === 'other' ? `Другая фаза · нед. ${p.week}` : `До отсчёта · нед. ${p.week}`}</span>
     <span class="dock__prev-sets num">${sets.map((t, i) => html`<span class=${i === now ? 'is-now' : null}>${t}</span>`)}</span>
     <span class="dock__prev-date">${fmtDayShort(p.date)}</span>
+  </div>`;
+}
+
+// A deliberate drop? One line where the recommendation stands: «−13% · нарочно?», «Да» sets
+// «Новая точка отсчёта» for this exercise today (the same as in «Отметки и комментарий»), «Нет»
+// hides it for this workout. ⓘ says it in full. Nothing blocks logging.
+function DropAsk({ drop, item, onMark, onNo }) {
+  const kg = (w) => `${fmtWeight(w, item.category)}\u00a0кг`;
+  const full = `Вес на ${drop.pct}% ниже, чем ${fmtDay(drop.date)}: было ${kg(drop.was)}, сегодня ${kg(drop.now)}.`;
+  const info = () => openSheet((close) => html`<${Sheet} title="Вес ниже прошлого раза" onClose=${close}>
+    <p class="rec-sheet__head"><b>${full}</b></p>
+    <ul class="rec-sheet__why">
+      <li>Если вы снизили вес нарочно — ради техники, полной амплитуды или других настроек тренажёра, — отметьте новую точку отсчёта. Тогда сравнение начнётся с сегодняшней тренировки: ни просадки, ни регресса, а «Прошлый раз» и подсказки пойдут от нового веса.</li>
+      <li>Если это просто тяжёлый день, ничего не отмечайте: результат сравнится с прошлым как обычно.</li>
+      <li>Отметку можно снять или поставить позже в «Отметки и комментарий», в том числе из «Истории».</li>
+    </ul>
+    <div class="btn-row">
+      <button type="button" class="btn btn--primary" onClick=${() => { close(); onMark(); }}>Отметить точку отсчёта</button>
+      <button type="button" class="btn" onClick=${() => { close(); onNo(); }}>Нет, это просадка</button>
+    </div>
+  <//>`);
+  return html`<div class="dock__rec dock__ask" role="note" aria-label=${`${full} Снизили нарочно?`}>
+    <button type="button" class="dock__rec-why" onClick=${info} aria-label=${`${full} Снизили нарочно? Подробнее`}>
+      <span class="dock__rec-label">Вес</span><b class="num">−${drop.pct}%</b><span class="dock__rec-tag">· нарочно?</span>
+      <${Icon} name="info" />
+    </button>
+    <button type="button" class="dock__rec-use" onClick=${onMark} aria-label="Да, отметить новую точку отсчёта">Да</button>
+    <button type="button" class="dock__rec-use" onClick=${onNo} aria-label="Нет, это просадка">Нет</button>
   </div>`;
 }
 

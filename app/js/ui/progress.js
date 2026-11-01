@@ -3,7 +3,7 @@
 import { html, useState, app, Icon, WeekMark, Seg, fmtWeight, SetText, local } from './core.js';
 import { RecordsOverview, openRecordSheet } from './records.js';
 import { derived } from './derive.js';
-import { overview, seriesStatus, STATUS } from '../lib/plateau.js';
+import { overview, seriesStatus, bySessionOrder, STATUS } from '../lib/plateau.js';
 import { CATEGORY } from '../lib/program.js';
 import { fmtDay, fmtDayShort, fmtNum, median } from '../lib/util.js';
 import { describeComparison } from './describe.js';
@@ -108,7 +108,7 @@ export function ExerciseDetail({ seriesKey }) {
       ]} />
 
     <div style="margin:12px 0 4px">
-      <${SetsChart} exposures=${shown} category=${category} />
+      <${SetsChart} exposures=${shown} category=${category} marks=${list.filter((e) => e.flags.baseline)} />
     </div>
 
     <h2 class="section-title">Все тренировки</h2>
@@ -138,10 +138,13 @@ export function ExerciseDetail({ seriesKey }) {
 
 // ---------------------------------------------------------------- sparkline
 
-// The trend of the last heavy-week workouts in a row of the list: the best set of each workout.
-// Bodyweight pull-ups follow the reps. Fewer than two workouts: a dashed stub, no line.
+// The trend of the last heavy-week workouts in a row of the list: the best set of each workout, since
+// the latest «новая точка отсчёта» (no cliff from the old weight). Bodyweight pull-ups follow the
+// reps. Fewer than two workouts: a dashed stub, no line.
 function Spark({ exposures, category, tone }) {
-  const heavy = exposures.filter((e) => !e.active && e.week !== 1 && e.sets.length).slice(-6);
+  const done = exposures.filter((e) => !e.active);
+  const from = Math.max(0, done.findLastIndex((e) => e.flags.baseline));
+  const heavy = done.slice(from).filter((e) => e.week !== 1 && e.sets.length).slice(-6);
   const byReps = category === 'pullup' && !heavy.some((e) => e.sets.some((s) => s.weight > 0));
   const vals = heavy.map((e) => Math.max(...e.sets.map((s) => (byReps ? s.reps || 0 : value(s, category)))));
   const w = 44;
@@ -188,7 +191,9 @@ function niceTicks(lo, hi, n = 4) {
 
 // Every working set as a dot (not only the best one), the median of each workout as a line.
 // One y-axis; weeks are separate series (blue = week 2, red = week 3, green ring = week 1).
-export function SetsChart({ exposures, category }) {
+// A «новая точка отсчёта» (`marks` — those exposures, any week) is a dashed vertical line between the
+// last workout shown before it and the first on or after it; the median lines do not cross it.
+export function SetsChart({ exposures, category, marks = [] }) {
   const [tip, setTip] = useState(null);
   const pts = exposures.filter((e) => e.sets.length);
   if (category === 'pullup' && !pts.some((e) => e.sets.some((s) => s.weight > 0))) {
@@ -208,10 +213,14 @@ export function SetsChart({ exposures, category }) {
   hi = Math.max(hi, ticks[ticks.length - 1]);
   const x = (i) => M.l + (pts.length === 1 ? (W - M.l - M.r) / 2 : (i * (W - M.l - M.r)) / (pts.length - 1));
   const y = (v) => M.t + (1 - (v - lo) / (hi - lo)) * (H - M.t - M.b);
+  // Index of the first point on or after each mark; a mark before every shown point or after the last
+  // one has nothing to divide and is not drawn.
+  const cuts = [...new Set(marks.map((m) => pts.findIndex((e) => bySessionOrder(e, m) >= 0)))].filter((i) => i > 0).sort((a, b) => a - b);
+  const segOf = (i) => cuts.filter((c) => c <= i).length;
   const weeks = [...new Set(pts.map((e) => e.week))].sort();
   const lines = weeks.map((w) => {
     const ps = pts.map((e, i) => ({ e, i })).filter((p) => p.e.week === w);
-    const d = ps.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(median(p.e.sets.map((s) => value(s, category)))).toFixed(1)}`).join(' ');
+    const d = ps.map((p, k) => `${k && segOf(p.i) === segOf(ps[k - 1].i) ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(median(p.e.sets.map((s) => value(s, category)))).toFixed(1)}`).join(' ');
     return { w, d, n: ps.length };
   });
   const labelEvery = Math.max(1, Math.ceil(pts.length / 5));
@@ -233,6 +242,14 @@ export function SetsChart({ exposures, category }) {
         ? html`<text x=${x(i)} y=${H - 6} text-anchor="middle" font-size="11" fill="var(--steel)">${fmtDayShort(e.date)}</text>`
         : null))}
       <rect x=${x(sel) - 14} y=${M.t} width="28" height=${H - M.t - M.b} rx="6" fill="var(--press)" />
+      ${cuts.map((i) => {
+        const cx = (x(i - 1) + x(i)) / 2;
+        const right = cx > W - 90;
+        return html`<g class="chart__mark" aria-hidden="true">
+          <line x1=${cx} x2=${cx} y1=${M.t} y2=${H - M.b} stroke="var(--steel)" stroke-width="1.5" stroke-dasharray="4 4" />
+          <text x=${right ? cx - 4 : cx + 4} y=${M.t + 9} text-anchor=${right ? 'end' : 'start'} font-size="10" fill="var(--steel)">новая точка</text>
+        </g>`;
+      })}
       ${lines.map((l) => (l.n > 1 ? html`<path d=${l.d} fill="none" stroke=${`var(--plate-${l.w})`} stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />` : null))}
       ${pts.map((e, i) => e.sets.map((s) => html`<circle cx=${x(i)} cy=${y(value(s, category))} r="4.5"
         fill=${e.week === 1 ? 'var(--paper)' : `var(--plate-${e.week})`} stroke=${e.week === 1 ? 'var(--plate-1)' : 'var(--paper)'} stroke-width="2" />`))}
@@ -241,11 +258,11 @@ export function SetsChart({ exposures, category }) {
         onClick=${(ev) => show(i, ev)} onFocus=${() => show(i)} />`)}
     </svg>
     <div class="chart__readout" aria-live="polite">
-      ${fmtDay(pts[sel].date)}, неделя ${pts[sel].week}${tip == null ? ' (последняя; нажмите на столбец, чтобы выбрать)' : ''}
+      ${fmtDay(pts[sel].date)}, неделя ${pts[sel].week}${pts[sel].flags?.baseline ? ', новая точка отсчёта' : ''}${tip == null ? ' (последняя; нажмите на столбец, чтобы выбрать)' : ''}
       <strong>${pts[sel].sets.map((s) => `${fmtWeight(s.weight, category)}×${s.reps}`).join('   ')}</strong>
     </div>
     <figcaption class="muted" style="font-size:12px;padding:2px 8px 4px">${category === 'pullup'
       ? 'Точки — дополнительный вес каждого подхода, линия — медиана тренировки.'
-      : 'Точки — каждый рабочий подход (расчётный максимум по весу и повторениям), линия — медиана тренировки.'}</figcaption>
+      : 'Точки — каждый рабочий подход (расчётный максимум по весу и повторениям), линия — медиана тренировки.'}${cuts.length ? ' Пунктир — новая точка отсчёта: сравнение начинается заново.' : ''}</figcaption>
   </figure>`;
 }
