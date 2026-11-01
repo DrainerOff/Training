@@ -6,15 +6,23 @@
 
 import { normName, slugify, uid, plural } from './util.js';
 
+// `lightReps` — the light week's reps (week 1, since v1.6.0). Base lifts and Hammer 10–12, isolation
+// (and calves without their own reps) 12–15, both at the RIR of PHASE[1]. Muscle growth is about the
+// same across these ranges when sets end near failure (Schoenfeld et al. 2021, the repetition
+// continuum), so the split is about the rest: isolation at 12–15 is ~15% lighter than week 2 instead of
+// ~10%, easier on elbows and shoulders before two heavy weeks; compound lifts stay at 12 or fewer,
+// where RIR is judged better (Halperin et al. 2022: errors grow in sets over 12 reps) and a set is not
+// cut short by breathing. Pull-ups keep 3×6 on every week (`reps`).
 export const CATEGORY = {
-  base: { label: 'Базовое', heavySets: 4 },
-  hammer: { label: 'Hammer', heavySets: 3 },
+  base: { label: 'Базовое', heavySets: 4, lightReps: [10, 12] },
+  hammer: { label: 'Hammer', heavySets: 3, lightReps: [10, 12] },
   pullup: { label: 'Подтягивания', heavySets: 3, reps: [6, 6] },
-  iso: { label: 'Изоляция', heavySets: 3 },
-  calves: { label: 'Икры', heavySets: 3, dropOnWeek: 3 },
+  iso: { label: 'Изоляция', heavySets: 3, lightReps: [12, 15] },
+  calves: { label: 'Икры', heavySets: 3, dropOnWeek: 3, lightReps: [12, 15] },
 };
 export const CATEGORY_KEYS = Object.keys(CATEGORY);
 
+// Week 1 has no single rep range: it comes from the category (CATEGORY[].lightReps).
 export const PHASE = {
   1: { title: 'Лёгкая неделя', reps: null, rir: [2, 3] },
   2: { title: 'Тяжёлая неделя', reps: [8, 10], rir: [1, 2] },
@@ -25,20 +33,21 @@ export const WEEKS = [1, 2, 3];
 export function phaseSummary(week) {
   const p = PHASE[week];
   if (!p) return '';
-  if (!p.reps) return `3 подхода, RIR\u00a0${fmtRange(p.rir)}`;
+  if (!p.reps) return `3 подхода, базовые ${fmtRange(CATEGORY.base.lightReps)}, изоляция ${fmtRange(CATEGORY.iso.lightReps)}, RIR\u00a0${fmtRange(p.rir)}`;
   return `${fmtRange(p.reps)} повторений, RIR\u00a0${fmtRange(p.rir)}`;
 }
 
 // Target for a slot in a given week of the 3-week cycle.
-// Light week: 3 working sets for everything, RIR of PHASE[1].
+// Light week: 3 working sets for everything, RIR of PHASE[1], reps of the category (lightReps).
 // Heavy weeks: base lifts 4 sets, Hammer / pull-ups / isolation 3 sets.
 // Pull-ups are always 3×6 strict. Calves get one extra drop set on week 3.
+// The slot's own sets/reps for a week (overrides) win, e.g. calves 10–12 on every week.
 export function targetFor(slot, week) {
   const cat = CATEGORY[slot?.category] || CATEGORY.iso;
   const ph = PHASE[week] || PHASE[1];
   const t = {
     sets: week === 1 ? 3 : cat.heavySets,
-    reps: cat.reps || ph.reps,
+    reps: cat.reps || (week === 1 ? cat.lightReps || null : ph.reps),
     rir: cat.noRir ? null : ph.rir,
     drop: cat.dropOnWeek === week ? 1 : 0,
   };

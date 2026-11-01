@@ -9,10 +9,23 @@ test('light week: 3 sets for everything, RIR 2–3', () => {
     assert.deepEqual(t.rir, [2, 3]);
     assert.equal(t.drop, 0);
   }
-  assert.equal(phaseSummary(1), '3 подхода, RIR\u00a02–\u20603');
-  assert.equal(fmtTarget(targetFor({ category: 'base' }, 1)), '3 подхода, RIR\u00a02–\u20603');
   // Calves keep their own reps on week 1, the RIR comes from the week.
   assert.equal(fmtTarget(targetFor({ category: 'calves', overrides: { 1: { sets: 3, reps: [10, 12] } } }, 1)), '3 × 10–\u206012, RIR\u00a02–\u20603');
+});
+
+test('light week reps by category (v1.6.0): base and Hammer 10–12, isolation 12–15, pull-ups 6', () => {
+  const reps = (category) => targetFor({ category }, 1).reps;
+  assert.deepEqual(['base', 'hammer', 'iso', 'calves', 'pullup'].map(reps), [[10, 12], [10, 12], [12, 15], [12, 15], [6, 6]]);
+  assert.equal(fmtTarget(targetFor({ category: 'base' }, 1)), '3 × 10–\u206012, RIR\u00a02–\u20603');
+  assert.equal(fmtTarget(targetFor({ category: 'iso' }, 1)), '3 × 12–\u206015, RIR\u00a02–\u20603');
+  assert.equal(fmtTarget(targetFor({ category: 'pullup' }, 1)), '3 × 6, RIR\u00a02–\u20603');
+  // An unknown category is isolation; the week's own sets/reps still win.
+  assert.deepEqual(targetFor({ category: 'nope' }, 1).reps, [12, 15]);
+  assert.deepEqual(targetFor({ category: 'iso', overrides: { 1: { sets: 2, reps: [8, 10] } } }, 1), { sets: 2, reps: [8, 10], rir: [2, 3], drop: 0 });
+  assert.equal(phaseSummary(1), '3 подхода, базовые 10–\u206012, изоляция 12–\u206015, RIR\u00a02–\u20603');
+  // Heavy weeks are unchanged.
+  assert.deepEqual([2, 3].map((w) => targetFor({ category: 'iso' }, w).reps), [[8, 10], [6, 8]]);
+  assert.equal(phaseSummary(2), '8–\u206010 повторений, RIR\u00a01–\u20602');
 });
 
 test('the number of sets in rows does not change: base 4 on heavy weeks, pull-ups 3×6', () => {

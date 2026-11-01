@@ -178,13 +178,15 @@ test('moving the two exercises in the program editor keeps keys, notes, steps an
       await store.deleteSession(store.liveSessions().find((s) => s.status === 'active').id);
     });
 
-    // Cycle 2, week 1, day 3: the seated press is at place 5 with its day 4 history, light week «3 подхода, RIR 2–3».
+    // Cycle 2, week 1, day 3: the seated press is at place 5 with its day 4 history, light week: 3 sets at RIR 2–3,
+    // reps by category since v1.6.0 (the seated press is isolation in this program: 12–15).
     await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 1, day: 3, date: '2026-11-03' }));
-    await expect(page.locator('.wk-sub')).toHaveText('Цикл 2, лёгкая неделя 1: 3 подхода, RIR 2–⁠3');
+    await expect(page.locator('.wk-sub')).toHaveText('Цикл 2, лёгкая неделя 1: 3 подхода, базовые 10–\u206012, изоляция 12–\u206015, RIR\u00a02–\u20603');
     await page.getByRole('button', { name: /^Жим сидя на плечи/ }).click();
     await expect(page.locator('.dock__prev')).toHaveAttribute('aria-label', /31 октября: 32,5×8/);
     await expect(page.locator('.dock__rec')).toHaveAttribute('data-kind', 'estimate');
     await expect(dock(page)).toContainText('Подход 1 из 3');
+    await expect(page.locator('.panel__target')).toHaveText('3 × 12–\u206015, RIR\u00a02–\u20603');
   } finally {
     gas.server.close();
   }

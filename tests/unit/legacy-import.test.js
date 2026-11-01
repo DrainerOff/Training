@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SNAPSHOT } from '../fixtures/synthetic/gsheets-snapshot.js';
 import { convertSnapshot, serialToISO } from '../helpers/legacy-import.js';
-import { targetFor } from '../../app/js/lib/program.js';
+import { targetFor, CATEGORY } from '../../app/js/lib/program.js';
 import { nextWorkout } from '../../app/js/lib/planner.js';
 
 const data = convertSnapshot();
@@ -39,7 +39,9 @@ test('program: sets and reps of every slot equal the sheet for all three weeks',
   for (const r of SNAPSHOT.program.rows) {
     const slot = slots.get(r[1]);
     const [r2, r3] = String(r[8]).split('/').map(range);
-    const want = { 1: [Number(r[5]), range(r[7])], 2: [Number(r[6]), r2], 3: [Number(r[6]), r3] };
+    // Week 1 «не задано» («выбирай по упражнению»): the light-week reps of the category since v1.6.0.
+    const r1 = range(r[7]) || CATEGORY[slot.category].lightReps;
+    const want = { 1: [Number(r[5]), r1], 2: [Number(r[6]), r2], 3: [Number(r[6]), r3] };
     for (const w of [1, 2, 3]) {
       const t = targetFor(slot, w);
       assert.deepEqual([t.sets, t.reps], want[w], `${r[1]} week ${w}`);

@@ -129,19 +129,21 @@ test('light week: «Ориентир» (with a range when the two formulas diffe
   await open(page);
   await absPhone(page, pressHistory());
   await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 1, day: 1, date: '2026-10-30' }));
-  await expect(page.locator('.wk-sub')).toHaveText('Цикл 2, лёгкая неделя 1: 3 подхода, RIR\u00a02–\u20603');
+  await expect(page.locator('.wk-sub')).toHaveText('Цикл 2, лёгкая неделя 1: 3 подхода, базовые 10–\u206012, изоляция 12–\u206015, RIR\u00a02–\u20603');
+  // Each exercise shows its own light-week reps (v1.6.0): the press is isolation, 12–15; the bench press is base, 10–12.
+  await expect(page.locator('.ex', { hasText: 'Жим штанги лежа' }).first()).toContainText('3 × 10–\u206012, RIR\u00a02–\u20603');
   await page.getByRole('button', { name: /^Пресс в тренажере/ }).click();
-  await expect(page.locator('.panel__target')).toHaveText('3 подхода, RIR\u00a02–\u20603');
-  // RIR 2–3 since v1.4.2: here both formulas give 32,5 on the 2,5 kg grid, so no range (at RIR 4–5 it was 30, from 30 to 32,5).
-  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 32,5 кг');
+  await expect(page.locator('.panel__target')).toHaveText('3 × 12–\u206015, RIR\u00a02–\u20603');
+  // Isolation at 12–15 (v1.6.0): lighter than at 10–12 (32,5 then), and the two formulas differ by two steps here.
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 30 кг (от 27,5 кг до 32,5 кг)');
   await expect(dock(page)).toContainText('ориентир, ≈');
   const label = await rec(page).getAttribute('aria-label');
   const w = label.match(/приблизительно: ([\d,]+) кг/)[1];
-  await expect(logButton(page)).toContainText(`${w} ×`);
+  await expect(logButton(page)).toContainText(`${w} × 12`);
   await rec(page).getByRole('button', { name: /Почему/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Приблизительная оценка по другой неделе');
   await expect(page.getByRole('dialog')).toContainText('Лёгкой недели в истории этого варианта ещё нет');
-  await expect(page.getByRole('dialog')).toContainText('Цель лёгкой недели — 10–12 при RIR 2–3.');
+  await expect(page.getByRole('dialog')).toContainText('Цель лёгкой недели — 12–15 при RIR 2–3.');
   await expect(page.getByRole('dialog')).toContainText('Если первый подход тяжелее RIR 2 — снизьте вес.');
 });
 
