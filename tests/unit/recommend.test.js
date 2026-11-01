@@ -379,3 +379,53 @@ test('every answer says how it was made', () => {
   assert.equal(rec(s, { week: 1 }).basis, 'light');
   assert.equal(rec(new Map(), { week: 2 }).basis, null);
 });
+
+// ---------------------------------------------------------------- v1.4.3: a step large for the weight
+
+test('regression: light dumbbells, step 2,5 — «Ориентир» goes up a step instead of staying a whole window too light', () => {
+  // Week 2: 10×11 at RIR 3 (14 reps to failure). Week 3 (6–8 at RIR 0–1, 6–9 to failure): 10 kg would
+  // be ≈14 again (a whole window above), 12,5 kg ≈5 — one step up is nearer to the target.
+  const s = history([{ date: '2026-11-06', week: 2, sets: [[10, 11, 3], [10, 11, 3], [10, 11, 3]] }], { category: 'iso' });
+  const r = rec(s, { week: 3, category: 'iso' });
+  assert.deepEqual([r.kind, r.basis, r.weight], ['estimate', 'heavy', 12.5]);
+  const why = r.reasons.join(' ');
+  assert.match(why, /Шаг 2,5 кг для этого веса крупный: при 10 кг выходит около 14 повторений до отказа — легче цели, при 12,5 кг — около 5\. Взят 12,5 кг: он ближе к цели\./);
+  assert.match(why, /Если первый подход пойдёт тяжелее плана — следующий 10 кг/);
+  // Today's first set still corrects it by a step either way.
+  assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 4, rir: 0 }] }).weight, 10);
+  assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 8, rir: 3 }] }).weight, 15);
+});
+
+test('a step large for the weight: the lighter weight stays when the next step is far too heavy or only a rep is at stake', () => {
+  const at = (sets, step) => {
+    const s = history([{ date: '2026-11-06', week: 2, sets }], { category: 'iso' });
+    return recommend({ list: s.get('press'), session: today(3), target: targetFor({ category: 'iso' }, 3), category: 'iso', step });
+  };
+  // 10×10 at RIR 2 (12 to failure): 10 kg ≈12, 12,5 kg ≈4 — two reps under the window: stays 10, and says why.
+  let r = at([[10, 10, 2], [10, 10, 2], [10, 10, 2]], 2.5);
+  assert.equal(r.weight, 10);
+  assert.match(r.reasons.join(' '), /Шаг 2,5 кг для этого веса крупный: при 12,5 кг выходит около 4 повторений до отказа — тяжелее цели, поэтому 10 кг\./);
+  // 45×8 at RIR 2, step 5: 45 kg ≈10 (a rep above 6–9), 50 kg ≈6 — ordinary rounding, light side, no note.
+  r = at([[45, 8, 2], [45, 8, 2], [45, 8, 2]], 5);
+  assert.equal(r.weight, 45);
+  assert.doesNotMatch(r.reasons.join(' '), /крупный/);
+});
+
+test('a step large for the weight, week 3 → week 2: never half the weight because the same one sits on the window edge', () => {
+  // Week 3: 3×7 at RIR 2 (9 to failure) = the bottom of week 2's window (9–12); 2 kg would be ≈28.
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[3, 7, 2], [3, 7, 2], [3, 7, 2]] }], { category: 'iso' });
+  const r = recommend({ list: s.get('press'), session: today(2), target: targetFor({ category: 'iso' }, 2), category: 'iso', step: 1 });
+  assert.equal(r.weight, 3);
+});
+
+test('a fine step (machines at working weights): the large-step rule never fires', () => {
+  for (const step of [1, 2, 2.5, 5]) {
+    for (let w = Math.max(step * 13, 30); w <= 200; w += step) {
+      for (const [week, other, sets] of [[3, 2, [[w, 10, 2], [w, 10, 1], [w, 9, 3]]], [2, 3, [[w, 7, 1], [w, 6, 0], [w, 8, 2]]]]) {
+        const s = history([{ date: '2026-11-06', week: other, sets }], { category: 'iso' });
+        const r = recommend({ list: s.get('press'), session: today(week), target: targetFor({ category: 'iso' }, week), category: 'iso', step });
+        assert.doesNotMatch(r.reasons.join(' '), /для этого веса крупный/, `step ${step}, ${w} kg, week ${other} → ${week}`);
+      }
+    }
+  }
+});

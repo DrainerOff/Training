@@ -37,8 +37,12 @@ function buildRows(session) {
     });
     const working = sets.filter((s) => !s.drop).length;
     const drops = sets.length - working;
-    const complete = !!item.skipped || (working >= target.sets && drops >= target.drop);
-    return { item, sets, target, prevs, rec, working, drops, complete };
+    // «Пропущено» only while nothing is logged: a set logged after «Пропустить» (a superset, a change
+    // of mind, a stray tap) means the exercise is being done. The store clears the mark on such a set;
+    // older workouts may still carry it next to their sets.
+    const skipped = !!item.skipped && !sets.length;
+    const complete = skipped || (working >= target.sets && drops >= target.drop);
+    return { item, sets, target, prevs, rec, working, drops, complete, skipped };
   });
 }
 
@@ -144,7 +148,7 @@ export function Workout({ session, mode = 'live', syncStatus }) {
 }
 
 function ExerciseRow({ row, onOpen }) {
-  const { item, sets, target, complete, working } = row;
+  const { item, sets, target, complete, working, skipped } = row;
   const total = target.sets + target.drop;
   const p = Math.min(1, sets.length / total);
   const last = sets[sets.length - 1];
@@ -155,7 +159,7 @@ function ExerciseRow({ row, onOpen }) {
       </span>
       <span>
         <span class="ex__name">${item.name}</span>
-        ${item.skipped ? html`<span class="ex__alt">пропущено</span>` : last ? html`<span class="ex__alt">последний: ${fmtWeight(last.weight, item.category)} × ${last.reps}</span>` : html`<span class="ex__alt">${fmtTarget(target)}</span>`}
+        ${skipped ? html`<span class="ex__alt">пропущено</span>` : last ? html`<span class="ex__alt">последний: ${fmtWeight(last.weight, item.category)} × ${last.reps}</span>` : html`<span class="ex__alt">${fmtTarget(target)}</span>`}
       </span>
       <span class="ex__count">${working}/${target.sets}</span>
     </button>
@@ -220,7 +224,7 @@ function SetupSheet({ item, onClose }) {
 }
 
 function ExercisePanel({ row, session, next, onNext }) {
-  const { item, sets, target, prevs, complete } = row;
+  const { item, sets, target, prevs, complete, skipped } = row;
   const total = target.sets + target.drop;
   const planned = [];
   for (let i = sets.length; i < total; i++) planned.push(i);
@@ -275,7 +279,7 @@ function ExercisePanel({ row, session, next, onNext }) {
       ${!complete && !sets.length
         ? html`<button type="button" class="toggle" onClick=${() => app.store.updateItem(session.id, item.slotId, { skipped: true })}>Пропустить</button>`
         : null}
-      ${item.skipped
+      ${skipped
         ? html`<button type="button" class="toggle" onClick=${() => app.store.updateItem(session.id, item.slotId, { skipped: false })}>Вернуть</button>`
         : null}
       ${complete && next
@@ -569,7 +573,8 @@ function openSwap(session, item) {
 }
 
 // One line under a found exercise: category, where it is in the program, when it was done last.
-function entryLine(e) {
+// Also under the search in the program editor's «Быстрый выбор».
+export function entryLine(e) {
   const main = e.where.filter((w) => w.main).map((w) => w.day);
   const alt = e.where.filter((w) => !w.main).map((w) => w.day);
   const days = (list) => `${list.length > 1 ? 'дни' : 'день'} ${list.join(', ')}`;
@@ -883,7 +888,7 @@ function openFinish(session, rows) {
 
 function FinishSheet({ session, rows, onClose }) {
   const { bodyweightAt, shareOf } = derived();
-  const missing = rows.reduce((t, r) => t + (r.item.skipped ? 0 : Math.max(0, r.target.sets - r.working)), 0);
+  const missing = rows.reduce((t, r) => t + (r.skipped ? 0 : Math.max(0, r.target.sets - r.working)), 0);
   const allSets = rows.reduce((t, r) => t + r.sets.length, 0);
   const minutes = allSets ? Math.round((Math.max(...rows.flatMap((r) => r.sets.map((s) => s.createdAt))) - session.startedAt) / 60000) : 0;
   const finish = async () => {

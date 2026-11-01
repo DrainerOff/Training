@@ -10,7 +10,8 @@ import { fmtDay, fmtTime, fmtNum, parseNum, uid, plural } from '../lib/util.js';
 import { describeError, checkApiUrl, checkToken } from '../data/sync.js';
 import { SETUP_MAX } from '../data/store.js';
 import { findSameSlotSession } from '../lib/planner.js';
-import { knownKeys } from '../lib/exercises.js';
+import { knownKeys, searchExercises, findExact } from '../lib/exercises.js';
+import { entryLine } from './workout.js';
 import { exercisesNow } from './derive.js';
 
 async function copy(text) {
@@ -397,14 +398,10 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
     ${onDelete ? html`<button type="button" class="btn btn--danger" onClick=${() => { onDelete(); onClose(); }}>Удалить</button>` : null}
     <button type="button" class="btn btn--primary" disabled=${!v.name.trim() || shareBad} onClick=${save}>Готово</button>`;
   return html`<${Sheet} title=${isNew ? 'Новое упражнение' : 'Упражнение'} onClose=${onClose} footer=${footer} dirty=${dirty}>
-    ${isNew
-      ? html`<div class="sheet__section"><div class="sheet__label">Быстрый выбор</div>
-          <div class="seg">${exerciseCatalog(app.store.state.program).map((k) => html`<button type="button" onClick=${() => up({ name: k.name, category: k.category, alts: (k.alts || []).join('\n') })}>${k.name}</button>`)}</div>
-        </div>`
-      : null}
+    ${isNew ? html`<${QuickPick} index=${index} name=${v.name} onPick=${up} />` : null}
     <div class="sheet__section">
       <div class="sheet__label">Название</div>
-      <input class="input" value=${v.name} onInput=${(e) => up({ name: e.currentTarget.value })} />
+      <input class="input" aria-label="Название" value=${v.name} onInput=${(e) => up({ name: e.currentTarget.value })} />
       ${!isNew ? html`<p class="muted" style="font-size:12px;margin-top:4px">Переименование сохраняет историю. Для другого упражнения добавьте новое.</p>` : null}
       ${joined.map(({ o, e }) => html`<p class="muted" style="font-size:12px;margin-top:4px">«${o.name}» уже есть${e.count ? ` (${e.count} ${plural(e.count, 'тренировка', 'тренировки', 'тренировок')}, последняя ${fmtDay(e.last.date)})` : ' в программе'}: история будет общей.</p>`)}
     </div>
@@ -451,6 +448,33 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
         value=${v.note} onInput=${(e) => up({ note: e.currentTarget.value })}></textarea>
     </div>
   <//>`;
+}
+
+// «Быстрый выбор» for a new exercise: the program's exercises as chips, or — once something is typed —
+// a search over the program and the whole history (the same as «Заменить» in a workout). The chosen
+// one stays highlighted while the name below is its name. Picking fills the name, category, weight
+// step and (for a program exercise) its alternatives; a name done before joins that series.
+function QuickPick({ index, name, onPick }) {
+  const [query, setQuery] = useState('');
+  const q = query.trim();
+  const catalog = exerciseCatalog(app.store.state.program);
+  const chosen = name.trim() ? findExact(index, name)?.key || null : null;
+  const pick = (e) => {
+    const k = catalog.find((x) => x.key === e.key);
+    onPick({ name: e.name, category: e.category || 'iso', step: e.step || 2.5, alts: (k?.alts || []).join('\n') });
+  };
+  const found = q ? searchExercises(index, q) : [];
+  return html`<div class="sheet__section ex-search quick-pick"><div class="sheet__label">Быстрый выбор</div>
+    <input class="input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Найти в программе и истории" aria-label="Найти упражнение"
+      value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} />
+    ${q
+      ? html`${found.map((e) => html`<button type="button" class="choice" key=${e.key} aria-pressed=${String(e.key === chosen)} onClick=${() => pick(e)}>
+            <span class="choice__main">${e.name}<span class="choice__sub">${entryLine(e)}</span></span>
+            ${e.key === chosen ? html`<span class="choice__mark"><${Icon} name="check" label="Выбрано" /></span>` : null}
+          </button>`)}
+          ${found.length ? null : html`<p class="muted ex-search__none">В программе и истории такого нет — впишите название ниже: это будет новое упражнение.</p>`}`
+      : html`<div class="seg">${catalog.map((k) => html`<button type="button" key=${k.key} aria-pressed=${String(k.key === chosen)} onClick=${() => pick(k)}>${k.name}</button>`)}</div>`}
+  </div>`;
 }
 
 // ---------------------------------------------------------------- program as text
