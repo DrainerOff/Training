@@ -209,3 +209,69 @@ test('smallest iPhone: «Ориентир» keeps «примерно» whole nex
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
   await context.close();
 });
+
+// v1.6.1: the «Ориентир» follows today's latest set, and the line says when the exercise moved later in
+// the day than in the workout the advice comes from (Hammer after the barbell press). Synthetic weights.
+async function reorderedPhone(page) {
+  const { history } = await import('../helpers/order-history.js');
+  await page.evaluate(async (data) => window.__trainer.store.applyRemote(data, { queue: true }), history());
+  await page.waitForFunction(() => !window.__trainer.store.state.program.draft);
+  await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 1, day: 1, date: '2026-10-30' }));
+  await page.getByRole('button', { name: /^Наклонный жим: Hammer - наклон/ }).click();
+}
+const logHammer = (page, weight, reps, rir) => page.evaluate(async (v) => {
+  const { store } = window.__trainer;
+  const s = store.liveSessions().find((x) => x.status === 'active');
+  await store.logSet(s.id, 'D1-02', v);
+}, { weight, reps, rir });
+
+test('«Ориентир» after each set, not only the first; «Порядок: было 2-е, теперь 4-е» under the line', async ({ page }) => {
+  await open(page);
+  await reorderedPhone(page);
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 85 кг (от 80 кг до 87,5 кг)');
+  const note = dock(page).locator('.dock__rec-note');
+  await expect(note).toHaveText('Порядок: было 2-е, теперь 4-е — вес может быть завышен');
+  await rec(page).getByRole('button', { name: /Почему/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Рекомендация на сегодня' });
+  await expect(sheet).toContainText('В тот раз (25 октября) упражнение было 2-м по порядку, сегодня оно 4-е: перед ним больше работы, поэтому ориентир может быть завышен — проверьте первым подходом.');
+  await sheet.getByRole('button', { name: 'Понятно' }).click();
+
+  await logHammer(page, 85, 12, 2);
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 85 кг');
+  await expect(note).toHaveCount(0); // the first set has answered «проверьте первым подходом»
+  await expect(rec(page).getByRole('button', { name: 'Использовать' })).toHaveCount(0); // the field already holds 85
+  await logHammer(page, 85, 10, 1);
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 82,5 кг');
+  await expect(logButton(page)).toContainText('85 × 10'); // the field follows the last set until «Использовать»
+  await rec(page).getByRole('button', { name: /Почему/ }).click();
+  await expect(sheet).toContainText('Сегодня второй подход 85×10 (RIR 1) — ниже цели: следующий 82,5 кг.');
+  await expect(sheet).not.toContainText('этот вес и дальше');
+  await sheet.getByRole('button', { name: 'Понятно' }).click();
+  await rec(page).getByRole('button', { name: 'Использовать' }).click();
+  await expect(logButton(page)).toContainText('82,5 × 10');
+});
+
+test('smallest iPhone: the order note stays one line inside the dock, the log button in view', async ({ browser }) => {
+  const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 320, height: 568 }, locale: 'ru-RU', timezoneId: 'Europe/Moscow' });
+  const page = await context.newPage();
+  await open(page);
+  await reorderedPhone(page);
+  const note = dock(page).locator('.dock__rec-note');
+  await expect(note).toBeVisible();
+  const [n, grid, log, d] = await Promise.all([note, page.locator('.dock__grid'), page.locator('.dock__log .btn'), dock(page)].map((l) => l.boundingBox()));
+  expect(n.x).toBeGreaterThanOrEqual(d.x);
+  expect(n.x + n.width).toBeLessThanOrEqual(d.x + d.width + 0.5);
+  expect(n.height).toBeLessThan(20); // one line, cut with «…» rather than wrapped
+  expect(n.y + n.height).toBeLessThanOrEqual(grid.y + 0.5);
+  expect(log.y + log.height).toBeLessThanOrEqual(568);
+  await expect(rec(page).locator('.dock__rec-tag')).toHaveText('· примерно');
+  // «Повторения 10–12» stays one line (without «цель» here), so both steppers stand level.
+  await expect(page.locator('.dock .field__hint-word')).toBeHidden();
+  await expect(page.locator('.dock .field__label').nth(1).locator('.field__hint')).toBeVisible();
+  const labels = await page.locator('.dock .field__label').evaluateAll((ls) => ls.map((l) => l.getBoundingClientRect().height));
+  expect(labels.every((h) => h < 20)).toBe(true);
+  const steppers = await page.locator('.dock .stepper').evaluateAll((ss) => ss.map((s) => Math.round(s.getBoundingClientRect().y)));
+  expect(steppers[0]).toBe(steppers[1]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+  await context.close();
+});

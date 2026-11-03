@@ -18,6 +18,9 @@
 //    «закрепить».
 //  * «Закрепить» is the heaviest weight done in enough successful sets: one heavy set below the range
 //    with the rest lighter does not make that heavy weight the working one.
+//  * Order: where today the exercise stands two or more places later in the day's program than in that
+//    workout, it is not raised («закрепить», with the reason): more work before it, less to lift
+//    (a press moved behind another press). Earlier is no reason to change.
 //
 // «Ориентир» (kind 'estimate') — only where the same week has no result yet: the weight is recounted
 // from the latest result of another week of the cycle. It is always marked approximate.
@@ -40,8 +43,12 @@
 //    one.
 //  * Pull-ups: the whole load (body + added). A body-weight difference below one step is weigh-in
 //    noise and is not recounted (the same threshold as above).
-//  * Today's first working set corrects it by one step: below the window → a step down, two or more
-//    reps above it → a step up.
+//  * Today's latest working set (with RIR) corrects it by one step from that set's weight: below the
+//    window → a step down, two or more reps above it → a step up, else that weight. Not the first set
+//    only: on the light week, with short rests, the reps to failure can fall by a few from the first
+//    set to the second, and «в цели: этот вес и дальше» after the first one is wrong by then.
+//  * Order: two or more places later in the day's program than in the source workout → the ⓘ and
+//    the line say so; the weight itself is not recounted (one case is not a number).
 
 import { daysBetween, fmtDay, fmtNum, median, plural } from './util.js';
 
@@ -75,14 +82,26 @@ function setText(s, category) {
 const range = (r) => (r[0] === r[1] ? String(r[0]) : `${r[0]}–${r[1]}`);
 const valid = (s) => !s.deleted && !s.drop && s.reps > 0;
 const round = (w) => Math.round(w * 100) / 100;
+const ORDINAL = ['первый', 'второй', 'третий', 'четвёртый', 'пятый', 'шестой'];
+
+// Two or more places later in the day's program than in the reference workout: more work before it.
+export const MOVED_PLACES = 2;
+function movedLater(ref, order) {
+  if (!Number.isInteger(order) || !Number.isInteger(ref?.order) || order - ref.order < MOVED_PLACES) return null;
+  return { then: ref.order + 1, now: order + 1 };
+}
+const movedText = (ref, mv) => `В тот раз (${fmtDay(ref.date)}) упражнение было ${mv.then}-м по порядку, сегодня оно ${mv.now}-е: перед ним больше работы`;
 
 // `list` — exposures of this variant (lib/plateau.js buildExposures, chronological, with `bw`);
 // `session` — today's workout { id, date, week, startedAt }; `target` — today's target
 // (lib/program.js targetFor); `todaySets` — sets already logged today for this exercise;
 // `todayFlags` — pain / technique / baseline marked today; `share` — lifted part of body weight;
-// `bodyweightToday` — lib/bodyweight.js bodyweightAt(today) or null.
+// `bodyweightToday` — lib/bodyweight.js bodyweightAt(today) or null; `order` — today's place of the
+// exercise in the day's program (0 = first), or null.
 // → { kind: 'up' | 'hold' | 'estimate' | 'none', label, weight, conditional, reasons: [string], ref,
-//     basis: 'same' | 'heavy' | 'light' | null, approx, range? }
+//     basis: 'same' | 'heavy' | 'light' | null, approx, range?, moved? }
+//   `moved` — { then, now } (1-based places) when the reference stood two or more places earlier;
+//   left out once a working set is logged today (the ⓘ still says it).
 export function recommend(args) {
   const a = sameWeek(args);
   if (!a.otherWeek) return a;
@@ -94,7 +113,7 @@ export function recommend(args) {
 
 function sameWeek({
   list = [], session, target, category = null, step = 2.5, share = 0,
-  todaySets = [], todayFlags = {}, bodyweightToday = null,
+  todaySets = [], todayFlags = {}, bodyweightToday = null, order = null,
 }) {
   step = step > 0 ? step : 2.5;
   const week = session.week;
@@ -135,7 +154,12 @@ function sameWeek({
   const atTop = sets.filter((s) => (s.weight || 0) === top);
   const reasons = [`Прошлый раз на неделе ${week}, ${fmtDay(ref.date)}: ${sets.map((s) => setText(s, category)).join(', ')}.`];
   const refInfo = { date: ref.date, week, sessionId: ref.sessionId };
-  const hold = (why, more = []) => out('hold', top, [...reasons, ...why, ...more], { ref: refInfo });
+  // Later in the day's program than that time: said with every hold; an increase waits. The line
+  // under the advice (`moved`) only until today's first working set has answered it.
+  const moved = movedLater(ref, order);
+  const movedNote = moved ? [`${movedText(ref, moved)}, вес может быть завышен — проверьте первым подходом.`] : [];
+  const movedInfo = moved && !todaySets.some(valid) ? { moved } : {};
+  const hold = (why, more = []) => out('hold', top, [...reasons, ...why, ...more, ...movedNote], { ref: refInfo, ...movedInfo });
 
   // Body weight, where it is part of the load.
   const bwNotes = [];
@@ -188,7 +212,7 @@ function sameWeek({
         const n = count(w);
         return out('hold', w, [...reasons,
           `По ${load(top)} — ${short.map((s) => setText(s, category)).join(', ')}: ниже диапазона ${range(reps)}, поэтому рабочий вес — ${load(w)}${n ? ` (${n} ${plural(n, 'подход', 'подхода', 'подходов')} в диапазоне)` : ''}.`,
-          goalAt(w), ...bwNotes], { ref: refInfo });
+          goalAt(w), ...bwNotes, ...movedNote], { ref: refInfo, ...movedInfo });
       }
     }
     return hold([`По ${load(top)} — ${atTop.length} ${plural(atTop.length, 'подход', 'подхода', 'подходов')} из ${target.sets}. ${goal}`], bwNotes);
@@ -225,6 +249,12 @@ function sameWeek({
     return hold([...why.slice(0, 1), `Но масса тела выросла: нагрузка уже больше на ≈${fmtNum(bwGain, 1)} кг. Сначала закрепите ${load(top)} с новой массой тела.`], bwNotes);
   }
 
+  if (moved) {
+    return out('hold', top, [...reasons, ...why.slice(0, 1),
+      `${movedText(ref, moved)}, поэтому вес пока не повышаем: сначала ${load(top)} на новом месте.`, ...bwNotes],
+    { ref: refInfo, ...movedInfo });
+  }
+
   // Today's sets: one at the new weight fell below the range → back to the old weight.
   const low = todaySets.filter(valid).find((s) => (s.weight || 0) >= weight && s.reps < lo);
   if (low) {
@@ -256,7 +286,7 @@ function heaviest(sets) {
 // The second argument is what sameWeek saw: exposures before today and those since the baseline.
 function estimate({
   session, target, category = null, step = 2.5, share = 0,
-  todaySets = [], todayFlags = {}, bodyweightToday = null,
+  todaySets = [], todayFlags = {}, bodyweightToday = null, order = null,
 }, { seg, before }) {
   step = step > 0 ? step : 2.5;
   const week = session.week;
@@ -361,6 +391,8 @@ function estimate({
       ? `Лёгкой недели в истории этого варианта ещё нет, поэтому вес пересчитан с недели ${src.week} (${fmtDay(src.date)}): ${srcText}.`
       : `На неделе ${week} этот вариант ещё не выполнялся, поэтому взята неделя ${src.week} (${fmtDay(src.date)}): ${srcText}.`,
   ];
+  const moved = movedLater(src, order);
+  if (moved) reasons.push(`${movedText(src, moved)}, поэтому ориентир может быть завышен — проверьте первым подходом.`);
   if (light) {
     reasons.push(`Цель лёгкой недели — ${goal}. Такой пересчёт неточен: ${span ? `формулы дают от ${load(span[0])} до ${load(span[1])}, ` : ''}ошибка около ±10%.`);
   } else {
@@ -373,20 +405,24 @@ function estimate({
     ? `Это приблизительная оценка по другой неделе. Если первый подход тяжелее RIR ${fmtNum(rir[0])} — снизьте вес.`
     : `Это приблизительный расчёт по другой неделе, а не результат той же недели. Если первый подход пойдёт тяжелее плана — следующий ${load(down)}.`);
 
-  // Today's first working set (with RIR) corrects the hint by one step.
-  const first = todaySets.filter((s) => valid(s) && s.rir != null)[0];
-  if (first) {
-    const r = first.reps + first.rir;
-    const w = first.weight || 0;
+  // Today's latest working set (with RIR) corrects the hint by one step from its weight: the sets
+  // after the first show how the weight holds up as they go on.
+  const working = todaySets.filter(valid);
+  const last = working.filter((s) => s.rir != null).at(-1);
+  if (last) {
+    const n = working.indexOf(last) + 1;
+    const which = `${ORDINAL[n - 1] || `${n}-й`} подход`;
+    const r = last.reps + last.rir;
+    const w = last.weight || 0;
     if (r < lo) {
       weight = Math.max(0, round(w - step));
-      reasons.push(`Сегодня первый подход ${setText(first, category)} — ниже цели: следующий ${load(weight)}.`);
+      reasons.push(`Сегодня ${which} ${setText(last, category)} — ниже цели: следующий ${load(weight)}.`);
     } else if (r >= hi + 2) {
       weight = round(w + step);
-      reasons.push(`Сегодня первый подход ${setText(first, category)} — заметно легче цели: следующий ${load(weight)}.`);
+      reasons.push(`Сегодня ${which} ${setText(last, category)} — заметно легче цели: следующий ${load(weight)}.`);
     } else {
       weight = w;
-      reasons.push(`Сегодня первый подход ${setText(first, category)} — в цели: этот вес и дальше.`);
+      reasons.push(`Сегодня ${which} ${setText(last, category)} — в цели: этот вес и дальше.`);
     }
     span = null;
   }
@@ -395,6 +431,7 @@ function estimate({
     kind: 'estimate', label: KIND.estimate, weight, conditional: false, approx: true,
     basis: light ? 'light' : 'heavy', range: span, reps, reasons,
     ref: { date: src.date, week: src.week, sessionId: src.sessionId },
+    ...(moved && !last ? { moved } : {}),
   };
 }
 

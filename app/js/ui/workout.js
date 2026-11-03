@@ -18,7 +18,7 @@ const STALE_MS = 12 * 3600 * 1000;
 
 function buildRows(session) {
   const { series, bodyweightAt, shareOf } = derived();
-  return session.items.map((item) => {
+  return session.items.map((item, order) => {
     const sets = app.store.setsOf(session.id, item.slotId);
     const target = itemTarget(item, session.week);
     const list = series.get(item.seriesKey);
@@ -33,7 +33,7 @@ function buildRows(session) {
     const rec = recommend({
       list, session, target, category: item.category, step: item.step || 2.5,
       share: shareOf(item.seriesKey, item.category), todaySets: sets, todayFlags: item.flags || {},
-      bodyweightToday: bodyweightAt(session.date),
+      bodyweightToday: bodyweightAt(session.date), order,
     });
     const working = sets.filter((s) => !s.drop).length;
     const drops = sets.length - working;
@@ -410,7 +410,7 @@ function Dock({ row, session, live, onLogged, justLogged }) {
           onChange=${(w) => update({ weight: w, touchedW: true })} onTap=${padWeight} />
       </div>
       <div>
-        <div class="field__label"><span>Повторения</span>${target.reps ? html`<span class="field__hint">цель ${target.reps[0] === target.reps[1] ? target.reps[0] : `${target.reps[0]}–${target.reps[1]}`}</span>` : null}</div>
+        <div class="field__label"><span>Повторения</span>${target.reps ? html`<span class="field__hint"><span class="field__hint-word">цель </span>${target.reps[0] === target.reps[1] ? target.reps[0] : `${target.reps[0]}–${target.reps[1]}`}</span>` : null}</div>
         <${Stepper} label="Повторения" value=${v.reps} step=${1} suggested=${(sug.source === 'prev' || sug.source === 'estimate') && !v.touchedR}
           onChange=${(r) => update({ reps: r, touchedR: true })} onTap=${padReps} />
       </div>
@@ -491,6 +491,12 @@ function Recommendation({ rec, category, current, onUse }) {
     : approx
       ? `Ориентир на сегодня, приблизительно: ${fmtLoad(rec.weight, category)}${span}`
       : `Рекомендуем сегодня: ${fmtLoad(rec.weight, category)}, ${rec.label.toLowerCase()}${rec.conditional ? ', условно' : ''}`;
+  // The exercise stands later in the day than in the workout the advice comes from: said under the line
+  // until today's first working set (the ⓘ says why), cut with «…» on a narrow screen rather than
+  // pushing the dock taller.
+  const moved = has && rec.moved
+    ? html`<p class="dock__rec-note" role="note">Порядок: было ${rec.moved.then}-е, теперь ${rec.moved.now}-е — вес может быть завышен</p>`
+    : null;
   return html`<div class=${'dock__rec' + (rec.kind === 'up' ? ' dock__rec--up' : '') + (approx ? ' dock__rec--approx' : '')} role="note" aria-label=${said} data-kind=${rec.kind}>
     <button type="button" class="dock__rec-why" onClick=${info} aria-label=${said + '. Почему'}>
       ${has
@@ -501,7 +507,7 @@ function Recommendation({ rec, category, current, onUse }) {
     ${has && current !== rec.weight
       ? html`<button type="button" class="dock__rec-use" onClick=${() => onUse(rec.weight)}>Использовать</button>`
       : null}
-  </div>`;
+  </div>${moved}`;
 }
 
 function RecommendationSheet({ rec, category, onClose }) {

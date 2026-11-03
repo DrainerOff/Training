@@ -6,7 +6,8 @@ import { buildExposures } from '../../app/js/lib/plateau.js';
 import { recommend } from '../../app/js/lib/recommend.js';
 import { targetFor } from '../../app/js/lib/program.js';
 
-// `specs`: { date, week, day?, key?, sets: [[w, r, rir?, extra?]], flags?, bw? } in order.
+// `specs`: { date, week, day?, key?, sets: [[w, r, rir?, extra?]], flags?, bw?, order? } in order;
+// `order` — the exercise's place in that day's program (0 = first; other exercises fill the places before).
 function history(specs, { key = 'press', category = 'base' } = {}) {
   const sessions = [];
   const sets = [];
@@ -15,7 +16,8 @@ function history(specs, { key = 'press', category = 'base' } = {}) {
     const id = `s${i}`;
     const k = sp.key || key;
     sessions.push({ id, date: sp.date, cycle: sp.cycle || 1, week: sp.week, day: sp.day || 1, status: 'done', startedAt: i + 1,
-      items: [{ slotId: 'slot1', seriesKey: k, category, flags: sp.flags || {} }] });
+      items: [...Array.from({ length: sp.order || 0 }, (_, j) => ({ slotId: `other${j}`, seriesKey: `other${j}`, category: 'iso', flags: {} })),
+        { slotId: 'slot1', seriesKey: k, category, flags: sp.flags || {} }] });
     sp.sets.forEach(([w, r, rir, extra], j) => sets.push({ id: `${id}-${j}`, sessionId: id, slotId: 'slot1', seriesKey: k, exercise: k, setNo: j + 1, weight: w, reps: r, rir: rir ?? null, ...(extra || {}) }));
     if (sp.bw) bws.set(sp.date, { value: sp.bw, date: sp.date });
   });
@@ -449,4 +451,78 @@ test('a fine step (machines at working weights): the large-step rule never fires
       }
     }
   }
+});
+
+// ---------------------------------------------------------------- v1.6.1: every set, the order of the day
+
+test("«Ориентир»: today's latest set corrects it, not only the first", () => {
+  // Light week, Hammer: 75×12 at RIR 2 is in the window, then 75×10 at RIR 1 is not.
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[95, 7, 1], [95, 7, 1], [95, 7, 0]] }], { category: 'hammer' });
+  const at = (...todaySets) => rec(s, { week: 1, category: 'hammer', todaySets });
+  let r = at({ weight: 75, reps: 12, rir: 2 });
+  assert.equal(r.weight, 75);
+  assert.match(r.reasons.join(' '), /Сегодня первый подход 75×12 \(RIR 2\) — в цели: этот вес и дальше\./);
+  r = at({ weight: 75, reps: 12, rir: 2 }, { weight: 75, reps: 10, rir: 1 });
+  assert.equal(r.weight, 72.5);
+  assert.match(r.reasons.join(' '), /Сегодня второй подход 75×10 \(RIR 1\) — ниже цели: следующий 72,5 кг\./);
+  assert.doesNotMatch(r.reasons.join(' '), /этот вес и дальше/, 'the first set no longer speaks once another followed');
+  r = at({ weight: 75, reps: 12, rir: 2 }, { weight: 75, reps: 10, rir: 1 }, { weight: 72.5, reps: 11, rir: 2 });
+  assert.equal(r.weight, 72.5);
+  assert.match(r.reasons.join(' '), /Сегодня третий подход 72,5×11 \(RIR 2\) — в цели: этот вес и дальше/);
+  // Two reps over the window → a step up from that set's weight.
+  assert.equal(at({ weight: 75, reps: 12, rir: 2 }, { weight: 72.5, reps: 14, rir: 3 }).weight, 75);
+  // The latest set WITH RIR decides; drop sets and deleted sets are not working sets.
+  r = at({ weight: 75, reps: 10, rir: 1 }, { weight: 72.5, reps: 12 }, { weight: 50, reps: 15, rir: 0, drop: true }, { weight: 90, reps: 3, rir: 0, deleted: true });
+  assert.equal(r.weight, 72.5);
+  assert.match(r.reasons.join(' '), /Сегодня первый подход 75×10/);
+  assert.equal(r.range, null, 'after a set the range is gone: the set decided');
+});
+
+test('order: later in the day than the source workout → said, the «Ориентир» weight itself unchanged', () => {
+  const src = (order) => history([{ date: '2026-11-06', week: 3, order, sets: [[95, 7, 1], [95, 7, 1], [95, 7, 0]] }], { category: 'hammer' });
+  const plain = rec(src(1), { week: 1, category: 'hammer' });
+  assert.equal(plain.moved, undefined, 'no place today → nothing said');
+  const r = rec(src(1), { week: 1, category: 'hammer', order: 3 });
+  assert.deepEqual(r.moved, { then: 2, now: 4 });
+  assert.equal(r.weight, plain.weight);
+  assert.match(r.reasons.join(' '), /В тот раз \(6 ноября\) упражнение было 2-м по порядку, сегодня оно 4-е: перед ним больше работы, поэтому ориентир может быть завышен — проверьте первым подходом\./);
+  // One place later, the same place or earlier → nothing.
+  assert.equal(rec(src(1), { week: 1, category: 'hammer', order: 2 }).moved, undefined);
+  assert.equal(rec(src(3), { week: 1, category: 'hammer', order: 1 }).moved, undefined);
+  // A heavy week from the other heavy week too.
+  const h = history([{ date: '2026-11-06', week: 2, order: 0, sets: [[90, 10, 2], [90, 10, 2], [90, 9, 1]] }], { category: 'hammer' });
+  assert.deepEqual(rec(h, { week: 3, category: 'hammer', order: 4 }).moved, { then: 1, now: 5 });
+  // Today's set has answered it: no line under the advice, the ⓘ still says it.
+  const after = rec(src(1), { week: 1, category: 'hammer', order: 3, todaySets: [{ weight: plain.weight, reps: 12, rir: 2 }] });
+  assert.equal(after.moved, undefined);
+  assert.match(after.reasons.join(' '), /сегодня оно 4-е/);
+});
+
+test('order: «Можно повысить» waits when the exercise moved two places later; a hold says why it may be heavy', () => {
+  const up = (order, sets = [[90, 10, 2], [90, 10, 2], [90, 10, 2]]) =>
+    history([{ date: '2026-11-06', week: 2, order, sets }], { category: 'hammer' });
+  let r = rec(up(1), { week: 2, category: 'hammer', order: 1 });
+  assert.deepEqual([r.kind, r.weight, r.moved], ['up', 92.5, undefined]);
+  r = rec(up(1), { week: 2, category: 'hammer', order: 3 });
+  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 90, { then: 2, now: 4 }]);
+  assert.match(r.reasons.join(' '), /Во всех подходах по 90 кг — верх диапазона 8–10/);
+  assert.match(r.reasons.join(' '), /В тот раз \(6 ноября\) упражнение было 2-м по порядку, сегодня оно 4-е: перед ним больше работы, поэтому вес пока не повышаем: сначала 90 кг на новом месте\./);
+  // Earlier today than then → the increase stands.
+  assert.equal(rec(up(3), { week: 2, category: 'hammer', order: 1 }).kind, 'up');
+  // After today's first set: still «закрепить», the line under it gone.
+  r = rec(up(1), { week: 2, category: 'hammer', order: 3, todaySets: [{ weight: 90, reps: 9, rir: 1 }] });
+  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 90, undefined]);
+  assert.match(r.reasons.join(' '), /поэтому вес пока не повышаем/);
+  // Already a hold (below the top of the range): the same weight, with the warning.
+  r = rec(up(1, [[90, 9, 2], [90, 9, 2], [90, 8, 1]]), { week: 2, category: 'hammer', order: 3 });
+  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 90, { then: 2, now: 4 }]);
+  assert.match(r.reasons.at(-1), /сегодня оно 4-е: перед ним больше работы, вес может быть завышен — проверьте первым подходом\./);
+});
+
+test('order: the place of each exposure in its day comes from the workout, null when the slot is not in it', () => {
+  const s = history([{ date: '2026-11-06', week: 2, order: 2, sets: [[90, 10, 2]] }]);
+  assert.equal(s.get('press')[0].order, 2);
+  const lost = buildExposures([{ id: 'x', date: '2026-11-06', week: 2, cycle: 1, day: 1, status: 'done', items: [] }],
+    [{ id: 'x-0', sessionId: 'x', slotId: 'gone', seriesKey: 'press', exercise: 'press', setNo: 1, weight: 90, reps: 10, rir: 2 }]);
+  assert.equal(lost.get('press')[0].order, null);
 });

@@ -58,7 +58,8 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
     const k = `${st.sessionId}|${st.seriesKey}`;
     let e = byKey.get(k);
     if (!e) {
-      const item = (s.items || []).find((i) => i.slotId === st.slotId);
+      const at = (s.items || []).findIndex((i) => i.slotId === st.slotId);
+      const item = at >= 0 ? s.items[at] : null;
       const m = metricsByDate?.get(s.date);
       e = {
         key: st.seriesKey,
@@ -79,6 +80,9 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
           baseline: !!item?.flags?.baseline,
         },
         note: item?.note || '',
+        // Place in that day's program (0 = first), or null: the more work before an exercise, the
+        // less it can lift (lib/recommend.js says so when it moved later).
+        order: at >= 0 ? at : null,
         sleep: m?.sleep ?? null,
         // Body weight on the day of the workout (lib/bodyweight.js), or null: context for
         // exercises where the body is part of the load. Never stored with the sets.
