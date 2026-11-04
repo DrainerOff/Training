@@ -1256,6 +1256,15 @@ p {
 .dock__rec-why:active {
   opacity: 0.7;
 }
+/* «Порядок: было 2-е, теперь 4-е — …» under the recommendation: one line, cut rather than wrapped. */
+.dock__rec-note {
+  margin: -2px 0 2px;
+  font-size: 12px;
+  color: var(--accent-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .rec-sheet__head {
   margin: 0 0 8px;
   font-size: 17px;
@@ -1293,9 +1302,17 @@ p {
   color: var(--steel);
   display: flex;
   justify-content: space-between;
+  gap: 6px;
 }
 .field__hint {
   color: var(--ghost);
+  white-space: nowrap;
+}
+/* 320 pt: «Повторения 10–12» in one line (with «цель» the label wrapped and pushed its stepper down). */
+@media (max-width: 359px) {
+  .field__hint-word {
+    display: none;
+  }
 }
 .stepper {
   display: grid;
