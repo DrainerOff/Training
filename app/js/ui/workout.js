@@ -318,9 +318,10 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   if (sug.weight == null && category === 'pullup') sug.weight = 0;
   // Another week's result is a weight reference only; reps follow today's target. On the light week a
   // heavy week's weight under the light reps would be ~20–25% too heavy: without a «Ориентир» (pain,
-  // no RIR, a long break) the weight stays empty. Pull-ups keep their reps on every week.
+  // no RIR, a long break) the weight stays empty — unless it was 0 (no added weight: nothing too heavy
+  // to put there). Pull-ups keep their reps on every week.
   if (sug.source === 'prev' && otherPhase && target.reps && sug.reps != null) {
-    if (session.week === 1 && category !== 'pullup') sug = { weight: null, reps: target.reps[0], source: null };
+    if (session.week === 1 && category !== 'pullup' && sug.weight > 0) sug = { weight: null, reps: target.reps[0], source: null };
     else sug.reps = Math.min(Math.max(sug.reps, target.reps[0]), target.reps[1]);
   }
   const draftKey = `draft:${session.id}:${item.slotId}:${sets.length}:${dropMode ? 1 : 0}`;

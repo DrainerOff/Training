@@ -205,7 +205,9 @@ function sameWeek({
   const moved = movedLater(place, order);
   const movedNote = moved ? [`${movedText(place, moved, ref)}, вес может быть завышен — проверьте первым подходом.`] : [];
   const movedInfo = moved && !todaySets.some(valid) ? { moved } : {};
-  const hold = (why, more = []) => out('hold', top, [...reasons, ...why, ...more, ...movedNote], { ref: refInfo, ...movedInfo });
+  // Every hold names the working weight (pain, worse technique, a break included): not one heavy set
+  // below the range — that is also what lib/plateau.js weightDrop measures a drop from.
+  const hold = (why, more = []) => out('hold', ww.weight, [...reasons, ...why, ...more, ...movedNote], { ref: refInfo, ...movedInfo });
 
   // Body weight, where it is part of the load.
   const bwNotes = [];

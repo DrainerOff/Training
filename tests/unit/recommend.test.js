@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildExposures } from '../../app/js/lib/plateau.js';
-import { recommend } from '../../app/js/lib/recommend.js';
+import { recommend, workingWeight } from '../../app/js/lib/recommend.js';
 import { targetFor } from '../../app/js/lib/program.js';
 
 // `specs`: { date, week, day?, key?, sets: [[w, r, rir?, extra?]], flags?, bw?, order? } in order;
@@ -677,4 +677,28 @@ test('review 6: the large-step rule does not depend on rounding — the same str
     }
   }
   assert.ok(cases > 1000);
+});
+
+test('verifier on v1.6.2: every «Лучше закрепить» names the working weight — after pain, worse technique or a break too', () => {
+  // Week 3: 100×5 at RIR 0 (below 6–8), then 90×7 three times: the working weight is 90, and the drop
+  // question measures from it (lib/plateau.js weightDrop), so the advice must not say 100.
+  const sets = [[100, 5, 0], [90, 7, 1], [90, 7, 1], [90, 7, 1]];
+  const at = (spec, opts = {}) => rec(history([{ date: '2026-11-06', week: 3, sets, ...spec }]), { week: 3, ...opts });
+  const T = targetFor({ category: 'base' }, 3);
+  const cases = {
+    plain: at({}),
+    technique: at({ flags: { technique: true } }),
+    pain: at({ flags: { pain: true } }),
+    painToday: at({}, { todayFlags: { pain: true } }),
+    techniqueToday: at({}, { todaySets: [{ weight: 90, reps: 7, rir: 1, technique: true }] }),
+    break: at({ date: '2026-09-01' }),
+  };
+  for (const [name, r] of Object.entries(cases)) assert.deepEqual([r.kind, r.weight], ['hold', 90], name);
+  assert.match(cases.technique.reasons.join(' '), /В тот раз техника была хуже/);
+  assert.match(cases.break.reasons.join(' '), /после перерыва сначала прежний вес/);
+  const ref = history([{ date: '2026-11-06', week: 3, sets, flags: { technique: true } }]).get('press')[0];
+  assert.equal(workingWeight(ref.sets, T).weight, cases.technique.weight, 'the advice and the drop question agree');
+  // The top weight in enough sets is still the one held.
+  const most = rec(history([{ date: '2026-11-06', week: 3, sets: [[100, 5, 0], [100, 5, 0], [100, 5, 0], [90, 7, 1]], flags: { technique: true } }]), { week: 3 });
+  assert.deepEqual([most.kind, most.weight], ['hold', 100]);
 });

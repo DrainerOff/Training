@@ -48,6 +48,19 @@ test('review 4: light week, no «Ориентир» after pain on week 3 — the
   await expect(logButton(page)).toContainText('× 12');
 });
 
+test('verifier on v1.6.2: light week without a «Ориентир», no added weight on the heavy week — 0 stays in the field', async ({ page }) => {
+  const { absWorkout, programNow, PRESS } = await import('../helpers/workout-2026-10-20.js');
+  const w3 = absWorkout(programNow(), { id: 'ss-1029', date: '2026-10-29', day: 3, week: 3, abs: [[0, 15, 1], [0, 14, 1], [0, 14, 0]], absAs: PRESS });
+  w3.sets.find((s) => s.id === 'ss-1029-a2').pain = true;
+  await open(page);
+  await seed(page, [w3]);
+  await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 1, day: 1, date: '2026-10-30' }));
+  await page.getByRole('button', { name: /^Пресс в тренажере/ }).click();
+  await expect(rec(page)).toHaveAttribute('data-kind', 'none');
+  // The heavy week's reps, within the light target (12–15), as before v1.6.2.
+  await expect(logButton(page)).toHaveText('Записать 0 × 15');
+});
+
 test('review 4: without pain the light week still starts from the «Ориентир»', async ({ page }) => {
   const { absWorkout, programNow, PRESS } = await import('../helpers/workout-2026-10-20.js');
   const w3 = absWorkout(programNow(), { id: 'ss-1029', date: '2026-10-29', day: 3, week: 3, abs: [[37.5, 8, 1], [37.5, 7, 1], [37.5, 7, 0]], absAs: PRESS });
