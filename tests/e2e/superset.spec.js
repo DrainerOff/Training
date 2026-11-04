@@ -98,6 +98,21 @@ test('superset after «Пропустить» on the calves: the first set clear
   await expect(dock(page)).toContainText('≈70% веса'); // the drop set is next
 });
 
+test('review 7: «Отменить» right after the first set on a skipped exercise puts «пропущено» back', async ({ page }) => {
+  await gym(page);
+  await open(page, CALVES);
+  await page.locator('.panel').getByRole('button', { name: 'Пропустить' }).click();
+  expect(await skipped(page)).toBe(true);
+  await logSet(page, { rir: 2 });
+  await expect.poll(() => skipped(page)).toBe(false);
+  await dock(page).getByRole('button', { name: 'Отменить' }).click();
+  // Before: the set was gone but the mark too — 0/3 and three sets missing in the summary.
+  await expect.poll(() => skipped(page)).toBe(true);
+  await expect(page.locator('.panel').getByRole('button', { name: 'Вернуть' })).toBeVisible();
+  await open(page, ROW);
+  await expect(row(page, CALVES)).toContainText('пропущено');
+});
+
 test('an old workout that still carries «пропущено» next to logged sets reads as done by its sets, and «Пропустить» alone still skips', async ({ page }) => {
   await gym(page);
   // As recorded by v1.4.2: the mark stayed on the calves after their sets.

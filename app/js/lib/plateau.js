@@ -17,6 +17,7 @@
 //  * the light week (week 1) is shown but never used to diagnose plateau/regress.
 
 import { fmtDay, median, sum } from './util.js';
+import { workingWeight } from './recommend.js';
 
 export const EPS = 0.01; // 1% — below this a change is noise
 const HEAVY = new Set([2, 3]);
@@ -57,8 +58,8 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
     if (!s) continue;
     const k = `${st.sessionId}|${st.seriesKey}`;
     let e = byKey.get(k);
+    const at = (s.items || []).findIndex((i) => i.slotId === st.slotId);
     if (!e) {
-      const at = (s.items || []).findIndex((i) => i.slotId === st.slotId);
       const item = at >= 0 ? s.items[at] : null;
       const m = metricsByDate?.get(s.date);
       e = {
@@ -81,14 +82,21 @@ export function buildExposures(sessions, sets, { metricsByDate = null, includeAc
         },
         note: item?.note || '',
         // Place in that day's program (0 = first), or null: the more work before an exercise, the
-        // less it can lift (lib/recommend.js says so when it moved later).
-        order: at >= 0 ? at : null,
+        // less it can lift (lib/recommend.js says so when it moved later). `places` — every place of
+        // the variant that day (twice in a day: two slots); `order` — the first of them.
+        order: null,
+        places: [],
         sleep: m?.sleep ?? null,
         // Body weight on the day of the workout (lib/bodyweight.js), or null: context for
         // exercises where the body is part of the load. Never stored with the sets.
         bw: bodyweightAt ? bodyweightAt(s.date) : null,
       };
       byKey.set(k, e);
+    }
+    if (at >= 0 && !e.places.includes(at)) {
+      e.places.push(at);
+      e.places.sort((a, b) => a - b);
+      e.order = e.places[0];
     }
     (st.drop ? e.drops : e.sets).push(st);
     if (st.pain) e.flags.pain = true;
@@ -355,20 +363,33 @@ export function previousExposures(list, { week, sessionId, date, startedAt = Inf
   return { samePhase, latest, old, mark: old ? mark : null };
 }
 
-// A drop worth asking about: today's heaviest working set at least 10% below the heaviest set of the
-// same week last time (since the latest mark). It may be meant — stricter technique, a full range,
+// A drop worth asking about: today's heaviest working set at least 10% below the working weight of the
+// same week last time (since the latest mark; lib/recommend.js workingWeight with today's `target`:
+// one heavy set below the range there is not it). It may be meant — stricter technique, a full range,
 // other settings — and then a «новая точка отсчёта» keeps it from reading as a dip or a regress.
+// Where the body is part of the load (`share`, dips), it counts with the body weight of each day (the
+// known one for both when one is unknown; neither known — not asked): 20 → 15 kg on the belt at 80 kg
+// is −5% of what is lifted, not −25%. `todaySets` — today's sets of this variant only.
 // Not asked once today is marked, with pain or worse technique, or for pull-ups (added weight).
 export const DROP_ASK = 0.1;
 
-export function weightDrop({ todaySets = [], ref = null, category = null, flags = {} }) {
+export function weightDrop({ todaySets = [], ref = null, target = null, category = null, flags = {}, share = 0, bodyweightToday = null }) {
   if (!ref || flags.baseline || flags.pain || flags.technique || category === 'pullup') return null;
   const today = todaySets.filter((s) => !s.deleted && !s.drop && s.reps > 0);
   if (!today.length || today.some((s) => s.pain || s.technique)) return null;
-  const was = Math.max(0, ...ref.sets.map((s) => s.weight || 0));
+  const was = workingWeight(ref.sets, target)?.weight || 0;
   const now = Math.max(...today.map((s) => s.weight || 0));
-  if (!(was > 0) || now > was * (1 - DROP_ASK) + 1e-9) return null;
-  return { was, now, pct: Math.round((1 - now / was) * 100), date: ref.date };
+  let body = [0, 0];
+  if (share > 0) {
+    const a = ref.bw?.value > 0 ? ref.bw.value : null;
+    const b = bodyweightToday?.value > 0 ? bodyweightToday.value : null;
+    if (a == null && b == null) return null;
+    body = [share * (a ?? b), share * (b ?? a)];
+  }
+  const from = was + body[0];
+  const to = now + body[1];
+  if (!(from > 0) || to > from * (1 - DROP_ASK) + 1e-9) return null;
+  return { was, now, pct: Math.round((1 - to / from) * 100), date: ref.date, ...(share > 0 ? { body: true } : {}) };
 }
 
 // --- body metrics -------------------------------------------------------------------

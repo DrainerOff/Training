@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildExposures } from '../../app/js/lib/plateau.js';
-import { recommend } from '../../app/js/lib/recommend.js';
+import { recommend, workingWeight } from '../../app/js/lib/recommend.js';
 import { targetFor } from '../../app/js/lib/program.js';
 
 // `specs`: { date, week, day?, key?, sets: [[w, r, rir?, extra?]], flags?, bw?, order? } in order;
@@ -414,9 +414,12 @@ test('regression: light dumbbells, step 2,5 — «Ориентир» goes up a s
   const why = r.reasons.join(' ');
   assert.match(why, /Шаг 2,5 кг для этого веса крупный: при 10 кг выходит около 14 повторений до отказа — легче цели, при 12,5 кг — около 5\. Взят 12,5 кг: он ближе к цели\./);
   assert.match(why, /Если первый подход пойдёт тяжелее плана — следующий 10 кг/);
-  // Today's first set still corrects it by a step either way.
+  // Today's first set still corrects it by a step down; a step up follows the same large-step rule
+  // (v1.6.2): 12,5×8 at RIR 3 is 11 to failure, 15 kg would be ≈4 — further under the window than 12,5
+  // is over it, so 12,5 stays; 12,5×10 at RIR 3 (13) — 15 kg ≈6, in the window.
   assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 4, rir: 0 }] }).weight, 10);
-  assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 8, rir: 3 }] }).weight, 15);
+  assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 8, rir: 3 }] }).weight, 12.5);
+  assert.equal(rec(s, { week: 3, category: 'iso', todaySets: [{ weight: 12.5, reps: 10, rir: 3 }] }).weight, 15);
 });
 
 test('a step large for the weight: the lighter weight stays when the next step is far too heavy or only a rep is at stake', () => {
@@ -525,4 +528,177 @@ test('order: the place of each exposure in its day comes from the workout, null 
   const lost = buildExposures([{ id: 'x', date: '2026-11-06', week: 2, cycle: 1, day: 1, status: 'done', items: [] }],
     [{ id: 'x-0', sessionId: 'x', slotId: 'gone', seriesKey: 'press', exercise: 'press', setNo: 1, weight: 90, reps: 10, rir: 2 }]);
   assert.equal(lost.get('press')[0].order, null);
+});
+
+// ---------------------------------------------------------------- v1.6.2: independent review of v1.4.2–v1.6.1
+
+// One workout where the same variant stands in two slots of the day (`places`, 0-based); the sets go to
+// the slots in turn.
+function twice(specs, { key = 'press', category = 'base' } = {}) {
+  const sessions = [];
+  const sets = [];
+  specs.forEach((sp, i) => {
+    const id = `s${i}`;
+    const n = Math.max(...sp.places) + 1;
+    const items = Array.from({ length: n }, (_, j) => (sp.places.includes(j)
+      ? { slotId: `slot${j}`, seriesKey: key, category, flags: {} }
+      : { slotId: `other${j}`, seriesKey: `other${j}`, category: 'iso', flags: {} }));
+    sessions.push({ id, date: sp.date, cycle: 1, week: sp.week, day: sp.day || 1, status: 'done', startedAt: i + 1, items });
+    sp.sets.forEach(([w, r, rir], j) => sets.push({ id: `${id}-${j}`, sessionId: id, slotId: `slot${sp.places[j % sp.places.length]}`, seriesKey: key, exercise: key, setNo: j + 1, weight: w, reps: r, rir }));
+  });
+  return buildExposures(sessions, sets);
+}
+
+test('review 1: an exercise in two days at different places — never held for the place of the other day', () => {
+  // «Разгибание рук из-за головы на блоке»: day 1 — 6th, day 3 — 3rd. The same-week reference of day 1
+  // is always day 3 of the cycle before; the place is compared with day 1 only.
+  const top = [[20, 10, 1], [20, 10, 1], [20, 10, 1]];
+  const s = history([
+    { date: '2026-10-26', week: 2, day: 1, order: 5, sets: top },
+    { date: '2026-10-30', week: 2, day: 3, order: 2, sets: top },
+  ], { category: 'iso' });
+  const at = (day, order, week = 2) => recommend({ list: s.get('press'), session: today(week, '2026-11-16', { day }), target: targetFor({ category: 'iso' }, week), category: 'iso', step: 2.5, order });
+  let r = at(1, 5);
+  assert.deepEqual([r.kind, r.weight, r.moved, r.ref.date], ['up', 22.5, undefined, '2026-10-30']);
+  assert.doesNotMatch(r.reasons.join(' '), /по порядку/);
+  // Moved later within day 1 itself (a program change): held, and the day-1 workout is named.
+  r = at(1, 8);
+  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 20, { then: 6, now: 9 }]);
+  assert.match(r.reasons.join(' '), /26 октября \(день 1\) упражнение было 6-м по порядку, сегодня оно 9-е: перед ним больше работы, поэтому вес пока не повышаем/);
+  // A day with no earlier workout of its own: nothing to compare the place with.
+  r = at(2, 7);
+  assert.deepEqual([r.kind, r.moved], ['up', undefined]);
+  // The «Ориентир» of the light week the same way: source day 3, today day 1 at its usual place.
+  const h = history([
+    { date: '2026-11-02', week: 3, day: 1, order: 5, sets: [[22.5, 8, 1], [22.5, 8, 1], [22.5, 7, 1]] },
+    { date: '2026-11-06', week: 3, day: 3, order: 2, sets: [[22.5, 8, 1], [22.5, 8, 1], [22.5, 7, 1]] },
+  ], { category: 'iso' });
+  const e = recommend({ list: h.get('press'), session: today(1, '2026-11-16', { day: 1 }), target: targetFor({ category: 'iso' }, 1), category: 'iso', step: 2.5, order: 5 });
+  assert.deepEqual([e.kind, e.moved, e.ref.date], ['estimate', undefined, '2026-11-06']);
+});
+
+test('review 9: the same exercise twice in one day — the second slot is not «moved later» against the first', () => {
+  const s = twice([{ date: '2026-11-06', week: 2, places: [1, 4], sets: [[90, 10, 2], [90, 10, 2], [90, 10, 2], [90, 10, 2]] }], { category: 'hammer' });
+  const [e] = s.get('press');
+  assert.deepEqual([e.order, e.places], [1, [1, 4]]);
+  const at = (order) => recommend({ list: s.get('press'), session: today(2), target: targetFor({ category: 'hammer' }, 2), category: 'hammer', step: 2.5, order });
+  assert.deepEqual([at(4).kind, at(4).moved], ['up', undefined]);
+  assert.deepEqual([at(1).kind, at(1).moved], ['up', undefined]);
+  // Further than either place → still said.
+  assert.deepEqual(at(6).moved, { then: 5, now: 7 });
+});
+
+test('review 8: the order line under the «Ориентир» goes after any working set, with or without RIR', () => {
+  const s = history([{ date: '2026-11-06', week: 3, order: 1, sets: [[95, 7, 1], [95, 7, 1], [95, 7, 0]] }], { category: 'hammer' });
+  const r = rec(s, { week: 1, category: 'hammer', order: 3, todaySets: [{ weight: 75, reps: 12 }] });
+  assert.equal(r.moved, undefined);
+  assert.match(r.reasons.join(' '), /сегодня оно 4-е/, 'the ⓘ still says it');
+});
+
+test('review 2: a step larger than the window — the hint never swings back to a weight already below the target today', () => {
+  // Lateral raises, light week (12–15 at RIR 2–3: 14–18 to failure), dumbbells 10 / 12,5;
+  // source week 3: 12,5×8 at RIR 1. The owner does what each hint says.
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[12.5, 8, 1], [12.5, 8, 1], [12.5, 8, 1]] }], { category: 'iso' });
+  const done = [];
+  const after = (set) => {
+    done.push(set);
+    return rec(s, { week: 1, category: 'iso', todaySets: [...done] });
+  };
+  let r = after({ weight: 10, reps: 15, rir: 5 });
+  assert.equal(r.weight, 10, '12,5 would be ≈10 to failure — further under the window than 10 is over it');
+  assert.match(r.reasons.join(' '), /Сегодня первый подход 10×15 \(RIR 5\) — заметно легче цели, но шаг 2,5 кг для этого веса крупный: при 12,5 кг выходит около 10 повторений до отказа — тяжелее цели\. Этот вес и дальше\./);
+  r = after({ weight: 12.5, reps: 11, rir: 1 });
+  assert.equal(r.weight, 10);
+  r = after({ weight: 10, reps: 15, rir: 5 });
+  assert.equal(r.weight, 10);
+  r = after({ weight: 12.5, reps: 10, rir: 1 });
+  assert.equal(r.weight, 10);
+  // A weight that was below the target today is not offered again even when the formula would allow it.
+  const m = history([{ date: '2026-11-06', week: 3, sets: [[60, 8, 1], [60, 8, 1], [60, 8, 1]] }], { category: 'iso' });
+  r = rec(m, { week: 1, category: 'iso', todaySets: [{ weight: 52.5, reps: 11, rir: 1 }, { weight: 50, reps: 17, rir: 3 }] });
+  assert.equal(r.weight, 50);
+  assert.match(r.reasons.join(' '), /заметно легче цели, но 52,5×11 \(RIR 1\) сегодня уже был ниже цели: этот вес и дальше\./);
+  // A fine step still goes up.
+  r = rec(m, { week: 1, category: 'iso', todaySets: [{ weight: 50, reps: 17, rir: 3 }] });
+  assert.equal(r.weight, 52.5);
+});
+
+test('review 5: a set harder than the planned RIR at the bottom of the window is not «в цели»', () => {
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[100, 7, 1], [100, 7, 1], [100, 7, 0], [100, 6, 0]] }]);
+  const at = (set) => rec(s, { week: 1, todaySets: [set] });
+  // Base, light week: 10–12 at RIR 2–3. To failure at 12 — 10 at RIR 2, and the next set falls short.
+  let r = at({ weight: 87.5, reps: 12, rir: 0 });
+  assert.equal(r.weight, 85);
+  assert.match(r.reasons.join(' '), /Сегодня первый подход 87,5×12 \(RIR 0\) — тяжелее плана \(RIR 2–3\): следующий 85 кг\./);
+  assert.doesNotMatch(r.reasons.join(' '), /в цели/);
+  r = at({ weight: 87.5, reps: 11, rir: 1 });
+  assert.equal(r.weight, 85);
+  // Reps to spare at the planned RIR: the weight is right, the set should stop earlier — said so.
+  r = at({ weight: 87.5, reps: 14, rir: 0 });
+  assert.equal(r.weight, 87.5);
+  assert.match(r.reasons.join(' '), /87,5×14 \(RIR 0\) — вес в цели, но подход тяжелее плана: этот вес и дальше, останавливайтесь на RIR 2–3\./);
+  // At the planned RIR the bottom of the window is still in it (unchanged).
+  assert.equal(at({ weight: 87.5, reps: 10, rir: 2 }).weight, 87.5);
+  // Heavy week 2 (RIR 1–2) from week 3: to failure at the bottom → a step lighter, as the ⓘ promises.
+  const h = history([{ date: '2026-11-06', week: 3, sets: [[100, 8, 1], [100, 8, 1], [100, 7, 1], [100, 7, 1]] }]);
+  r = rec(h, { week: 2, todaySets: [{ weight: 95, reps: 9, rir: 0 }] });
+  assert.equal(r.weight, 92.5);
+});
+
+test('review 6: the large-step rule does not depend on rounding — the same strength gives the same answer', () => {
+  // 20×9 (RIR 2), 20×9 (RIR 2), 20×8 (RIR 1), 20×8 (RIR 1) is the same strength as 4×20×8 at RIR 2.
+  const at = (sets, step = 2.5) => {
+    const s = history([{ date: '2026-11-06', week: 2, sets }], { category: 'iso' });
+    return recommend({ list: s.get('press'), session: today(3), target: targetFor({ category: 'iso' }, 3), category: 'iso', step });
+  };
+  const at2 = (week, other, w, step, sets) => {
+    const s = history([{ date: '2026-11-06', week: other, sets: sets.map(([r, rir]) => [w, r, rir]) }], { category: 'iso' });
+    return recommend({ list: s.get('press'), session: today(week), target: targetFor({ category: 'iso' }, week), category: 'iso', step });
+  };
+  const mixed = at([[20, 9, 2], [20, 9, 2], [20, 8, 1], [20, 8, 1]]);
+  const even = at([[20, 8, 2], [20, 8, 2], [20, 8, 2], [20, 8, 2]]);
+  assert.equal(mixed.weight, even.weight);
+  assert.doesNotMatch(mixed.reasons.join(' '), /крупный/);
+  assert.doesNotMatch(even.reasons.join(' '), /крупный/);
+  // Any weight, step and reps on the heavy weeks (Epley is linear in reps to failure): sets at n±1 to
+  // failure answer exactly as sets at n.
+  let cases = 0;
+  for (const step of [1, 1.25, 2, 2.5]) {
+    for (let w = 4; w <= 40; w += step) {
+      for (let n = 7; n <= 14; n++) {
+        for (const [week, other] of [[3, 2], [2, 3]]) {
+          const a = at2(week, other, w, step, [[n - 2, 2], [n - 2, 2], [n - 2, 2], [n - 2, 2]]);
+          const b = at2(week, other, w, step, [[n - 1, 2], [n - 1, 2], [n - 2, 1], [n - 2, 1]]);
+          assert.equal(a.weight, b.weight, `step ${step}, ${w} kg, ${n} to failure, week ${other} → ${week}`);
+          assert.equal(/крупный/.test(a.reasons.join(' ')), /крупный/.test(b.reasons.join(' ')), `note: step ${step}, ${w} kg, ${n}, ${other} → ${week}`);
+          cases++;
+        }
+      }
+    }
+  }
+  assert.ok(cases > 1000);
+});
+
+test('verifier on v1.6.2: every «Лучше закрепить» names the working weight — after pain, worse technique or a break too', () => {
+  // Week 3: 100×5 at RIR 0 (below 6–8), then 90×7 three times: the working weight is 90, and the drop
+  // question measures from it (lib/plateau.js weightDrop), so the advice must not say 100.
+  const sets = [[100, 5, 0], [90, 7, 1], [90, 7, 1], [90, 7, 1]];
+  const at = (spec, opts = {}) => rec(history([{ date: '2026-11-06', week: 3, sets, ...spec }]), { week: 3, ...opts });
+  const T = targetFor({ category: 'base' }, 3);
+  const cases = {
+    plain: at({}),
+    technique: at({ flags: { technique: true } }),
+    pain: at({ flags: { pain: true } }),
+    painToday: at({}, { todayFlags: { pain: true } }),
+    techniqueToday: at({}, { todaySets: [{ weight: 90, reps: 7, rir: 1, technique: true }] }),
+    break: at({ date: '2026-09-01' }),
+  };
+  for (const [name, r] of Object.entries(cases)) assert.deepEqual([r.kind, r.weight], ['hold', 90], name);
+  assert.match(cases.technique.reasons.join(' '), /В тот раз техника была хуже/);
+  assert.match(cases.break.reasons.join(' '), /после перерыва сначала прежний вес/);
+  const ref = history([{ date: '2026-11-06', week: 3, sets, flags: { technique: true } }]).get('press')[0];
+  assert.equal(workingWeight(ref.sets, T).weight, cases.technique.weight, 'the advice and the drop question agree');
+  // The top weight in enough sets is still the one held.
+  const most = rec(history([{ date: '2026-11-06', week: 3, sets: [[100, 5, 0], [100, 5, 0], [100, 5, 0], [90, 7, 1]], flags: { technique: true } }]), { week: 3 });
+  assert.deepEqual([most.kind, most.weight], ['hold', 100]);
 });
