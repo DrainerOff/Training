@@ -344,11 +344,14 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
       deleted: false,
     };
     // A set logged on an exercise marked «Пропустить» (a superset done out of order, a stray tap):
-    // it is no longer skipped. Same write, so the mark and the set never disagree.
+    // it is no longer skipped. Same write, so the mark and the set never disagree. `unskipped` lets
+    // «Отменить» put the mark back (deleteSet `reskip`).
     if (it.skipped) {
       const items = s.items.map((x) => (x.slotId === slotId ? { ...x, skipped: false } : x));
       await saveAll([['sets', [rec]], ['sessions', [{ ...s, items, updatedAt: stamp(s) }]]]);
-    } else await save('sets', [rec]);
+      return { set: rec, duplicate: false, unskipped: true };
+    }
+    await save('sets', [rec]);
     return { set: rec, duplicate: false };
   }
 
@@ -368,10 +371,17 @@ export function createStore(adapter, { now = () => Date.now() } = {}) {
     await save('sets', changed);
   }
 
-  async function deleteSet(id) {
+  // `reskip`: the undo of a set that took its exercise out of «Пропустить» (logSet `unskipped`) puts
+  // the mark back in the same write, unless another set is still on that exercise.
+  async function deleteSet(id, { reskip = false } = {}) {
     const x = state.sets.get(id);
     if (!x) return;
-    await save('sets', [{ ...x, deleted: true, updatedAt: stamp(x) }]);
+    const del = { ...x, deleted: true, updatedAt: stamp(x) };
+    const s = reskip ? state.sessions.get(x.sessionId) : null;
+    if (s && !setsOf(x.sessionId, x.slotId).some((y) => y.id !== id)) {
+      const items = s.items.map((i) => (i.slotId === x.slotId ? { ...i, skipped: true } : i));
+      await saveAll([['sets', [del]], ['sessions', [{ ...s, items, updatedAt: stamp(s) }]]]);
+    } else await save('sets', [del]);
     await renumber(x.sessionId, x.slotId);
   }
 

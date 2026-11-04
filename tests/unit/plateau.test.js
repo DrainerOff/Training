@@ -347,3 +347,31 @@ test('weight trend needs enough data before claiming a rate', () => {
   const t = weightTrend([{ date: '2026-10-16', bodyweight: 80 }, { date: '2026-10-17', bodyweight: 80.4 }]);
   assert.equal(t.perWeek, null);
 });
+
+// v1.6.2, review 3: the question compares with the working weight (as lib/recommend.js picks it), not
+// with one heavy set below the range.
+test('review 3: weight drop — against the working weight of that workout, not its heaviest single set', () => {
+  const target = { sets: 4, reps: [8, 10], rir: [1, 2] };
+  // 100×5 at RIR 0 was below the range; the working weight was 90 (the app itself says «закрепить 90»).
+  const ref = { date: '2026-10-29', sets: [{ weight: 100, reps: 5, rir: 0 }, { weight: 90, reps: 7, rir: 2 }, { weight: 90, reps: 7, rir: 2 }, { weight: 90, reps: 7, rir: 2 }] };
+  assert.equal(weightDrop({ ref, target, todaySets: [{ weight: 90, reps: 8 }] }), null);
+  assert.deepEqual(weightDrop({ ref, target, todaySets: [{ weight: 80, reps: 8 }] }), { was: 90, now: 80, pct: 11, date: '2026-10-29' });
+  // Dumbbells: 12×6 at RIR 0, then 10×10 twice → working 10.
+  const db = { date: '2026-10-29', sets: [{ weight: 12, reps: 6, rir: 0 }, { weight: 10, reps: 10, rir: 2 }, { weight: 10, reps: 10, rir: 2 }] };
+  assert.equal(weightDrop({ ref: db, target: { sets: 3, reps: [8, 10], rir: [1, 2] }, todaySets: [{ weight: 10, reps: 10 }] }), null);
+  // The top weight in enough sets stays the working weight.
+  const full = { date: '2026-10-29', sets: [{ weight: 100, reps: 8 }, { weight: 100, reps: 8 }, { weight: 100, reps: 7 }, { weight: 90, reps: 10 }] };
+  assert.equal(weightDrop({ ref: full, target, todaySets: [{ weight: 90, reps: 10 }] }).was, 100);
+});
+
+test('review 10: weight drop where the body is part of the load (dips) — counted with the body weight', () => {
+  const ref = { date: '2026-10-29', bw: { value: 80 }, sets: [{ weight: 20, reps: 8 }, { weight: 20, reps: 8 }] };
+  // −25% on the belt is −5% of what is lifted: 20 + 72 → 15 + 72.
+  assert.equal(weightDrop({ ref, todaySets: [{ weight: 15, reps: 8 }], share: 0.9, bodyweightToday: { value: 80 } }), null);
+  const d = weightDrop({ ref, todaySets: [{ weight: 0, reps: 8 }], share: 0.9, bodyweightToday: { value: 80 } });
+  assert.deepEqual([d.was, d.now, d.pct, d.body], [20, 0, 22, true]);
+  // One day's body weight unknown: the known one stands for both.
+  assert.equal(weightDrop({ ref: { ...ref, bw: null }, todaySets: [{ weight: 15, reps: 8 }], share: 0.9, bodyweightToday: { value: 80 } }), null);
+  // Neither known: the belt alone says nothing about the load — not asked.
+  assert.equal(weightDrop({ ref: { ...ref, bw: null }, todaySets: [{ weight: 0, reps: 8 }], share: 0.9 }), null);
+});

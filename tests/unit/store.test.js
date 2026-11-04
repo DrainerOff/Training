@@ -182,3 +182,39 @@ test('a set logged on an exercise marked «Пропустить» clears the mar
   await store.logSet(s.id, press.slotId, { weight: 90, reps: 9, rir: 1 });
   assert.equal(store.state.sessions.get(s.id).items[1].skipped, undefined, 'a set on a not skipped exercise does not rewrite the workout');
 });
+
+test('review 7: «Отменить» right after such a set puts «Пропустить» back in the same write', async () => {
+  const { store, s, tick } = await setup();
+  const [, press, row] = s.items;
+  await store.updateItem(s.id, row.slotId, { skipped: true });
+  tick(60_000);
+  const r = await store.logSet(s.id, row.slotId, { weight: 70, reps: 10, rir: 1 });
+  assert.equal(r.unskipped, true);
+  tick(1000);
+  await store.deleteSet(r.set.id, { reskip: r.unskipped });
+  const after = store.state.sessions.get(s.id);
+  assert.equal(after.items[2].skipped, true);
+  assert.equal(store.setsOf(s.id, row.slotId).length, 0);
+  assert.equal(store.state.outbox.get(`sessions:${s.id}`)?.updatedAt, after.updatedAt);
+  assert.equal(store.state.sets.get(r.set.id).deleted, true);
+  assert.equal(store.state.outbox.get(`sets:${r.set.id}`)?.updatedAt, store.state.sets.get(r.set.id).updatedAt);
+  // A set on an exercise that was not skipped says nothing and its undo rewrites nothing else.
+  tick(60_000);
+  const p = await store.logSet(s.id, press.slotId, { weight: 90, reps: 9, rir: 1 });
+  assert.equal(p.unskipped, undefined);
+  const before = store.state.sessions.get(s.id).updatedAt;
+  tick(1000);
+  await store.deleteSet(p.set.id, { reskip: p.unskipped });
+  assert.equal(store.state.sessions.get(s.id).updatedAt, before);
+  assert.equal(store.state.sessions.get(s.id).items[1].skipped, undefined);
+  // Another set still on it: the exercise is being done, the mark does not come back.
+  await store.updateItem(s.id, row.slotId, { skipped: true });
+  tick(60_000);
+  const a = await store.logSet(s.id, row.slotId, { weight: 70, reps: 10, rir: 1 });
+  tick(60_000);
+  const b = await store.logSet(s.id, row.slotId, { weight: 70, reps: 9, rir: 1 });
+  tick(1000);
+  await store.deleteSet(a.set.id, { reskip: a.unskipped });
+  assert.equal(store.state.sessions.get(s.id).items[2].skipped, false);
+  assert.equal(b.unskipped, undefined);
+});

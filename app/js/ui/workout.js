@@ -29,11 +29,20 @@ function buildRows(session) {
       startedAt: session.startedAt,
       baseline: !!item.flags?.baseline,
     });
-    // A suggestion beside «Прошлый раз», never written into the composer by itself.
+    // A suggestion beside «Прошлый раз», never written into the composer by itself. Today's sets of
+    // this variant only (after «Заменить» keeping the sets, the other variant's weights are not this
+    // one's); pain or worse technique on any set of the exercise today still counts.
+    const mine = sets.filter((s) => s.seriesKey === item.seriesKey);
+    const share = shareOf(item.seriesKey, item.category);
+    const bodyweight = bodyweightAt(session.date);
+    const todayFlags = {
+      ...(item.flags || {}),
+      pain: !!item.flags?.pain || sets.some((s) => s.pain),
+      technique: !!item.flags?.technique || sets.some((s) => s.technique),
+    };
     const rec = recommend({
       list, session, target, category: item.category, step: item.step || 2.5,
-      share: shareOf(item.seriesKey, item.category), todaySets: sets, todayFlags: item.flags || {},
-      bodyweightToday: bodyweightAt(session.date), order,
+      share, todaySets: mine, todayFlags, bodyweightToday: bodyweight, order,
     });
     const working = sets.filter((s) => !s.drop).length;
     const drops = sets.length - working;
@@ -42,7 +51,7 @@ function buildRows(session) {
     // older workouts may still carry it next to their sets.
     const skipped = !!item.skipped && !sets.length;
     const complete = skipped || (working >= target.sets && drops >= target.drop);
-    return { item, sets, target, prevs, rec, working, drops, complete, skipped };
+    return { item, sets, mine, todayFlags, share, bodyweight, target, prevs, rec, working, drops, complete, skipped };
   });
 }
 
@@ -74,12 +83,12 @@ export function Workout({ session, mode = 'live', syncStatus }) {
     return () => clearTimeout(t);
   }, [justLogged]);
 
-  const onLogged = (set, row) => {
+  const onLogged = (set, row, { unskipped = false } = {}) => {
     const working = row.working + (set.drop ? 0 : 1);
     const drops = row.drops + (set.drop ? 1 : 0);
     const nowComplete = working >= row.target.sets && drops >= row.target.drop;
     const undo = () => {
-      app.store.deleteSet(set.id);
+      app.store.deleteSet(set.id, { reskip: unskipped });
       setActive(row.item.slotId);
       setJustLogged(null);
     };
@@ -307,9 +316,12 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   const hint = row.rec?.kind === 'estimate' && row.rec.weight != null && (row.rec.basis === 'light' || cut) ? row.rec : null;
   if (hint && !dropMode && sug.source !== 'today') sug = { weight: hint.weight, reps: hint.reps?.[0] ?? sug.reps, source: 'estimate' };
   if (sug.weight == null && category === 'pullup') sug.weight = 0;
-  // Another week's result is a weight reference only; reps follow today's target.
+  // Another week's result is a weight reference only; reps follow today's target. On the light week a
+  // heavy week's weight under the light reps would be ~20–25% too heavy: without a «Ориентир» (pain,
+  // no RIR, a long break) the weight stays empty. Pull-ups keep their reps on every week.
   if (sug.source === 'prev' && otherPhase && target.reps && sug.reps != null) {
-    sug.reps = Math.min(Math.max(sug.reps, target.reps[0]), target.reps[1]);
+    if (session.week === 1 && category !== 'pullup') sug = { weight: null, reps: target.reps[0], source: null };
+    else sug.reps = Math.min(Math.max(sug.reps, target.reps[0]), target.reps[1]);
   }
   const draftKey = `draft:${session.id}:${item.slotId}:${sets.length}:${dropMode ? 1 : 0}`;
   const fresh = () => ({ weight: sug.weight, reps: sug.reps, rir: null, touchedW: false, touchedR: false });
@@ -334,7 +346,9 @@ function Dock({ row, session, live, onLogged, justLogged }) {
   // recommendation line (which would say «закрепить» the old weight) until answered.
   const askKey = `drop-ask:${session.id}:${item.slotId}`;
   const [noAskYet, setNoAskYet] = useState(() => !local.get(askKey));
-  const drop = noAskYet ? weightDrop({ todaySets: sets, ref: prevs.samePhase, category, flags: item.flags || {} }) : null;
+  const drop = noAskYet
+    ? weightDrop({ todaySets: row.mine, ref: prevs.samePhase, target, category, flags: row.todayFlags, share: row.share, bodyweightToday: row.bodyweight })
+    : null;
   const markBaseline = async () => {
     await app.store.updateItem(session.id, item.slotId, { flags: { baseline: true } });
     app.ui.toast('Отмечено: новая точка отсчёта');
@@ -366,13 +380,13 @@ function Dock({ row, session, live, onLogged, justLogged }) {
     }
     setBusy(true);
     try {
-      const { set, duplicate } = await app.store.logSet(session.id, item.slotId, { weight: v.weight, reps: v.reps, rir: v.rir, drop: dropMode });
+      const { set, duplicate, unskipped } = await app.store.logSet(session.id, item.slotId, { weight: v.weight, reps: v.reps, rir: v.rir, drop: dropMode });
       if (duplicate) {
         setBusy(false); // second tap of a double tap: nothing new recorded, keep the button usable
         return;
       }
       local.set(draftKey, null);
-      onLogged(set, row);
+      onLogged(set, row, { unskipped });
     } catch (err) {
       app.ui.toast(`Не удалось записать: ${err.message}`);
       setBusy(false);
@@ -452,7 +466,9 @@ function LastTime({ prevs, category, index, drop }) {
 // hides it for this workout. ⓘ says it in full. Nothing blocks logging.
 function DropAsk({ drop, item, onMark, onNo }) {
   const kg = (w) => `${fmtWeight(w, item.category)}\u00a0кг`;
-  const full = `Вес на ${drop.pct}% ниже, чем ${fmtDay(drop.date)}: было ${kg(drop.was)}, сегодня ${kg(drop.now)}.`;
+  const full = drop.body
+    ? `Нагрузка с учётом массы тела на ${drop.pct}% ниже, чем ${fmtDay(drop.date)}: доп. вес был ${kg(drop.was)}, сегодня ${kg(drop.now)}.`
+    : `Вес на ${drop.pct}% ниже, чем ${fmtDay(drop.date)}: было ${kg(drop.was)}, сегодня ${kg(drop.now)}.`;
   const info = () => openSheet((close) => html`<${Sheet} title="Вес ниже прошлого раза" onClose=${close}>
     <p class="rec-sheet__head"><b>${full}</b></p>
     <ul class="rec-sheet__why">
