@@ -433,7 +433,7 @@ function SlotSheet({ slot, onSave, onDelete, onClose }) {
     </div>
     <div class="sheet__section">
       <div class="sheet__label">Шаг веса, кг</div>
-      <${Seg} label="Шаг веса" value=${Number(v.step)} onChange=${(step) => up({ step })} options=${[1, 1.25, 2, 2.5, 5].map((s) => ({ value: s, label: String(s).replace('.', ',') }))} />
+      <${Seg} label="Шаг веса" value=${Number(v.step)} onChange=${(step) => up({ step })} options=${[0.5, 1, 1.25, 2, 2.5, 5].map((s) => ({ value: s, label: String(s).replace('.', ',') }))} />
     </div>
     <div class="sheet__section">
       <div class="sheet__label">Особые подходы по неделям (если отличаются от правил)</div>
