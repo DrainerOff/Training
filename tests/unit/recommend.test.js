@@ -376,6 +376,12 @@ test('pull-ups: whole load; a body-weight difference below a step is not recount
   assert.match(r.reasons.join(' '), /Масса тела меньше на 4,3 кг, чем 6 ноября: учтено/);
   r = rec(history([{ date: '2026-11-06', week: 2, sets: [[28, 6, 1], [28, 6, 1], [28, 8, 0]] }], { key: 'pullup', category: 'pullup' }), { ...base, bodyweightToday: null });
   assert.equal(r.kind, 'none');
+  // No added weight: «без доп. веса выходит», not «при без доп. веса» (v1.6.3).
+  const bw = history([{ date: '2026-11-06', week: 3, sets: [[0, 7, 1], [0, 7, 1], [0, 7, 1]], bw: 80 }], { key: 'pullup', category: 'pullup' });
+  r = rec(bw, { ...base, week: 2, bodyweightToday: { value: 80 } });
+  assert.deepEqual([r.kind, r.weight], ['estimate', 0]);
+  assert.match(r.reasons.join(' '), /По этим подходам без доп\. веса выходит около/);
+  assert.doesNotMatch(r.reasons.join(' '), /при без доп/);
 });
 
 test("«Ориентир»: today's first set corrects it by one step", () => {
@@ -488,6 +494,42 @@ test('regression v1.6.3: a step large for the weight going down — the hint kee
   assert.match(r.reasons.join(' '), /шаг 2,5 кг для этого веса крупный: на шаг легче — уже без веса\. Этот вес и дальше/);
   why = r.reasons.join(' ');
   assert.doesNotMatch(why, /NaN|Infinity|бесконечн/);
+});
+
+test('verifier on v1.6.3: the weight stays only a rep below the window, never against a lighter set done today', () => {
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[7.5, 8, 1], [7.5, 8, 1], [7.5, 8, 1]] }], { category: 'iso' });
+  const at = (...todaySets) => rec(s, { week: 1, category: 'iso', todaySets });
+  // Two or more reps below the window: a step down even when large (it errs light), the ⓘ names the
+  // weight between. 5×3 at RIR 0 is not «этот вес и дальше, останавливайтесь на RIR 2–3».
+  for (const [reps, rir] of [[11, 1], [5, 1], [3, 0]]) {
+    const r = at({ weight: 5, reps, rir });
+    assert.equal(r.weight, 2.5, `5×${reps} RIR ${rir}`);
+    assert.doesNotMatch(r.reasons.join(' '), /Этот вес и дальше/, `5×${reps} RIR ${rir}`);
+  }
+  assert.match(at({ weight: 5, reps: 11, rir: 1 }).reasons.join(' '), /ниже цели: следующий 2,5 кг\. Точнее — около 4,5 кг/);
+  // A set at the lighter weight today in the window (or below it): what was done beats the formula.
+  let r = at({ weight: 5, reps: 13, rir: 2 }, { weight: 7.5, reps: 10, rir: 1 });
+  assert.equal(r.weight, 5);
+  assert.match(r.reasons.join(' '), /Сегодня второй подход 7,5×10 \(RIR 1\) — ниже цели: следующий 5 кг\./);
+  // A lighter set clearly lighter than the target does not count against keeping the weight.
+  r = at({ weight: 5, reps: 18, rir: 4 }, { weight: 7.5, reps: 12, rir: 1 });
+  assert.equal(r.weight, 7.5);
+});
+
+test('verifier on v1.6.3: the advice for the first set goes once a set is logged — the ⓘ never contradicts itself', () => {
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[7.5, 8, 1], [7.5, 8, 1], [7.5, 8, 1]] }], { category: 'iso' });
+  assert.match(rec(s, { week: 1, category: 'iso' }).reasons.join(' '), /Это приблизительная оценка по другой неделе\. Если первый подход тяжелее RIR 2 — снизьте вес\./);
+  let r = rec(s, { week: 1, category: 'iso', todaySets: [{ weight: 5, reps: 12, rir: 1 }] });
+  assert.equal(r.weight, 5);
+  assert.match(r.reasons.join(' '), /Это приблизительная оценка по другой неделе\./);
+  assert.doesNotMatch(r.reasons.join(' '), /Если первый подход/);
+  // Heavy week: «следующий 2,5 кг» is not promised next to «Этот вес и дальше».
+  const h = history([{ date: '2026-11-06', week: 2, sets: [[5, 11, 2], [5, 11, 2], [5, 11, 2]] }], { category: 'iso' });
+  assert.match(rec(h, { week: 3, category: 'iso' }).reasons.join(' '), /Если первый подход пойдёт тяжелее плана — следующий/);
+  r = rec(h, { week: 3, category: 'iso', todaySets: [{ weight: 5, reps: 5, rir: 0 }] });
+  assert.doesNotMatch(r.reasons.join(' '), /Если первый подход/);
+  // A set without RIR corrects nothing, and the advice stays.
+  assert.match(rec(s, { week: 1, category: 'iso', todaySets: [{ weight: 5, reps: 12 }] }).reasons.join(' '), /Если первый подход тяжелее RIR 2/);
 });
 
 test('v1.6.3: with a fine step a set below the window is still one step down', () => {

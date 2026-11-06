@@ -57,8 +57,10 @@
 //    A step down follows it too, the other way: the next set is taken a rep weaker (the light week
 //    loses about one to failure from set to set), and the weight stays where one step down lands above
 //    the window by more than this weight falls below it, plus a rep (a cable stack in 2,5 kg plates:
-//    5 → 2,5 kg is half the load, ≈54 to failure at 14–18). Where that step lands above the window,
-//    the ⓘ names the weight between the two for the middle of the window: small add-on weights make it.
+//    5 → 2,5 kg is half the load, ≈54 to failure at 14–18) — only when that set was at most one rep
+//    below the window, and not where a set at the lighter weight today was in the window or below it.
+//    Where that step lands above the window, the ⓘ names the weight between the two for the middle of
+//    the window: small add-on weights make it. The advice for the first set goes once a set is logged.
 //  * Order: two or more places later in the day's program than in the source workout → the ⓘ and
 //    the line say so; the weight itself is not recounted (one case is not a number). Compared within
 //    one day of the program, as above.
@@ -339,6 +341,8 @@ function estimate({
   const rir = target?.rir || null;
   const load = (w) => fmtLoad(w, category);
   const none = (why) => ({ weight: null, reasons: why ? [why] : [] });
+  // «при 10 кг», but pull-ups with no added weight: «без доп. веса», not «при без доп. веса».
+  const atLoad = (w) => (category === 'pullup' && !(w > 0) ? load(w) : `при ${load(w)}`);
   if (!reps || !rir) return none();
   // The latest heavy week other than today's (seg has no result of today's week).
   let src = null;
@@ -418,7 +422,7 @@ function estimate({
       if (up) {
         const n = (c) => fmtNum(Math.max(0, c.r), 0);
         if (up.r >= lo - 1 && Math.max(0, lo - up.r) + 1 < best.r - hi) {
-          coarse = `Шаг ${fmtNum(step)} кг для этого веса крупный: при ${load(best.w)} выходит около ${n(best)} повторений до отказа — легче цели, при ${load(up.w)} — около ${n(up)}. Взят ${load(up.w)}: он ближе к цели.`;
+          coarse = `Шаг ${fmtNum(step)} кг для этого веса крупный: ${atLoad(best.w)} выходит около ${n(best)} повторений до отказа — легче цели, при ${load(up.w)} — около ${n(up)}. Взят ${load(up.w)}: он ближе к цели.`;
           best = up;
         } else {
           coarse = `Шаг ${fmtNum(step)} кг для этого веса крупный: при ${load(up.w)} выходит около ${n(up)} повторений до отказа — тяжелее цели, поэтому ${load(best.w)}.`;
@@ -443,20 +447,20 @@ function estimate({
   if (light) {
     reasons.push(`Цель лёгкой недели — ${goal}. Такой пересчёт неточен: ${span ? `формулы дают от ${load(span[0])} до ${load(span[1])}, ` : ''}ошибка около ±10%.`);
   } else {
-    reasons.push(`По этим подходам при ${load(weight)} выходит около ${fmtNum(rtfAt(weight), 0)} повторений до отказа (повторения + RIR); цель недели — ${goal}.`);
+    reasons.push(`По этим подходам ${atLoad(weight)} выходит около ${fmtNum(rtfAt(weight), 0)} повторений до отказа (повторения + RIR); цель недели — ${goal}.`);
     if (coarse) reasons.push(coarse);
   }
   reasons.push(...notes);
-  const down = Math.max(0, round(weight - step));
-  reasons.push(light
-    ? `Это приблизительная оценка по другой неделе. Если первый подход тяжелее RIR ${fmtNum(rir[0])} — снизьте вес.`
-    : `Это приблизительный расчёт по другой неделе, а не результат той же недели. Если первый подход пойдёт тяжелее плана — следующий ${load(down)}.`);
-
   // Today's latest working set (with RIR) corrects the hint by one step from its weight: the sets
-  // after the first show how the weight holds up as they go on.
+  // after the first show how the weight holds up as they go on. What to do after the first set is
+  // said only until one is logged: then the line about that set says it (it may keep the weight).
   const working = todaySets.filter(valid);
   const withRir = working.filter((s) => s.rir != null);
   const last = withRir.at(-1);
+  const down = Math.max(0, round(weight - step));
+  reasons.push(light
+    ? `Это приблизительная оценка по другой неделе.${last ? '' : ` Если первый подход тяжелее RIR ${fmtNum(rir[0])} — снизьте вес.`}`
+    : `Это приблизительный расчёт по другой неделе, а не результат той же недели.${last ? '' : ` Если первый подход пойдёт тяжелее плана — следующий ${load(down)}.`}`);
   // Below the window, or harder than the planned RIR without a rep to spare at its bottom.
   const below = (s) => s.reps + s.rir < lo + (s.rir < rir[0] ? 1 : 0);
   if (last) {
@@ -468,16 +472,19 @@ function estimate({
       // A step down as in the large-step rule, the other way: the next set is taken a rep weaker
       // (the light week loses about one to failure from set to set), and this weight stays where one
       // step down lands above the window by more than this weight falls below it, plus a rep — the
-      // lighter weight keeps one rep of advantage.
+      // lighter weight keeps one rep of advantage. Only when this set was at most one rep below the
+      // window (as the heavier weight in that rule), and never where a set at the lighter weight
+      // today was not clearly lighter than the target: what was done beats the formula.
       const down = Math.max(0, round(w - step));
       const next = r - 1;
       const capNext = EPLEY.cap(w + body, next);
       const downR = down + body > 0 ? fine(30 * (capNext / (down + body) - 1)) : Infinity;
       const why = r < lo ? 'ниже цели' : `тяжелее плана (RIR ${range(rir)})`;
-      if (Math.max(0, lo - next) + 1 < downR - hi) {
+      const tried = withRir.some((s) => (s.weight || 0) >= down && (s.weight || 0) < w && s.reps + s.rir < hi + 2);
+      if (!tried && r >= lo - 1 && Math.max(0, lo - next) + 1 < downR - hi) {
         weight = w;
         const at = !Number.isFinite(downR) ? 'на шаг легче — уже без веса'
-          : `${category === 'pullup' && !(down > 0) ? load(down) : `при ${load(down)}`} выходит около ${fmtNum(downR, 0)} повторений до отказа — легче цели`;
+          : `${atLoad(down)} выходит около ${fmtNum(downR, 0)} повторений до отказа — легче цели`;
         reasons.push(`${now} — ${why}, но шаг ${fmtNum(step)} кг для этого веса крупный: ${at}. Этот вес и дальше, останавливайтесь на RIR ${range(rir)}, даже если повторений меньше.`);
       } else {
         weight = down;
