@@ -125,3 +125,11 @@ test('findOptionByName ignores case and ё', () => {
   const { program } = parseProgramText('День 1\n- Сгибание ног лёжа [iso]');
   assert.ok(findOptionByName(program, 'сгибание ног лежа'));
 });
+
+test('v1.6.3: a step of 0,5 kg (small add-on weights on a cable stack) is read and written back', () => {
+  const { program, warnings } = parseProgramText('День 1\n- Разводка на блоке [iso] шаг=0,5\n- Сгибания на блоке [iso] шаг=0.5\n');
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(program.days[0].slots.map((s) => s.step), [0.5, 0.5]);
+  const again = parseProgramText(programToText(program)).program;
+  assert.deepEqual(again.days[0].slots.map((s) => s.step), [0.5, 0.5]);
+});

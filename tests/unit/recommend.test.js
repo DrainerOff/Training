@@ -456,6 +456,63 @@ test('a fine step (machines at working weights): the large-step rule never fires
   }
 });
 
+test('regression v1.6.3: a step large for the weight going down — the hint keeps the weight, not a step that halves it', () => {
+  // A cable stack in 2,5 kg plates, light week (isolation 12–15 at RIR 2–3: 14–18 to failure); week 3:
+  // 7,5×8 at RIR 1. The first hint is 5 kg; 5×13 at RIR 2 (15) is in the window, then 5×12 at RIR 1
+  // (13) a rep below it. Before: «следующий 2,5 кг» — half the weight, ≈44 reps to failure.
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[7.5, 8, 1], [7.5, 8, 1], [7.5, 8, 1]] }], { category: 'iso' });
+  const at = (step, ...todaySets) => rec(s, { week: 1, category: 'iso', step, todaySets });
+  const done = [{ weight: 5, reps: 13, rir: 2 }, { weight: 5, reps: 12, rir: 1 }];
+  assert.equal(at(2.5).weight, 5);
+  assert.equal(at(2.5, done[0]).weight, 5);
+  let r = at(2.5, ...done);
+  assert.deepEqual([r.kind, r.weight], ['estimate', 5]);
+  let why = r.reasons.join(' ');
+  assert.match(why, /Сегодня второй подход 5×12 \(RIR 1\) — ниже цели, но шаг 2,5 кг для этого веса крупный: при 2,5 кг выходит около 54 повторений до отказа — легче цели\. Этот вес и дальше, останавливайтесь на RIR 2–3, даже если повторений меньше\./);
+  // The weight between the two, for the middle of the window with the next set a rep weaker.
+  assert.match(why, /Точнее — около 4,5 кг, если есть чем добрать вес \(маленький блин, гантель\)\. Шаг веса упражнения меняется в программе\./);
+  // Step 0,5 (add-on weights): that weight itself, no note.
+  r = at(0.5, ...done);
+  assert.equal(r.weight, 4.5);
+  assert.match(r.reasons.join(' '), /Сегодня второй подход 5×12 \(RIR 1\) — ниже цели: следующий 4,5 кг\./);
+  assert.doesNotMatch(r.reasons.join(' '), /крупный|Точнее/);
+  // Step 1: 4 kg is ≈22 to failure — further above the window than 5 kg falls below it: 5 stays.
+  assert.equal(at(1, ...done).weight, 5);
+  // A set further below the window: one step down is nearer even when large.
+  r = at(2.5, { weight: 7.5, reps: 7, rir: 1 });
+  assert.equal(r.weight, 5);
+  assert.doesNotMatch(r.reasons.join(' '), /крупный/);
+  // At one step from zero: never «0 кг» for a weight that is part of the stack.
+  r = at(2.5, { weight: 2.5, reps: 12, rir: 1 });
+  assert.equal(r.weight, 2.5);
+  assert.match(r.reasons.join(' '), /шаг 2,5 кг для этого веса крупный: на шаг легче — уже без веса\. Этот вес и дальше/);
+  why = r.reasons.join(' ');
+  assert.doesNotMatch(why, /NaN|Infinity|бесконечн/);
+});
+
+test('v1.6.3: with a fine step a set below the window is still one step down', () => {
+  // A step at most 5% of the weight: the large-step rule going down never fires, on any week.
+  let cases = 0;
+  for (const step of [0.5, 1, 1.25, 2, 2.5, 5]) {
+    for (let w = step * 20; w <= 200; w += step) {
+      for (const [week, src, category, todaySets] of [
+        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'iso', [{ weight: w, reps: 12, rir: 1 }]],
+        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'iso', [{ weight: w, reps: 9, rir: 2 }]],
+        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'base', [{ weight: w, reps: 12, rir: 0 }]],
+        [2, [[w, 7, 1], [w, 7, 1], [w, 7, 0]], 'base', [{ weight: w, reps: 9, rir: 0 }]],
+        [3, [[w, 10, 2], [w, 10, 1], [w, 9, 3]], 'iso', [{ weight: w, reps: 4, rir: 1 }]],
+      ]) {
+        const s = history([{ date: '2026-11-06', week: week === 3 ? 2 : 3, sets: src }], { category });
+        const r = recommend({ list: s.get('press'), session: today(week), target: targetFor({ category }, week), category, step, todaySets });
+        assert.equal(r.weight, Math.round((w - step) * 100) / 100, `step ${step}, ${w} kg, week ${week}, ${category}`);
+        assert.doesNotMatch(r.reasons.join(' '), /крупный|Точнее/, `step ${step}, ${w} kg, week ${week}, ${category}`);
+        cases++;
+      }
+    }
+  }
+  assert.ok(cases > 1000);
+});
+
 // ---------------------------------------------------------------- v1.6.1: every set, the order of the day
 
 test("«Ориентир»: today's latest set corrects it, not only the first", () => {

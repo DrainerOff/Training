@@ -54,6 +54,11 @@
 //    at 10–12, RIR 2–3) is below it too: the next set, more tired, falls short. A step up follows the
 //    large-step rule above (it errs light) and never goes back to a weight that was below the window
 //    today: with dumbbells 10 / 12,5 the hint would swing between the two after every set.
+//    A step down follows it too, the other way: the next set is taken a rep weaker (the light week
+//    loses about one to failure from set to set), and the weight stays where one step down lands above
+//    the window by more than this weight falls below it, plus a rep (a cable stack in 2,5 kg plates:
+//    5 → 2,5 kg is half the load, ≈54 to failure at 14–18). Where that step lands above the window,
+//    the ⓘ names the weight between the two for the middle of the window: small add-on weights make it.
 //  * Order: two or more places later in the day's program than in the source workout → the ⓘ and
 //    the line say so; the weight itself is not recounted (one case is not a number). Compared within
 //    one day of the program, as above.
@@ -391,7 +396,9 @@ function estimate({
     if (span[0] === span[1]) span = null;
   } else {
     const cands = [];
-    for (let k = -12; k <= 12; k++) {
+    // Twelve steps each way, or half the load where the step is fine for it (0,5 kg at 150 kg).
+    const K = Math.max(12, Math.ceil((0.5 * (top + body)) / step));
+    for (let k = -K; k <= K; k++) {
       const w = round(top + k * step);
       if (w < 0 || (share === 0 && w <= 0)) continue;
       cands.push({ w, r: rtfAt(w) });
@@ -458,8 +465,30 @@ function estimate({
     const r = last.reps + last.rir;
     const w = last.weight || 0;
     if (below(last)) {
-      weight = Math.max(0, round(w - step));
-      reasons.push(`${now} — ${r < lo ? 'ниже цели' : `тяжелее плана (RIR ${range(rir)})`}: следующий ${load(weight)}.`);
+      // A step down as in the large-step rule, the other way: the next set is taken a rep weaker
+      // (the light week loses about one to failure from set to set), and this weight stays where one
+      // step down lands above the window by more than this weight falls below it, plus a rep — the
+      // lighter weight keeps one rep of advantage.
+      const down = Math.max(0, round(w - step));
+      const next = r - 1;
+      const capNext = EPLEY.cap(w + body, next);
+      const downR = down + body > 0 ? fine(30 * (capNext / (down + body) - 1)) : Infinity;
+      const why = r < lo ? 'ниже цели' : `тяжелее плана (RIR ${range(rir)})`;
+      if (Math.max(0, lo - next) + 1 < downR - hi) {
+        weight = w;
+        const at = !Number.isFinite(downR) ? 'на шаг легче — уже без веса'
+          : `${category === 'pullup' && !(down > 0) ? load(down) : `при ${load(down)}`} выходит около ${fmtNum(downR, 0)} повторений до отказа — легче цели`;
+        reasons.push(`${now} — ${why}, но шаг ${fmtNum(step)} кг для этого веса крупный: ${at}. Этот вес и дальше, останавливайтесь на RIR ${range(rir)}, даже если повторений меньше.`);
+      } else {
+        weight = down;
+        reasons.push(`${now} — ${why}: следующий ${load(weight)}.`);
+      }
+      // Where a step is large for the weight, the weight between the two (body weight aside) for the
+      // middle of the window: on a cable stack with small add-on weights it can be done.
+      if (downR > hi) {
+        const mid = Math.round(2 * (capNext / (1 + aim / 30) - body)) / 2;
+        if (mid > down && mid < w) reasons.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель). Шаг веса упражнения меняется в программе.`);
+      }
     } else if (r >= hi + 2) {
       // A step up as in the large-step rule: only when that weight misses the window by less than this
       // one overshoots it — and never back to a weight that was below the window today.
