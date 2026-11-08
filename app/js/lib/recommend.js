@@ -40,7 +40,9 @@
 //  * Light week (its target: base lifts and Hammer 10–12, isolation 12–15, at the RIR of PHASE[1];
 //    lib/program.js CATEGORY lightReps) from a heavy one is a long way to recount: Epley and Brzycki
 //    differ by 3–8% there for 10–12 and by 8–13% for 12–15, so the hint is «≈ weight (from–to)»
-//    between the two. At the same strength it is never heavier than week 2: its window of reps to
+//    between the two. It aims the first set above the middle of the window — isolation, Hammer and
+//    calves at its top (15 at RIR 3) — since on the light week the reps to failure fall from set to
+//    set (LIGHT_FADE), and the third set still has to land in the window. At the same strength it is never heavier than week 2: its window of reps to
 //    failure lies above week 2's, and both formulas give less load for more reps.
 //    Where one step is over ~10% of the weight (light dumbbells), the nearest weight can be the week 2
 //    one.
@@ -59,6 +61,9 @@
 //    the window by more than this weight falls below it, plus a rep (a cable stack in 2,5 kg plates:
 //    5 → 2,5 kg is half the load, ≈54 to failure at 14–18) — only when that set was at most one rep
 //    below the window, and not where a set at the lighter weight today was in the window or below it.
+//    On the light week a set far below the window (70×7 at RIR 1 at 12–15) is not fixed by one step:
+//    the next weight is as many steps lighter as that set says, the next set a rep weaker and at least
+//    half a rep into the window (57,5 kg, not 67,5).
 //    Where that step lands above the window, the ⓘ names the weight between the two for the middle of
 //    the window: small add-on weights make it. The advice for the first set goes once a set is logged.
 //  * Order: two or more places later in the day's program than in the source workout → the ⓘ and
@@ -100,6 +105,7 @@ const range = (r) => (r[0] === r[1] ? String(r[0]) : `${r[0]}–${r[1]}`);
 const valid = (s) => !s.deleted && !s.drop && s.reps > 0;
 const round = (w) => Math.round(w * 100) / 100;
 const fine = (x) => Math.round(x * 1e6) / 1e6;
+const cap1 = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const ORDINAL = ['первый', 'второй', 'третий', 'четвёртый', 'пятый', 'шестой'];
 
 // Two or more places later in the day's program than in the workout compared with: more work before it.
@@ -316,6 +322,12 @@ function sameWeek({
 const EPLEY = { cap: (load, rtf) => load * (1 + rtf / 30), load: (cap, rtf) => cap / (1 + rtf / 30) };
 const BRZYCKI = { cap: (load, rtf) => (load * 36) / (37 - rtf), load: (cap, rtf) => (cap * (37 - rtf)) / 36 };
 
+// Reps to failure lost from the first set of the light week to the third: isolation, Hammer and calves
+// at 12–18 to failure lose a few (the first set then goes at the top of the window: 15 at RIR 3);
+// base lifts and pull-ups at 8–15 about one. On the heavy weeks they hardly lose any.
+export const LIGHT_FADE = { base: 1, pullup: 1 };
+const lightFade = (category) => LIGHT_FADE[category] ?? 4;
+
 // The heaviest sets with RIR: all at the top weight, plus the next weight down when that is one set.
 function heaviest(sets) {
   const v = sets.filter((s) => valid(s) && s.rir != null).sort((a, b) => (b.weight || 0) - (a.weight || 0));
@@ -392,9 +404,13 @@ function estimate({
   let weight = null;
   let span = null;
   let coarse = null;
+  const first = Math.min(hi, aim + lightFade(category) / 2);
   if (light) {
-    const ep = EPLEY.load(C, aim) - body;
-    const bz = aim < 30 ? BRZYCKI.load(cap(BRZYCKI), aim) - body : ep;
+    // The first set above the middle of the window, so that the three sets sit around it: on the
+    // light week the reps to failure fall from set to set (LIGHT_FADE), and the third set still has
+    // to land in the window. Aimed at the middle, the second and third sets end below it.
+    const ep = EPLEY.load(C, first) - body;
+    const bz = first < 30 ? BRZYCKI.load(cap(BRZYCKI), first) - body : ep;
     weight = grid((ep + bz) / 2);
     span = [grid(Math.min(ep, bz)), grid(Math.max(ep, bz))];
     if (span[0] === span[1]) span = null;
@@ -445,7 +461,8 @@ function estimate({
   const moved = movedLater(place, order);
   if (moved) reasons.push(`${movedText(place, moved, src)}, поэтому ориентир может быть завышен — проверьте первым подходом.`);
   if (light) {
-    reasons.push(`Цель лёгкой недели — ${goal}. Такой пересчёт неточен: ${span ? `формулы дают от ${load(span[0])} до ${load(span[1])}, ` : ''}ошибка около ±10%.`);
+    reasons.push(`Цель лёгкой недели — ${goal}. Вес взят ${first === hi ? `под верх цели — ${reps[1]} при RIR ${fmtNum(rir[1])}` : 'чуть выше середины цели'}: на лёгкой неделе от подхода к подходу повторений до отказа становится меньше, и третий подход тоже должен остаться в цели.`);
+    reasons.push(`Такой пересчёт неточен: ${span ? `формулы дают от ${load(span[0])} до ${load(span[1])}, ` : ''}ошибка около ±10%.`);
   } else {
     reasons.push(`По этим подходам ${atLoad(weight)} выходит около ${fmtNum(rtfAt(weight), 0)} повторений до отказа (повторения + RIR); цель недели — ${goal}.`);
     if (coarse) reasons.push(coarse);
@@ -478,7 +495,8 @@ function estimate({
       const down = Math.max(0, round(w - step));
       const next = r - 1;
       const capNext = EPLEY.cap(w + body, next);
-      const downR = down + body > 0 ? fine(30 * (capNext / (down + body) - 1)) : Infinity;
+      const rAt = (x) => (x + body > 0 ? fine(30 * (capNext / (x + body) - 1)) : Infinity);
+      const downR = rAt(down);
       const why = r < lo ? 'ниже цели' : `тяжелее плана (RIR ${range(rir)})`;
       const tried = withRir.some((s) => (s.weight || 0) >= down && (s.weight || 0) < w && s.reps + s.rir < hi + 2);
       if (!tried && r >= lo - 1 && Math.max(0, lo - next) + 1 < downR - hi) {
@@ -488,13 +506,22 @@ function estimate({
         reasons.push(`${now} — ${why}, но шаг ${fmtNum(step)} кг для этого веса крупный: ${at}. Этот вес и дальше, останавливайтесь на RIR ${range(rir)}, даже если повторений меньше.`);
       } else {
         weight = down;
-        reasons.push(`${now} — ${why}: следующий ${load(weight)}.`);
+        // Light week: as many steps as this set says, not always one — the next set (a rep weaker) at
+        // least half a rep into the window, as the hint itself errs light. 70×7 at RIR 1 at 12–15,
+        // RIR 2–3 (8 to failure, the window 14–18): 67,5 kg is ≈8 to failure, 57,5 kg ≈15. Never below
+        // a lighter weight that was in the window today (or above it): what was done beats the formula.
+        const floor = Math.max(-1, ...withRir.filter((s) => (s.weight || 0) < w && !below(s)).map((s) => s.weight || 0));
+        if (light) while (weight > 0 && rAt(weight) < lo + 0.5 && round(weight - step) >= floor) weight = Math.max(0, round(weight - step));
+        reasons.push(weight < down
+          ? `${now} — ${why}: следующий ${load(weight)}. ${cap1(atLoad(down))} выходит около ${fmtNum(Math.max(0, rAt(down)), 0)} повторений до отказа — ${rAt(down) < lo ? 'тоже ниже цели' : 'впритык к нижней границе'}, поэтому легче на ${fmtNum(round(w - weight))} кг, а не на шаг.`
+          : `${now} — ${why}: следующий ${load(weight)}.`);
       }
       // Where a step is large for the weight, the weight between the two (body weight aside) for the
       // middle of the window: on a cable stack with small add-on weights it can be done.
-      if (downR > hi) {
+      const lower = weight < down ? weight : down;
+      if (rAt(lower) > hi) {
         const mid = Math.round(2 * (capNext / (1 + aim / 30) - body)) / 2;
-        if (mid > down && mid < w) reasons.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель). Шаг веса упражнения меняется в программе.`);
+        if (mid > lower && mid < round(lower + step)) reasons.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель). Шаг веса упражнения меняется в программе.`);
       }
     } else if (r >= hi + 2) {
       // A step up as in the large-step rule: only when that weight misses the window by less than this

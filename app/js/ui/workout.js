@@ -151,7 +151,8 @@ export function Workout({ session, mode = 'live', syncStatus }) {
       </div>
     </main>
     ${active
-      ? html`<${Dock} key=${`${active.item.slotId}:${active.sets.length}`} row=${active} session=${session} live=${live} onLogged=${onLogged} justLogged=${justLogged} />`
+      ? html`<${Dock} key=${`${active.item.slotId}:${active.sets.length}`} row=${active} session=${session} live=${live} onLogged=${onLogged} justLogged=${justLogged}
+          allDone=${rows.every((r) => r.complete)} onFinish=${() => openFinish(session, rows)} />`
       : null}
   `;
 }
@@ -300,7 +301,66 @@ function ExercisePanel({ row, session, next, onNext }) {
 
 // ---------------------------------------------------------------- the dock
 
-function Dock({ row, session, live, onLogged, justLogged }) {
+// Time since the latest set of the workout, while it runs (up to 30 minutes).
+function useRest(session, live) {
+  const allSets = app.store.setsOf(session.id);
+  const lastAt = allSets.length ? Math.max(...allSets.map((s) => s.createdAt)) : null;
+  const now = useNow(1000, live && !!lastAt);
+  return live && lastAt && now - lastAt < 30 * 60 * 1000 ? fmtDuration((now - lastAt) / 1000) : null;
+}
+
+// Today's weight 10%+ below the same week last time: was it meant? Asked in place of the
+// recommendation line (which would say «закрепить» the old weight) until answered — also once the
+// plan is done and the dock is folded.
+function useDropAsk(row, session) {
+  const { item, prevs, target } = row;
+  const askKey = `drop-ask:${session.id}:${item.slotId}`;
+  const [noAskYet, setNoAskYet] = useState(() => !local.get(askKey));
+  const drop = noAskYet
+    ? weightDrop({ todaySets: row.mine, ref: prevs.samePhase, target, category: item.category, flags: row.todayFlags, share: row.share, bodyweightToday: row.bodyweight })
+    : null;
+  const markBaseline = async () => {
+    await app.store.updateItem(session.id, item.slotId, { flags: { baseline: true } });
+    app.ui.toast('Отмечено: новая точка отсчёта');
+  };
+  const noAsk = () => {
+    local.set(askKey, true);
+    setNoAskYet(false);
+  };
+  return { drop, markBaseline, noAsk };
+}
+
+// The plan of the exercise is done (or it is skipped): nothing more is asked for. The dock folds into
+// one line — what was just recorded and «Отменить» for a few seconds, then «План выполнен». «Ещё
+// подход» opens the composer for a set over the plan, on purpose; when every exercise is done,
+// «Завершить тренировку» is right there (in a running workout). The dock is re-mounted after every
+// set, so it folds again after that set.
+function Dock(props) {
+  const { row, session, live, justLogged, allDone, onFinish } = props;
+  const [more, setMore] = useState(false);
+  const folded = row.complete && !more;
+  const ask = useDropAsk(row, session);
+  // No rest timer once everything is done: there is no next set to wait for.
+  const rest = useRest(session, live && folded && !allDone);
+  if (!folded) return html`<${Composer} ...${props} />`;
+  const { item, skipped } = row;
+  return html`<section class="dock dock--folded" style=${`--phase:var(--plate-${session.week})`} aria-label=${skipped ? `${item.name}: пропущено` : `${item.name}: план выполнен`}>
+    <div class="dock__head">
+      ${justLogged
+        ? html`<span class="dock__done" role="status"><${Icon} name="check" /><span class="dock__done-text">${justLogged.text}</span></span>
+            <button type="button" class="dock__undo" onClick=${justLogged.undo}>Отменить</button>`
+        : html`<span class="dock__what"><b class="dock__set">${skipped ? 'Пропущено' : 'План выполнен'}</b> <span class="dock__name">${item.name}</span></span>`}
+      ${rest ? html`<span class="dock__rest" aria-label=${'Отдых ' + rest}>отдых ${rest}</span>` : null}
+    </div>
+    ${ask.drop ? html`<${DropAsk} drop=${ask.drop} item=${item} onMark=${ask.markBaseline} onNo=${ask.noAsk} />` : null}
+    <div class="dock__more">
+      <button type="button" class="btn" onClick=${() => setMore(true)}><${Icon} name="plus" />${skipped ? 'Записать подход' : 'Ещё подход'}</button>
+      ${live && allDone ? html`<button type="button" class="btn btn--primary" onClick=${onFinish}>Завершить тренировку</button>` : null}
+    </div>
+  </section>`;
+}
+
+function Composer({ row, session, live, onLogged, justLogged }) {
   const { item, sets, target, prevs, working, drops } = row;
   const category = item.category;
   const dropDue = target.drop > 0 && working >= target.sets && drops < target.drop;
@@ -338,26 +398,9 @@ function Dock({ row, session, live, onLogged, justLogged }) {
       return n;
     });
 
-  const allSets = app.store.setsOf(session.id);
-  const lastAt = allSets.length ? Math.max(...allSets.map((s) => s.createdAt)) : null;
-  const now = useNow(1000, live && !!lastAt);
-  const rest = live && lastAt && now - lastAt < 30 * 60 * 1000 ? fmtDuration((now - lastAt) / 1000) : null;
+  const rest = useRest(session, live);
 
-  // Today's weight 10%+ below the same week last time: was it meant? Asked in place of the
-  // recommendation line (which would say «закрепить» the old weight) until answered.
-  const askKey = `drop-ask:${session.id}:${item.slotId}`;
-  const [noAskYet, setNoAskYet] = useState(() => !local.get(askKey));
-  const drop = noAskYet
-    ? weightDrop({ todaySets: row.mine, ref: prevs.samePhase, target, category, flags: row.todayFlags, share: row.share, bodyweightToday: row.bodyweight })
-    : null;
-  const markBaseline = async () => {
-    await app.store.updateItem(session.id, item.slotId, { flags: { baseline: true } });
-    app.ui.toast('Отмечено: новая точка отсчёта');
-  };
-  const noAsk = () => {
-    local.set(askKey, true);
-    setNoAskYet(false);
-  };
+  const { drop, markBaseline, noAsk } = useDropAsk(row, session);
 
   const n = sets.length + 1;
   // Set number first: on a narrow screen the exercise name is what gets truncated.

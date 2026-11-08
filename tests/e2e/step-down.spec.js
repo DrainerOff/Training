@@ -48,7 +48,8 @@ test('light week, step 2,5 at 5 kg: a set a rep below the window keeps 5 kg (not
   await open(page);
   await seedWeek3(page);
   await startLight(page);
-  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 5 кг (от 5 кг до 7,5 кг)');
+  // (Before v1.6.4, aimed at the middle of the window: «5 кг (от 5 кг до 7,5 кг)»; now both formulas give 5.)
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 5 кг');
   await expect(logButton(page)).toHaveText('Записать 5 × 12');
   await log(page, 13, 2); // 15 to failure: in the window (14–18)
   await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 5 кг');
@@ -88,10 +89,9 @@ test('the program editor offers a step of 0,5 kg; the next workout steps by 0,5 
   await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 1, day: 1, date: '2026-10-30' }));
   await page.locator('.tabbar').getByRole('button', { name: 'Тренировка' }).click();
   await page.getByRole('button', { name: /^Пресс в тренажере/ }).click();
-  // With the finer step the first hint sits on the 0,5 grid (≈6 kg); ± moves by 0,5.
-  await expect(rec(page)).toHaveAttribute('aria-label', /^Ориентир на сегодня, приблизительно: 6 кг/);
-  await expect(logButton(page)).toHaveText('Записать 6 × 12');
-  await dock(page).getByRole('button', { name: 'Уменьшить: Вес' }).click();
+  // With the finer step the first hint sits on the 0,5 grid (≈5,5 kg since v1.6.4, the top of the
+  // window); ± moves by 0,5.
+  await expect(rec(page)).toHaveAttribute('aria-label', /^Ориентир на сегодня, приблизительно: 5,5 кг/);
   await expect(logButton(page)).toHaveText('Записать 5,5 × 12');
   await dock(page).getByRole('button', { name: 'Уменьшить: Вес' }).click();
   await log(page, 13, 2);
