@@ -120,6 +120,20 @@ test('review 7: «Отменить» right after the first set on a skipped exer
   await expect(row(page, CALVES)).toContainText('пропущено');
 });
 
+test('«Записать подход» on a skipped exercise, then «Вернуть» and «Пропустить» again: the dock folds again', async ({ page }) => {
+  await gym(page);
+  await open(page, CALVES);
+  const panel = page.locator('.panel');
+  await panel.getByRole('button', { name: 'Пропустить' }).click();
+  await dock(page).getByRole('button', { name: 'Записать подход' }).click();
+  await expect(dock(page)).toContainText(`Подход 1 из 3 ${CALVES}`);
+  await panel.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(dock(page)).toContainText(`Подход 1 из 3 ${CALVES}`);
+  await panel.getByRole('button', { name: 'Пропустить' }).click();
+  await expect(dock(page)).toContainText(`Пропущено ${CALVES}`);
+  await expect(dock(page).getByRole('button', { name: /^Записать/ })).toHaveCount(1); // «Записать подход» only
+});
+
 test('an old workout that still carries «пропущено» next to logged sets reads as done by its sets, and «Пропустить» alone still skips', async ({ page }) => {
   await gym(page);
   // As recorded by v1.4.2: the mark stayed on the calves after their sets.

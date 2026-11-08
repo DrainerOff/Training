@@ -513,7 +513,7 @@ function estimate({
         const floor = Math.max(-1, ...withRir.filter((s) => (s.weight || 0) < w && !below(s)).map((s) => s.weight || 0));
         if (light) while (weight > 0 && rAt(weight) < lo + 0.5 && round(weight - step) >= floor) weight = Math.max(0, round(weight - step));
         reasons.push(weight < down
-          ? `${now} — ${why}: следующий ${load(weight)}. ${cap1(atLoad(down))} выходит около ${fmtNum(Math.max(0, rAt(down)), 0)} повторений до отказа — ${rAt(down) < lo ? 'тоже ниже цели' : 'впритык к нижней границе'}, поэтому легче на ${fmtNum(round(w - weight))} кг, а не на шаг.`
+          ? `${now} — ${why}: следующий ${load(weight)}. ${cap1(atLoad(down))} выходит около ${fmtNum(Math.max(0, rAt(down)), 0)} повторений до отказа — ${Math.round(rAt(down)) < lo ? 'тоже ниже цели' : 'впритык к нижней границе'}, поэтому легче на ${fmtNum(round(w - weight))} кг, а не на шаг.`
           : `${now} — ${why}: следующий ${load(weight)}.`);
       }
       // Where a step is large for the weight, the weight between the two (body weight aside) for the

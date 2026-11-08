@@ -3054,4 +3054,14 @@ textarea.nutr-instr {
   flex: 1;
   min-width: 0;
   padding: 0 12px;
+  white-space: nowrap;
+}
+/* With «Завершить тренировку»: «Ещё подход» as wide as its words, the rest for the main action. */
+.dock__more--finish > .btn:first-child {
+  flex: none;
+}
+@media (max-width: 359px) {
+  .dock__finish-what {
+    display: none;
+  }
 }

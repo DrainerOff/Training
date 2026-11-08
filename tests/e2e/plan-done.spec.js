@@ -5,7 +5,7 @@
 // Synthetic data.
 import { test, expect } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
-import { ready, dock, logSet, seedOwner, state } from './helpers.js';
+import { ready, dock, logButton, logSet, pickRir, seedOwner, state } from './helpers.js';
 
 let web;
 let base;
@@ -100,6 +100,44 @@ test('the plan done: the dock folds — no «сверх плана», a set over
   await expect(dock(page).getByRole('button', { name: 'Завершить тренировку' })).toHaveCount(0);
   await dock(page).getByRole('button', { name: 'Ещё подход' }).click();
   await expect(dock(page)).toContainText('сверх плана');
+});
+
+test('a double tap on the last «Записать»: the second tap opens neither «Итог тренировки» nor a set over the plan; the last exercise stays in the dock', async ({ page }) => {
+  const last = await gym(page);
+  await pickRir(page, 1);
+  const box = await logButton(page).boundingBox();
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await logButton(page).click();
+  await expect(dock(page).locator('.dock__more')).toBeVisible();
+  // The second tap at the same spot lands on a button of the folded dock.
+  expect(await page.evaluate(([px, py]) => !!document.elementFromPoint(px, py)?.closest('.dock__more button'), [x, y])).toBe(true);
+  await page.mouse.click(x, y);
+  await page.waitForTimeout(300);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(dock(page)).not.toContainText('сверх плана');
+  expect(await lastSets(page, last.key)).toBe(last.sets);
+  // The last exercise stays open, not the first one of the day.
+  await expect(dock(page)).toContainText(`План выполнен ${last.name}`, { timeout: 8000 });
+  await expect(page.locator('.panel__title')).toHaveText(last.name);
+  // A tap a moment later is a tap.
+  await dock(page).getByRole('button', { name: 'Завершить тренировку' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Итог тренировки');
+});
+
+test('a finished workout opened from «История» with a set missing folds too: «Сделано N из M», «Записать подход» opens the composer', async ({ page }) => {
+  const last = await gym(page);
+  await page.getByRole('button', { name: 'Меню тренировки' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Завершить тренировку' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Завершить', exact: true }).click();
+  await expect(page.locator('.next__title')).toBeVisible();
+  await page.getByRole('button', { name: 'История' }).click();
+  await page.locator('.row--day').first().click();
+  await expect(dock(page)).toContainText(`Сделано ${last.sets - 1} из ${last.sets} ${last.name}`);
+  await expect(dock(page).getByRole('button', { name: /^Записать/ })).toHaveCount(1); // «Записать подход» only
+  await expect(dock(page).getByRole('button', { name: 'Завершить тренировку' })).toHaveCount(0);
+  await expect(dock(page).getByRole('group', { name: 'Фактический RIR' })).toHaveCount(0);
+  await dock(page).getByRole('button', { name: 'Записать подход' }).click();
+  await expect(dock(page)).toContainText(`Подход ${last.sets} из ${last.sets} ${last.name}`);
 });
 
 test('an exercise not done yet keeps the composer; one done earlier folds while others are still to do', async ({ page }) => {

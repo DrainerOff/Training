@@ -607,6 +607,11 @@ test('v1.6.4: light week, a set far below the window → the next weight several
   assert.match(r.reasons.join(' '), /следующий 62,5 кг\. .*поэтому легче на 7,5 кг, а не на шаг\./);
   // A lighter set below the window today is no floor.
   assert.equal(at({ weight: 62.5, reps: 11, rir: 1 }, { weight: 70, reps: 7, rir: 1 }).weight, 57.5);
+  // A rep below the window (65×12 at RIR 1, 13 to failure): a step lighter is ≈13,6 for the next set, a
+  // rep weaker — said as «около 14», so «впритык к нижней границе», not «тоже ниже цели» (14 is in it).
+  r = at({ weight: 65, reps: 12, rir: 1 });
+  assert.equal(r.weight, 60);
+  assert.match(r.reasons.join(' '), /При 62,5 кг выходит около 14 повторений до отказа — впритык к нижней границе, поэтому легче на 5 кг, а не на шаг\./);
   // The heavy weeks keep one step: their reps to failure hardly fall from set to set.
   r = rec(s, { week: 2, category: 'iso', todaySets: [{ weight: 85, reps: 5, rir: 1 }] });
   assert.equal(r.weight, 82.5);
