@@ -1434,8 +1434,9 @@ p {
   position: fixed;
   left: 0;
   right: 0;
-  /* above the iOS keyboard and no taller than what is visible (set by trackViewport) */
-  bottom: var(--kb, 0px);
+  /* right on the iOS keyboard and no taller than what is visible (set by trackViewport while
+     typing; without the keyboard: at the bottom of the screen) */
+  bottom: calc(100% - var(--vvtop, 0px) - var(--vvh, 100%));
   z-index: 41;
   display: flex;
   flex-direction: column;
@@ -1495,6 +1496,17 @@ p {
 }
 .sheet__foot .btn {
   flex: 1;
+}
+/* while typing the keyboard covers the home indicator: no room kept for it, more for the form */
+.kb-open .sheet__foot {
+  padding-bottom: 10px;
+}
+.kb-open .sheet:not(.sheet--footer) .sheet__body {
+  padding-bottom: 16px;
+}
+/* a screen's end can be scrolled up above the keyboard */
+.kb-open .screen {
+  padding-bottom: calc(24px + var(--kb, 0px));
 }
 .sheet__section {
   margin: 14px 0;
