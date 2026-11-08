@@ -191,19 +191,77 @@ export function Sheet({ title, children, onClose, footer = null, dirty = false }
     </div>`;
 }
 
-// The visible part of the screen above the iOS keyboard, for sheets: --vvh (its height) and
-// --kb (how much of the bottom the keyboard covers).
+// A text field that brings up the on-screen keyboard has focus.
+const NO_KEYBOARD = new Set(['checkbox', 'radio', 'file', 'range', 'color', 'button', 'submit', 'reset', 'image', 'hidden']);
+export function typing(el = document.activeElement) {
+  if (!el) return false;
+  if (el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+  return el.tagName === 'INPUT' && !NO_KEYBOARD.has(el.type);
+}
+
+// The part of the screen the iOS keyboard leaves visible, while a text field has focus:
+// --vvtop and --vvh (where it starts and its height) for sheets, --kb (what the keyboard covers)
+// for the screens, and the class kb-open. Sheets sit right on the keyboard, and the field being
+// typed in is scrolled into sight.
+// On the iPhone the keyboard's own ˄ ˅ ✓ bar is part of the keyboard here. When the field was low,
+// iOS scrolls the page up to it (visualViewport.offsetTop > 0), but fixed parts stay where they
+// were on screen (iOS 26, a home-screen app): counting that offset put the sheet's bottom, its
+// «Готово» and the field itself behind the keyboard. Other browsers do move fixed parts with it.
+// With the keyboard closed the variables are dropped: iOS can keep reporting a slightly shorter
+// visible area after it closes, which would leave sheets hanging above the bottom.
 export function trackViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
-  const root = document.documentElement.style;
+  const root = document.documentElement;
+  const apple = /Apple/.test(navigator.vendor || '');
   const set = () => {
-    root.setProperty('--vvh', `${Math.round(vv.height)}px`);
-    root.setProperty('--kb', `${Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))}px`);
+    const full = Math.max(window.innerHeight, root.clientHeight);
+    if (!typing() || vv.height >= full - 1) {
+      root.style.removeProperty('--vvh');
+      root.style.removeProperty('--vvtop');
+      root.style.removeProperty('--kb');
+      root.classList.remove('kb-open');
+      return;
+    }
+    const top = apple && vv.scale <= 1.01 ? 0 : vv.offsetTop;
+    root.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    root.style.setProperty('--vvtop', `${Math.round(top)}px`);
+    root.style.setProperty('--kb', `${Math.max(0, Math.round(full - top - vv.height))}px`);
+    root.classList.toggle('kb-open', full - vv.height > 80);
+    requestAnimationFrame(() => revealField(top + vv.height));
   };
   vv.addEventListener('resize', set);
   vv.addEventListener('scroll', set);
+  // Focus moves before the keyboard does (and between fields with ˄ ˅ while it stays up).
+  const later = () => setTimeout(set, 0);
+  document.addEventListener('focusin', later);
+  document.addEventListener('focusout', later);
   set();
+}
+
+// The field being typed in, in sight: in a sheet between its header and its footer, on a screen
+// above the keyboard. After the sheet shrank to fit above the keyboard its list kept its scroll
+// position, and the field could end up under «Готово» or below the visible part. With room, the
+// field's label and its group come along (e.g. all three weeks of «Особые подходы»).
+function revealField(visibleBottom) {
+  const el = document.activeElement;
+  if (!typing(el)) return;
+  const box = el.closest('.sheet__body, .screen');
+  if (!box) return;
+  const view = box.getBoundingClientRect();
+  const top = view.top + 8;
+  const bottom = Math.min(view.bottom, visibleBottom) - 8;
+  if (bottom - top < 40) return;
+  const f = el.getBoundingClientRect();
+  if (f.top >= top && f.bottom <= bottom) return;
+  const fits = (x) => x && x !== box && box.contains(x) && x.getBoundingClientRect().height <= bottom - top;
+  const section = el.closest('.sheet__section, .card');
+  const row = el.closest('.kv, .setup-field, label');
+  const g = (fits(section) ? section : fits(row) ? row : el).getBoundingClientRect();
+  // Down: the group's end in sight, but never past the field's own top (a tall text box).
+  // Up: the group's start in sight.
+  const d = f.bottom > bottom ? Math.min(g.bottom - bottom, f.top - top) : g.top - top;
+  if (d) box.scrollTop += d;
 }
 
 export function openSheet(renderFn) {
