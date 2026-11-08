@@ -75,6 +75,12 @@ async function phone(browser, screen, { staleAfterClose = 0 } = {}) {
     document.addEventListener('focusin', () => setTimeout(update, 30));
     document.addEventListener('focusout', () => setTimeout(update, 30));
     window.__keyboard = () => ({ shown, pan, visibleBottom: window.innerHeight - shown });
+    // The keyboard hidden by its own button: the field keeps focus, the area is full again (or nearly).
+    window.__hideKeyboard = (rest = 0) => {
+      shown = rest;
+      pan = 0;
+      fire();
+    };
   }, [...screen.safe, screen.keyboard, staleAfterClose]);
   const page = await context.newPage();
   await page.goto(base);
@@ -176,6 +182,68 @@ test('after the keyboard closes the sheet is back at the bottom, even when iOS s
   await settled(sheet);
   const foot = await sheet.locator('.sheet__foot').boundingBox();
   expect(Math.round(foot.y + foot.height)).toBe(screen.height);
+  await context.close();
+});
+
+// verifier: a field already in sight with its label under the header (˄ to it, or iOS scrolled the
+// list itself) — the label comes into sight too. Without the keyboard the field and the label stay put.
+test('a field in sight whose label is under the header: the list shows the label too', async ({ browser }) => {
+  const screen = SCREENS[0];
+  const { context, page } = await phone(browser, screen);
+  const sheet = await exerciseSheet(page);
+  const week = (n) => sheet.getByPlaceholder('например 3x10-12@1-2').nth(n - 1);
+  await week(2).scrollIntoViewIfNeeded();
+  await expectTypable(page, sheet, week(2), screen, 'Неделя 2');
+  const body = sheet.locator('.sheet__body');
+  await body.evaluate((b, el) => {
+    b.scrollTop += el.getBoundingClientRect().top - b.getBoundingClientRect().top - 12;
+  }, await week(1).elementHandle());
+  await week(1).evaluate((el) => el.focus({ preventScroll: true }));
+  await page.waitForTimeout(150);
+  const g = await week(1).evaluate((el) => {
+    const b = el.closest('.sheet__body').getBoundingClientRect();
+    const label = el.closest('.kv').querySelector('label').getBoundingClientRect();
+    return { bodyTop: b.top, labelTop: label.top, fieldBottom: el.getBoundingClientRect().bottom, visible: window.__keyboard().visibleBottom };
+  });
+  expect(Math.round(g.labelTop)).toBeGreaterThanOrEqual(Math.round(g.bodyTop));
+  expect(g.fieldBottom).toBeLessThanOrEqual(g.visible);
+  await context.close();
+});
+
+// verifier: the keyboard hidden by its own button keeps the field focused; iOS may still report the
+// visible area 24 px short. That is no keyboard: the sheet is at the bottom.
+test('the keyboard hidden while the field keeps focus: the sheet is at the bottom', async ({ browser }) => {
+  const screen = SCREENS[0];
+  const { context, page } = await phone(browser, screen);
+  const sheet = await exerciseSheet(page);
+  await expectTypable(page, sheet, sheet.getByLabel('Заметка тренера'), screen, 'Заметка тренера');
+  await page.evaluate(() => window.__hideKeyboard(24));
+  await page.waitForTimeout(100);
+  const g = await sheet.evaluate((el) => ({ bottom: el.getBoundingClientRect().bottom, focused: document.activeElement.tagName, open: document.documentElement.classList.contains('kb-open') }));
+  expect(g.focused).toBe('TEXTAREA');
+  expect(Math.round(g.bottom)).toBe(screen.height);
+  expect(g.open).toBe(false);
+  await context.close();
+});
+
+// verifier: ˄ ˅ on the iPhone also reaches fields of the screen behind an open sheet (the program
+// editor's «Название дня»). The screen behind is not scrolled for it.
+test('a field of the screen behind an open sheet is not scrolled into sight', async ({ browser }) => {
+  const screen = SCREENS[0];
+  const { context, page } = await phone(browser, screen);
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  await page.getByRole('button', { name: /Редактировать программу/ }).click();
+  const list = page.locator('.screen');
+  await list.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  const before = await list.evaluate((el) => el.scrollTop);
+  expect(before).toBeGreaterThan(0);
+  await page.locator('.slot-edit').last().locator('button').first().click();
+  const sheet = page.getByRole('dialog', { name: 'Упражнение' });
+  await settled(sheet);
+  await expectTypable(page, sheet, sheet.getByLabel('Заметка тренера'), screen, 'Заметка тренера');
+  await page.getByPlaceholder('Название дня (необязательно)').evaluate((el) => el.focus({ preventScroll: true }));
+  await page.waitForTimeout(150);
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
   await context.close();
 });
 

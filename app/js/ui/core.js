@@ -208,7 +208,7 @@ export function typing(el = document.activeElement) {
 // were on screen (iOS 26, a home-screen app): counting that offset put the sheet's bottom, its
 // «Готово» and the field itself behind the keyboard. Other browsers do move fixed parts with it.
 // With the keyboard closed the variables are dropped: iOS can keep reporting a slightly shorter
-// visible area after it closes, which would leave sheets hanging above the bottom.
+// visible area after it closes (by ~24 px), which would leave sheets hanging above the bottom.
 export function trackViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
@@ -216,7 +216,8 @@ export function trackViewport() {
   const apple = /Apple/.test(navigator.vendor || '');
   const set = () => {
     const full = Math.max(window.innerHeight, root.clientHeight);
-    if (!typing() || vv.height >= full - 1) {
+    // Less than 40 px short is no keyboard (a keyboard hidden by its own button, the field still focused).
+    if (!typing() || vv.height > full - 40) {
       root.style.removeProperty('--vvh');
       root.style.removeProperty('--vvtop');
       root.style.removeProperty('--kb');
@@ -239,25 +240,30 @@ export function trackViewport() {
   set();
 }
 
-// The field being typed in, in sight: in a sheet between its header and its footer, on a screen
-// above the keyboard. After the sheet shrank to fit above the keyboard its list kept its scroll
-// position, and the field could end up under «Готово» or below the visible part. With room, the
-// field's label and its group come along (e.g. all three weeks of «Особые подходы»).
+// The field being typed in, in sight with its label: in a sheet between its header and its footer,
+// on a screen above the keyboard. After the sheet shrank to fit above the keyboard its list kept its
+// scroll position, and the field could end up under «Готово» or below the visible part. A field that
+// was out of sight comes with its group if there is room (e.g. all three weeks of «Особые подходы»);
+// one already in sight moves only as much as its label needs.
 function revealField(visibleBottom) {
   const el = document.activeElement;
   if (!typing(el)) return;
   const box = el.closest('.sheet__body, .screen');
   if (!box) return;
+  // ˄ ˅ on the iPhone also reach the fields of the screen behind an open sheet: leave it as it is.
+  if (box.classList.contains('screen') && document.querySelector('.sheet')) return;
   const view = box.getBoundingClientRect();
   const top = view.top + 8;
   const bottom = Math.min(view.bottom, visibleBottom) - 8;
   if (bottom - top < 40) return;
-  const f = el.getBoundingClientRect();
-  if (f.top >= top && f.bottom <= bottom) return;
+  const inSight = (r) => r.top >= top && r.bottom <= bottom;
   const fits = (x) => x && x !== box && box.contains(x) && x.getBoundingClientRect().height <= bottom - top;
-  const section = el.closest('.sheet__section, .card');
   const row = el.closest('.kv, .setup-field, label');
-  const g = (fits(section) ? section : fits(row) ? row : el).getBoundingClientRect();
+  const near = (fits(row) ? row : el).getBoundingClientRect();
+  if (inSight(near)) return;
+  const f = el.getBoundingClientRect();
+  const section = el.closest('.sheet__section, .card');
+  const g = !inSight(f) && fits(section) ? section.getBoundingClientRect() : near;
   // Down: the group's end in sight, but never past the field's own top (a tall text box).
   // Up: the group's start in sight.
   const d = f.bottom > bottom ? Math.min(g.bottom - bottom, f.top - top) : g.top - top;
