@@ -304,9 +304,10 @@ test('light week from a heavy one: «≈ weight (from–to)», marked as an appr
   const s = history([{ date: '2026-11-06', week: 3, sets: [[95, 7, 1], [95, 7, 1], [95, 7, 0]] }], { category: 'hammer' });
   const r = rec(s, { week: 1, category: 'hammer' });
   assert.deepEqual([r.kind, r.basis, r.approx], ['estimate', 'light', true]);
-  assert.deepEqual([r.weight, r.range], [80, [77.5, 82.5]]);
+  // Hammer: the first set at the top of the window (12 at RIR 3) — the light week loses reps set to set.
+  assert.deepEqual([r.weight, r.range], [75, [72.5, 80]]);
   assert.match(r.reasons[0], /Лёгкой недели в истории этого варианта ещё нет, поэтому вес пересчитан с недели 3/);
-  assert.match(r.reasons.join(' '), /Цель лёгкой недели — 10–12 при RIR 2–3\. .*формулы дают от 77,5 кг до 82,5 кг, ошибка около ±10%/);
+  assert.match(r.reasons.join(' '), /Цель лёгкой недели — 10–12 при RIR 2–3\. Вес взят под верх цели — 12 при RIR 3: на лёгкой неделе от подхода к подходу повторений до отказа становится меньше, и третий подход тоже должен остаться в цели\. .*формулы дают от 72,5 кг до 80 кг, ошибка около ±10%/);
   assert.match(r.reasons.join(' '), /Если первый подход тяжелее RIR 2 — снизьте вес/);
   assert.doesNotMatch(r.reasons.join(' '), /RIR 4/);
 });
@@ -323,17 +324,20 @@ const cycle = (w2, w3, step, category = 'iso') => {
 };
 
 test('light week at RIR 2–3: heavier than at RIR 4–5, still below the week 2 weight', () => {
-  // Machine, step 2.5: week 2 100×9–10, week 3 105×6–7 → light ≈ 87,5 (from 82,5 to 90); at RIR 4–5 it was ≈ 82,5.
+  // Machine, step 2.5: week 2 100×9–10, week 3 105×6–7 → light ≈ 85 (from 82,5 to 90; a base lift aims a
+  // little above the middle of the window, at 87,5 before v1.6.4); at RIR 4–5 it was ≈ 82,5.
   let r = cycle([[100, 10, 2], [100, 10, 1], [100, 9, 1], [100, 9, 1]], [[105, 7, 1], [105, 7, 1], [105, 6, 1], [105, 6, 0]], 2.5, 'base');
-  assert.deepEqual([r.basis, r.weight, r.range], ['light', 87.5, [82.5, 90]]);
+  assert.deepEqual([r.basis, r.weight, r.range], ['light', 85, [82.5, 90]]);
+  assert.match(r.reasons.join(' '), /Вес взят чуть выше середины цели: на лёгкой неделе/);
   assert.ok(r.weight < 100 && r.range[1] < 100);
-  // Isolation 40 kg, 12–15 since v1.6.0: ≈ 32,5 (from 30 to 35), below 40 (at 10–12 it was ≈ 35).
+  // Isolation 40 kg, 12–15 since v1.6.0: ≈ 30 (from 27,5 to 32,5; the top of the window since v1.6.4),
+  // below 40 (at 10–12 it was ≈ 35).
   r = cycle([[40, 10, 2], [40, 10, 1], [40, 9, 1]], [[42.5, 8, 1], [42.5, 7, 1], [42.5, 7, 0]], 2.5);
-  assert.deepEqual([r.weight, r.range], [32.5, [30, 35]]);
+  assert.deepEqual([r.weight, r.range], [30, [27.5, 32.5]]);
   assert.match(r.reasons.join(' '), /Цель лёгкой недели — 12–15 при RIR 2–3\./);
   // The same numbers on a base lift (10–12): heavier than isolation, still below week 2.
   r = cycle([[40, 10, 2], [40, 10, 1], [40, 9, 1]], [[42.5, 8, 1], [42.5, 7, 1], [42.5, 7, 0]], 2.5, 'base');
-  assert.deepEqual([r.weight, r.range], [35, [35, 37.5]]);
+  assert.deepEqual([r.weight, r.range], [35, [32.5, 37.5]]);
   assert.match(r.reasons.join(' '), /Цель лёгкой недели — 10–12 при RIR 2–3\./);
 });
 
@@ -356,10 +360,10 @@ test('light week never heavier than week 2 at the same strength; equal only wher
     }
   }
   assert.ok(n > 2000);
-  // Light dumbbells, step 2: week 2 14×10, week 3 16×7. Isolation at 12–15 → 12 (range 12–14); a base
+  // Light dumbbells, step 2: week 2 14×10, week 3 16×7. Isolation at 12–15 → 12 (range 10–12); a base
   // lift at 10–12 → the nearest dumbbell is 14 again (one step is 14% of the weight).
   let r = cycle([[14, 10, 2], [14, 10, 1], [14, 9, 1]], [[16, 7, 1], [16, 7, 1], [16, 6, 0]], 2);
-  assert.deepEqual([r.weight, r.range], [12, [12, 14]]);
+  assert.deepEqual([r.weight, r.range], [12, [10, 12]]);
   r = cycle([[14, 10, 2], [14, 10, 1], [14, 9, 1]], [[16, 7, 1], [16, 7, 1], [16, 6, 0]], 2, 'base');
   assert.equal(r.weight, 14);
 });
@@ -532,27 +536,86 @@ test('verifier on v1.6.3: the advice for the first set goes once a set is logged
   assert.match(rec(s, { week: 1, category: 'iso', todaySets: [{ weight: 5, reps: 12 }] }).reasons.join(' '), /Если первый подход тяжелее RIR 2/);
 });
 
-test('v1.6.3: with a fine step a set below the window is still one step down', () => {
-  // A step at most 5% of the weight: the large-step rule going down never fires, on any week.
+test('v1.6.3: with a fine step a set below the window is one step down on the heavy weeks', () => {
+  // A step at most 5% of the weight: the large-step rule going down never fires.
   let cases = 0;
   for (const step of [0.5, 1, 1.25, 2, 2.5, 5]) {
     for (let w = step * 20; w <= 200; w += step) {
       for (const [week, src, category, todaySets] of [
-        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'iso', [{ weight: w, reps: 12, rir: 1 }]],
-        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'iso', [{ weight: w, reps: 9, rir: 2 }]],
-        [1, [[w, 7, 1], [w, 7, 1], [w, 7, 1]], 'base', [{ weight: w, reps: 12, rir: 0 }]],
         [2, [[w, 7, 1], [w, 7, 1], [w, 7, 0]], 'base', [{ weight: w, reps: 9, rir: 0 }]],
         [3, [[w, 10, 2], [w, 10, 1], [w, 9, 3]], 'iso', [{ weight: w, reps: 4, rir: 1 }]],
       ]) {
         const s = history([{ date: '2026-11-06', week: week === 3 ? 2 : 3, sets: src }], { category });
         const r = recommend({ list: s.get('press'), session: today(week), target: targetFor({ category }, week), category, step, todaySets });
         assert.equal(r.weight, Math.round((w - step) * 100) / 100, `step ${step}, ${w} kg, week ${week}, ${category}`);
-        assert.doesNotMatch(r.reasons.join(' '), /крупный|Точнее/, `step ${step}, ${w} kg, week ${week}, ${category}`);
+        assert.doesNotMatch(r.reasons.join(' '), /крупный|Точнее|а не на шаг/, `step ${step}, ${w} kg, week ${week}, ${category}`);
         cases++;
       }
     }
   }
-  assert.ok(cases > 1000);
+  assert.ok(cases > 400);
+});
+
+test('v1.6.4: light week, a fine step — after a set below the window as many steps down as that set says', () => {
+  // The next set is taken a rep weaker; the weight is the heaviest one step or more lighter where that
+  // set lands at least half a rep into the window — never heavier, never a step more than that.
+  let cases = 0;
+  let more = 0;
+  for (const step of [0.5, 1, 1.25, 2, 2.5, 5]) {
+    for (let w = step * 20; w <= 200; w += step) {
+      for (const [category, set] of [['iso', { reps: 12, rir: 1 }], ['iso', { reps: 9, rir: 2 }], ['iso', { reps: 6, rir: 1 }], ['base', { reps: 12, rir: 0 }], ['base', { reps: 8, rir: 2 }]]) {
+        const s = history([{ date: '2026-11-06', week: 3, sets: [[w, 7, 1], [w, 7, 1], [w, 7, 1]] }], { category });
+        const target = targetFor({ category }, 1);
+        const r = recommend({ list: s.get('press'), session: today(1), target, category, step, todaySets: [{ weight: w, ...set }] });
+        const lo = target.reps[0] + target.rir[0];
+        const capNext = w * (1 + (set.reps + set.rir - 1) / 30);
+        const at = (x) => 30 * (capNext / x - 1);
+        const tag = `step ${step}, ${w} kg, ${category}, ${set.reps}@${set.rir}`;
+        assert.ok(r.weight <= w - step + 1e-9, tag);
+        assert.ok(at(r.weight) >= lo + 0.5 - 1e-6, `${tag}: ${r.weight} lands below the window`);
+        assert.ok(at(r.weight + step) < lo + 0.5 + 1e-6 || r.weight === Math.round((w - step) * 100) / 100, `${tag}: ${r.weight} is a step lighter than needed`);
+        assert.doesNotMatch(r.reasons.join(' '), /крупный/, tag);
+        if (r.weight < w - step - 1e-9) {
+          more++;
+          assert.match(r.reasons.join(' '), /поэтому легче на [\d,]+ кг, а не на шаг\./, tag);
+        }
+        cases++;
+      }
+    }
+  }
+  assert.ok(cases > 2000 && more > 1000);
+});
+
+test('v1.6.4: light week, a set far below the window → the next weight several steps lighter, not one', () => {
+  // Isolation 12–15 at RIR 2–3 (14–18 to failure); week 3 85×8–9 at RIR 1, step 2,5.
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[85, 9, 1], [85, 9, 1], [85, 8, 1]] }], { category: 'iso' });
+  const at = (...todaySets) => rec(s, { week: 1, category: 'iso', todaySets });
+  // The first set at the top of the window: ≈65 (from 60 to 70).
+  let r = at();
+  assert.deepEqual([r.weight, r.range], [65, [60, 70]]);
+  assert.match(r.reasons.join(' '), /Вес взят под верх цели — 15 при RIR 3/);
+  // 70×12 at RIR 2 is in the window; then 70×7 at RIR 1 (8 to failure): 67,5 would be ≈8 again → 57,5.
+  r = at({ weight: 70, reps: 12, rir: 2 });
+  assert.equal(r.weight, 70);
+  r = at({ weight: 70, reps: 12, rir: 2 }, { weight: 70, reps: 7, rir: 1 });
+  assert.equal(r.weight, 57.5);
+  assert.match(r.reasons.join(' '), /Сегодня второй подход 70×7 \(RIR 1\) — ниже цели: следующий 57,5 кг\. При 67,5 кг выходит около 8 повторений до отказа — тоже ниже цели, поэтому легче на 12,5 кг, а не на шаг\./);
+  // Never below a lighter weight that was in the window today: 62,5×14 at RIR 2 (16 to failure), then
+  // 70×7 at RIR 1 → 62,5, not 57,5.
+  r = at({ weight: 62.5, reps: 14, rir: 2 }, { weight: 70, reps: 7, rir: 1 });
+  assert.equal(r.weight, 62.5);
+  assert.match(r.reasons.join(' '), /следующий 62,5 кг\. .*поэтому легче на 7,5 кг, а не на шаг\./);
+  // A lighter set below the window today is no floor.
+  assert.equal(at({ weight: 62.5, reps: 11, rir: 1 }, { weight: 70, reps: 7, rir: 1 }).weight, 57.5);
+  // A rep below the window (65×12 at RIR 1, 13 to failure): a step lighter is ≈13,6 for the next set, a
+  // rep weaker — said as «около 14», so «впритык к нижней границе», not «тоже ниже цели» (14 is in it).
+  r = at({ weight: 65, reps: 12, rir: 1 });
+  assert.equal(r.weight, 60);
+  assert.match(r.reasons.join(' '), /При 62,5 кг выходит около 14 повторений до отказа — впритык к нижней границе, поэтому легче на 5 кг, а не на шаг\./);
+  // The heavy weeks keep one step: their reps to failure hardly fall from set to set.
+  r = rec(s, { week: 2, category: 'iso', todaySets: [{ weight: 85, reps: 5, rir: 1 }] });
+  assert.equal(r.weight, 82.5);
+  assert.doesNotMatch(r.reasons.join(' '), /а не на шаг/);
 });
 
 // ---------------------------------------------------------------- v1.6.1: every set, the order of the day
@@ -564,18 +627,20 @@ test("«Ориентир»: today's latest set corrects it, not only the first",
   let r = at({ weight: 75, reps: 12, rir: 2 });
   assert.equal(r.weight, 75);
   assert.match(r.reasons.join(' '), /Сегодня первый подход 75×12 \(RIR 2\) — в цели: этот вес и дальше\./);
+  // 11 to failure at 10–12, RIR 2–3 (12–15): the next set, a rep weaker, ≈11 at 72,5 — still below, so 70
+  // (light week since v1.6.4: as many steps as the set says).
   r = at({ weight: 75, reps: 12, rir: 2 }, { weight: 75, reps: 10, rir: 1 });
-  assert.equal(r.weight, 72.5);
-  assert.match(r.reasons.join(' '), /Сегодня второй подход 75×10 \(RIR 1\) — ниже цели: следующий 72,5 кг\./);
+  assert.equal(r.weight, 70);
+  assert.match(r.reasons.join(' '), /Сегодня второй подход 75×10 \(RIR 1\) — ниже цели: следующий 70 кг\. При 72,5 кг выходит около 11 повторений до отказа — тоже ниже цели, поэтому легче на 5 кг, а не на шаг\./);
   assert.doesNotMatch(r.reasons.join(' '), /этот вес и дальше/, 'the first set no longer speaks once another followed');
-  r = at({ weight: 75, reps: 12, rir: 2 }, { weight: 75, reps: 10, rir: 1 }, { weight: 72.5, reps: 11, rir: 2 });
-  assert.equal(r.weight, 72.5);
-  assert.match(r.reasons.join(' '), /Сегодня третий подход 72,5×11 \(RIR 2\) — в цели: этот вес и дальше/);
+  r = at({ weight: 75, reps: 12, rir: 2 }, { weight: 75, reps: 10, rir: 1 }, { weight: 70, reps: 11, rir: 2 });
+  assert.equal(r.weight, 70);
+  assert.match(r.reasons.join(' '), /Сегодня третий подход 70×11 \(RIR 2\) — в цели: этот вес и дальше/);
   // Two reps over the window → a step up from that set's weight.
   assert.equal(at({ weight: 75, reps: 12, rir: 2 }, { weight: 72.5, reps: 14, rir: 3 }).weight, 75);
   // The latest set WITH RIR decides; drop sets and deleted sets are not working sets.
   r = at({ weight: 75, reps: 10, rir: 1 }, { weight: 72.5, reps: 12 }, { weight: 50, reps: 15, rir: 0, drop: true }, { weight: 90, reps: 3, rir: 0, deleted: true });
-  assert.equal(r.weight, 72.5);
+  assert.equal(r.weight, 70);
   assert.match(r.reasons.join(' '), /Сегодня первый подход 75×10/);
   assert.equal(r.range, null, 'after a set the range is gone: the set decided');
 });
@@ -726,12 +791,14 @@ test('review 5: a set harder than the planned RIR at the bottom of the window is
   const s = history([{ date: '2026-11-06', week: 3, sets: [[100, 7, 1], [100, 7, 1], [100, 7, 0], [100, 6, 0]] }]);
   const at = (set) => rec(s, { week: 1, todaySets: [set] });
   // Base, light week: 10–12 at RIR 2–3. To failure at 12 — 10 at RIR 2, and the next set falls short.
+  // A step lighter the next set (a rep weaker) is ≈12 to failure — just at the bottom: since v1.6.4 one
+  // more step on the light week.
   let r = at({ weight: 87.5, reps: 12, rir: 0 });
-  assert.equal(r.weight, 85);
-  assert.match(r.reasons.join(' '), /Сегодня первый подход 87,5×12 \(RIR 0\) — тяжелее плана \(RIR 2–3\): следующий 85 кг\./);
-  assert.doesNotMatch(r.reasons.join(' '), /в цели/);
+  assert.equal(r.weight, 82.5);
+  assert.match(r.reasons.join(' '), /Сегодня первый подход 87,5×12 \(RIR 0\) — тяжелее плана \(RIR 2–3\): следующий 82,5 кг\. При 85 кг выходит около 12 повторений до отказа — впритык к нижней границе, поэтому легче на 5 кг, а не на шаг\./);
+  assert.doesNotMatch(r.reasons.join(' '), /— (вес )?в цели/);
   r = at({ weight: 87.5, reps: 11, rir: 1 });
-  assert.equal(r.weight, 85);
+  assert.equal(r.weight, 82.5);
   // Reps to spare at the planned RIR: the weight is right, the set should stop earlier — said so.
   r = at({ weight: 87.5, reps: 14, rir: 0 });
   assert.equal(r.weight, 87.5);

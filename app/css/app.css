@@ -3043,3 +3043,25 @@ textarea.nutr-instr {
 .quick-pick .input { margin-bottom: 8px; }
 .quick-pick .choice[aria-pressed='true'] .choice__main { color: var(--accent-text); font-weight: 600; }
 .quick-pick .choice[aria-pressed='true'] .choice__sub { font-weight: 400; }
+
+/* The plan of the exercise is done: the dock folds into one line and two buttons. */
+.dock__more {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+.dock__more > .btn {
+  flex: 1;
+  min-width: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+/* With «Завершить тренировку»: «Ещё подход» as wide as its words, the rest for the main action. */
+.dock__more--finish > .btn:first-child {
+  flex: none;
+}
+@media (max-width: 359px) {
+  .dock__finish-what {
+    display: none;
+  }
+}

@@ -135,7 +135,8 @@ test('light week: «Ориентир» (with a range when the two formulas diffe
   await page.getByRole('button', { name: /^Пресс в тренажере/ }).click();
   await expect(page.locator('.panel__target')).toHaveText('3 × 12–\u206015, RIR\u00a02–\u20603');
   // Isolation at 12–15 (v1.6.0): lighter than at 10–12 (32,5 then), and the two formulas differ by two steps here.
-  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 30 кг (от 27,5 кг до 32,5 кг)');
+  // Since v1.6.4 the first set at the top of the window (15 at RIR 3): 27,5, not 30.
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 27,5 кг (от 25 кг до 30 кг)');
   await expect(dock(page)).toContainText('ориентир, ≈');
   const label = await rec(page).getAttribute('aria-label');
   const w = label.match(/приблизительно: ([\d,]+) кг/)[1];
@@ -143,7 +144,7 @@ test('light week: «Ориентир» (with a range when the two formulas diffe
   await rec(page).getByRole('button', { name: /Почему/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Приблизительная оценка по другой неделе');
   await expect(page.getByRole('dialog')).toContainText('Лёгкой недели в истории этого варианта ещё нет');
-  await expect(page.getByRole('dialog')).toContainText('Цель лёгкой недели — 12–15 при RIR 2–3.');
+  await expect(page.getByRole('dialog')).toContainText('Цель лёгкой недели — 12–15 при RIR 2–3. Вес взят под верх цели — 15 при RIR 3');
   await expect(page.getByRole('dialog')).toContainText('Если первый подход тяжелее RIR 2 — снизьте вес.');
 });
 
@@ -228,7 +229,8 @@ const logHammer = (page, weight, reps, rir) => page.evaluate(async (v) => {
 test('«Ориентир» after each set, not only the first; «Порядок: было 2-е, теперь 4-е» under the line', async ({ page }) => {
   await open(page);
   await reorderedPhone(page);
-  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 85 кг (от 80 кг до 87,5 кг)');
+  // Hammer, light week: the first set at the top of the window (12 at RIR 3) since v1.6.4 — 80, not 85.
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 80 кг (от 75 кг до 85 кг)');
   const note = dock(page).locator('.dock__rec-note');
   await expect(note).toHaveText('Порядок: было 2-е, теперь 4-е — вес может быть завышен');
   await rec(page).getByRole('button', { name: /Почему/ }).click();
@@ -241,14 +243,15 @@ test('«Ориентир» after each set, not only the first; «Порядок:
   await expect(note).toHaveCount(0); // the first set has answered «проверьте первым подходом»
   await expect(rec(page).getByRole('button', { name: 'Использовать' })).toHaveCount(0); // the field already holds 85
   await logHammer(page, 85, 10, 1);
-  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 82,5 кг');
+  // 11 to failure, the window 12–15: a step lighter the next set (a rep weaker) is still below it — 80.
+  await expect(rec(page)).toHaveAttribute('aria-label', 'Ориентир на сегодня, приблизительно: 80 кг');
   await expect(logButton(page)).toContainText('85 × 10'); // the field follows the last set until «Использовать»
   await rec(page).getByRole('button', { name: /Почему/ }).click();
-  await expect(sheet).toContainText('Сегодня второй подход 85×10 (RIR 1) — ниже цели: следующий 82,5 кг.');
+  await expect(sheet).toContainText('Сегодня второй подход 85×10 (RIR 1) — ниже цели: следующий 80 кг. При 82,5 кг выходит около 11 повторений до отказа — тоже ниже цели, поэтому легче на 5 кг, а не на шаг.');
   await expect(sheet).not.toContainText('этот вес и дальше');
   await sheet.getByRole('button', { name: 'Понятно' }).click();
   await rec(page).getByRole('button', { name: 'Использовать' }).click();
-  await expect(logButton(page)).toContainText('82,5 × 10');
+  await expect(logButton(page)).toContainText('80 × 10');
 });
 
 test('smallest iPhone: the order note stays one line inside the dock, the log button in view', async ({ browser }) => {

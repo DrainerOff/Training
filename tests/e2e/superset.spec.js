@@ -62,6 +62,11 @@ test('superset after «Пропустить» on the calves: the first set clear
   await page.locator('.panel').getByRole('button', { name: 'Пропустить' }).click();
   await expect(page.locator('.panel').getByRole('button', { name: 'Вернуть' })).toBeVisible();
   expect(await skipped(page)).toBe(true);
+  // Since v1.6.4 a skipped exercise asks for nothing: the dock folds, «Записать подход» opens it.
+  await expect(dock(page)).toContainText(`Пропущено ${CALVES}`);
+  await expect(dock(page).getByRole('button', { name: /^Записать/ })).toHaveCount(1); // «Записать подход» only
+  await dock(page).getByRole('button', { name: 'Записать подход' }).click();
+  await expect(dock(page)).toContainText(`Подход 1 из 3 ${CALVES}`);
 
   // The calves set is logged anyway: not skipped any more, in the store and on screen.
   await logSet(page, { rir: 2 });
@@ -103,14 +108,30 @@ test('review 7: «Отменить» right after the first set on a skipped exer
   await open(page, CALVES);
   await page.locator('.panel').getByRole('button', { name: 'Пропустить' }).click();
   expect(await skipped(page)).toBe(true);
+  await dock(page).getByRole('button', { name: 'Записать подход' }).click();
   await logSet(page, { rir: 2 });
   await expect.poll(() => skipped(page)).toBe(false);
   await dock(page).getByRole('button', { name: 'Отменить' }).click();
   // Before: the set was gone but the mark too — 0/3 and three sets missing in the summary.
   await expect.poll(() => skipped(page)).toBe(true);
   await expect(page.locator('.panel').getByRole('button', { name: 'Вернуть' })).toBeVisible();
+  await expect(dock(page).getByRole('button', { name: 'Записать подход' })).toBeVisible();
   await open(page, ROW);
   await expect(row(page, CALVES)).toContainText('пропущено');
+});
+
+test('«Записать подход» on a skipped exercise, then «Вернуть» and «Пропустить» again: the dock folds again', async ({ page }) => {
+  await gym(page);
+  await open(page, CALVES);
+  const panel = page.locator('.panel');
+  await panel.getByRole('button', { name: 'Пропустить' }).click();
+  await dock(page).getByRole('button', { name: 'Записать подход' }).click();
+  await expect(dock(page)).toContainText(`Подход 1 из 3 ${CALVES}`);
+  await panel.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(dock(page)).toContainText(`Подход 1 из 3 ${CALVES}`);
+  await panel.getByRole('button', { name: 'Пропустить' }).click();
+  await expect(dock(page)).toContainText(`Пропущено ${CALVES}`);
+  await expect(dock(page).getByRole('button', { name: /^Записать/ })).toHaveCount(1); // «Записать подход» only
 });
 
 test('an old workout that still carries «пропущено» next to logged sets reads as done by its sets, and «Пропустить» alone still skips', async ({ page }) => {
