@@ -33,8 +33,8 @@ function rows(gas, name) {
 }
 
 // 250 synthetic weigh-ins: more than one request (200) can carry.
-async function manyWeighIns(store) {
-  for (let i = 0; i < 250; i++) {
+async function manyWeighIns(store, n = 250) {
+  for (let i = 0; i < n; i++) {
     const d = new Date(Date.UTC(2026, 0, 1) + i * 86400000).toISOString().slice(0, 10);
     await store.addBody({ kind: 'weight', value: 70 + (i % 10) / 10, measuredAt: `${d}T07:30` });
   }
@@ -103,4 +103,33 @@ test('250 records the sheet refuses: a new set still reaches App_Sets, the refus
   assert.match(st.error, /не приняла записей: 250\./);
   assert.equal(a.store.state.outbox.size, 250);
   assert.ok(requests <= 3, `a bounded number of requests, got ${requests}`);
+
+  // The next sync (every minute while something is queued) is one request, not one per 200 refused.
+  requests = 0;
+  await a.sync.syncNow();
+  assert.equal(requests, 1);
+  assert.match(a.sync.status.error, /не приняла записей: 250\./);
+});
+
+test('4100 refused records: from the second sync on, a new set goes first', async () => {
+  const gas = createGas();
+  const token = gas.call('setup');
+  const transport = async (_u, p) => {
+    const sent = JSON.parse(JSON.stringify(p));
+    const body = sent.push?.body || [];
+    if (sent.push) sent.push.body = [];
+    const res = gas.post(sent);
+    if (res.ok) res.rejected = [...(res.rejected || []), ...body.map((r) => ({ entity: 'body', id: r.id }))];
+    return res;
+  };
+  const a = await device(token, transport);
+  await manyWeighIns(a.store, 4100);
+  await a.sync.syncNow(); // 20 requests of 200: the phone learns which ones the sheet refuses
+  const s = await a.store.startSession({ cycle: 1, week: 2, day: 1 });
+  clock += 5000;
+  const { set } = await a.store.logSet(s.id, s.items[0].slotId, { weight: 60, reps: 8, rir: 2 });
+  await a.sync.syncNow();
+  assert.ok(rows(gas, 'App_Sets').some((r) => r.id === set.id), 'the set is in the sheet');
+  await a.sync.syncNow();
+  assert.match(a.sync.status.error, /не приняла записей: 4100\./);
 });
