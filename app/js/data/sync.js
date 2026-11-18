@@ -184,8 +184,17 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     return c && c.url && c.token ? c : null;
   }
 
-  async function round(cfg) {
-    const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
+  // Each request takes the oldest entries not sent yet during this run (`tried`), leaving out those
+  // of an entity the Apps Script doesn't know (they wait for the Code.gs update; every answer says
+  // which entities it knows, so they go in the next request once it does). Entries the sheet can't
+  // take now never fill every request and keep a set logged after them from reaching the sheet.
+  const sendable = (tried) => (e) => !tried.has(e.key) && !unknown.has(e.entity);
+  async function round(cfg, tried) {
+    const entries = [...store.state.outbox.values()]
+      .filter(sendable(tried))
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .slice(0, BATCH);
+    for (const e of entries) tried.add(e.key);
     const push = Object.fromEntries(SYNCED.map((e) => [e, []]));
     const sent = [];
     for (const e of entries) {
@@ -233,7 +242,8 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       ...(res.ingest && typeof res.ingest === 'object' ? { ingest: res.ingest } : {}),
       ...Object.fromEntries(behind.filter((entity) => known.has(entity)).map((entity) => [`${entity}Pulled`, true])),
     });
-    return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size };
+    const more = [...store.state.outbox.values()].some(sendable(tried));
+    return { more, refused: refused.size };
   }
 
   async function run() {
@@ -246,10 +256,11 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     try {
       let more = true;
       let refused = 0;
+      const tried = new Set();
       for (let i = 0; more && i < 20; i++) {
-        const r = await round(cfg);
+        const r = await round(cfg, tried);
         more = r.more;
-        refused = r.refused;
+        refused += r.refused;
       }
       if (refused) {
         update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Проверьте значения в них или обновите Code.gs до версии из репозитория.` });
