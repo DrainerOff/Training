@@ -184,8 +184,23 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     return c && c.url && c.token ? c : null;
   }
 
-  async function round(cfg) {
-    const entries = [...store.state.outbox.values()].sort((a, b) => a.updatedAt - b.updatedAt).slice(0, BATCH);
+  // Records the sheet refused, by outbox key → the version it refused. Until edited they are sent
+  // only in the room a request has left, so they neither hold back a set logged after them nor cost
+  // an extra request on every sync.
+  const refusedAt = new Map();
+  const isRefused = (e) => refusedAt.get(e.key) === e.updatedAt;
+
+  // Each request takes the oldest entries not sent yet during this run (`tried`), leaving out those
+  // of an entity the Apps Script doesn't know (they wait for the Code.gs update; every answer says
+  // which entities it knows, so they go in the next request once it does). Refused records go last.
+  // Entries the sheet can't take now never fill every request and keep a set logged after them
+  // from reaching the sheet.
+  const sendable = (tried) => (e) => !tried.has(e.key) && !unknown.has(e.entity);
+  async function round(cfg, tried) {
+    const byAge = (a, b) => a.updatedAt - b.updatedAt;
+    const open = [...store.state.outbox.values()].filter(sendable(tried));
+    const entries = [...open.filter((e) => !isRefused(e)).sort(byAge), ...open.filter(isRefused).sort(byAge)].slice(0, BATCH);
+    for (const e of entries) tried.add(e.key);
     const push = Object.fromEntries(SYNCED.map((e) => [e, []]));
     const sent = [];
     for (const e of entries) {
@@ -224,6 +239,10 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       if (known.has(entity)) unknown.delete(entity);
       else unknown.add(entity);
     }
+    for (const x of sent) {
+      if (refused.has(x.key)) refusedAt.set(x.key, x.updatedAt);
+      else refusedAt.delete(x.key);
+    }
     await store.ack(accepted);
     await store.applyRemote(res.pull || {});
     await store.setKV({
@@ -233,7 +252,8 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
       ...(res.ingest && typeof res.ingest === 'object' ? { ingest: res.ingest } : {}),
       ...Object.fromEntries(behind.filter((entity) => known.has(entity)).map((entity) => [`${entity}Pulled`, true])),
     });
-    return { more: entries.length === BATCH && accepted.length > 0, refused: refused.size };
+    const more = [...store.state.outbox.values()].some((e) => sendable(tried)(e) && !isRefused(e));
+    return { more };
   }
 
   async function run() {
@@ -245,12 +265,11 @@ export function createSync(store, { transport = fetchTransport, now = () => Date
     update({ state: 'syncing', error: null });
     try {
       let more = true;
+      const tried = new Set();
+      for (let i = 0; more && i < 20; i++) more = (await round(cfg, tried)).more;
+      // Every refused record still on the phone, not only those sent this time.
       let refused = 0;
-      for (let i = 0; more && i < 20; i++) {
-        const r = await round(cfg);
-        more = r.more;
-        refused = r.refused;
-      }
+      for (const e of store.state.outbox.values()) if (isRefused(e)) refused++;
       if (refused) {
         update({ state: 'error', lastSyncAt: now(), errorCode: 'rejected', error: `Таблица не приняла записей: ${refused}. Они сохранены на телефоне и будут отправляться повторно. Проверьте значения в них или обновите Code.gs до версии из репозитория.` });
       } else {

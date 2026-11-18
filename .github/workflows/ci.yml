@@ -17,8 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Ubuntu 24.04, not ubuntu-latest: Playwright 1.56.1 (pinned in package.json) cannot install
+  # Chromium on ubuntu-latest = 26.04 («Playwright does not support chromium on ubuntu26.04-x64»).
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +39,7 @@ jobs:
     # Today's filter lists (EasyList, EasyPrivacy, AdGuard): flags a list update that starts
     # blocking one of our files or hiding an element. Informational — never blocks publishing;
     # the tests above check the same against the snapshot in tests/fixtures/blocklists.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +55,7 @@ jobs:
   publish:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     # One gh-pages, one writer at a time.
