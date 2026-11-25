@@ -618,6 +618,32 @@ p {
   color: var(--steel);
   margin: -6px 0 12px;
 }
+.wk-pace {
+  margin: -4px 0 12px;
+}
+.wk-pace__bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-strong);
+  overflow: hidden;
+}
+.wk-pace__bar span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+.wk-pace__text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--steel);
+  font-variant-numeric: tabular-nums;
+}
+.wk-pace__text b {
+  font-weight: 700;
+  color: var(--iron);
+}
 .dock__done {
   flex: 1;
   min-width: 0;

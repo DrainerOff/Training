@@ -4,7 +4,8 @@ import {
   html, useState, useEffect, app, Icon, WeekMark, Sheet, openSheet, NumberPad, Stepper, RirPicker, Toggle, Seg,
   fmtWeight, SyncBadge, useNow, local, confirmSheet,
 } from './core.js';
-import { derived, latestBodyweight, recordsDerived, exercisesNow } from './derive.js';
+import { derived, latestBodyweight, recordsDerived, exercisesNow, paceFor } from './derive.js';
+import { workoutProgress, fmtLeft, fmtEndsAt } from '../lib/pace.js';
 import { itemTarget, suggestNext } from '../lib/planner.js';
 import { fmtTarget, PHASE, phaseSummary, CATEGORY, CATEGORY_KEYS, exerciseCatalog, makeOption } from '../lib/program.js';
 import { previousExposures, compareExposures, weightDrop } from '../lib/plateau.js';
@@ -122,6 +123,7 @@ export function Workout({ session, mode = 'live', syncStatus }) {
         <button type="button" class="icon-btn" aria-label="Меню тренировки" onClick=${() => openSessionMenu(session, mode)}><${Icon} name="more" /></button>
       </header>
       <p class="wk-sub">Цикл ${session.cycle}, ${session.week === 1 ? 'лёгкая' : 'тяжёлая'} неделя ${session.week}: ${phaseSummary(session.week)}</p>
+      ${live && !stale ? html`<${PaceLine} session=${session} rows=${rows} />` : null}
 
       ${stale
         ? html`<div class="notice notice--caution">
@@ -159,6 +161,30 @@ export function Workout({ session, mode = 'live', syncStatus }) {
           allDone=${rows.every((r) => r.complete)} onFinish=${() => openFinish(session, rows)} />`
       : null}
   `;
+}
+
+// How much of the plan is done and roughly how long the rest takes (lib/pace.js). Live workouts only.
+function PaceLine({ session, rows }) {
+  useNow(15000); // re-render: the rest shrinks while resting
+  const now = Date.now();
+  const p = workoutProgress({
+    session,
+    rows: rows.map((r) => ({ slotId: r.item.slotId, key: r.item.seriesKey, target: r.target, working: r.working, drops: r.drops, skipped: r.skipped })),
+    sets: app.store.setsOf(session.id),
+    model: paceFor(session),
+    now,
+  });
+  if (!p) return null;
+  let rest;
+  if (p.finished) rest = 'план выполнен';
+  else if (p.remainingMs == null) rest = 'время появится после третьего подхода';
+  else rest = `осталось ${fmtLeft(p.remainingMs)}, до\u00a0${fmtEndsAt(p.endsAt)}`;
+  return html`<div class="wk-pace">
+    <div class="wk-pace__bar" role="progressbar" aria-label="Выполнено" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${p.percent}>
+      <span style=${`width:${p.percent}%`}></span>
+    </div>
+    <p class="wk-pace__text"><b>${p.percent}%</b> · ${rest}</p>
+  </div>`;
 }
 
 function ExerciseRow({ row, onOpen }) {

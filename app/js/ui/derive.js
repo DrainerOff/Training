@@ -8,6 +8,7 @@ import { dailyWeights } from '../lib/bodydata.js';
 import { bodyweightLookup, loadShare } from '../lib/bodyweight.js';
 import { exerciseIndex } from '../lib/exercises.js';
 import { SAME_EXERCISE } from '../data/fixes.js';
+import { paceModel } from '../lib/pace.js';
 
 let cache = { v: -1 };
 
@@ -64,4 +65,14 @@ export function recordsDerived() {
   for (const o of allOptions(st.program)) steps.set(o.key, o.slot.step || 2.5);
   recordsCache = { v: st.version, books: buildRecordBook(perf.list), excluded: perf.excluded, duplicates: perf.duplicates, bodyweightAt, shareOf, steps };
   return recordsCache;
+}
+
+// The usual intervals between sets (lib/pace.js), from finished workouts before this one.
+let paceCache = { v: -1 };
+export function paceFor(session) {
+  const st = app.store.state;
+  if (paceCache.v === st.version && paceCache.id === session.id && paceCache.at === session.startedAt) return paceCache.model;
+  const model = paceModel(app.store.liveSessions(), (id) => app.store.setsOf(id), { before: session.startedAt, exceptId: session.id });
+  paceCache = { v: st.version, id: session.id, at: session.startedAt, model };
+  return model;
 }

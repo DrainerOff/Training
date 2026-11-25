@@ -27,6 +27,7 @@ const SHELL = [
   './js/lib/recommend.js',
   './js/lib/nutrition.js',
   './js/lib/report.js',
+  './js/lib/pace.js',
   './js/data/db.js',
   './js/data/store.js',
   './js/data/sync.js',
