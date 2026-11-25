@@ -176,8 +176,8 @@ function PaceLine({ session, rows }) {
   });
   if (!p) return null;
   let rest;
-  if (p.remainingMs === 0) rest = 'план выполнен';
-  else if (p.remainingMs == null) rest = 'время появится после пары подходов';
+  if (p.finished) rest = 'план выполнен';
+  else if (p.remainingMs == null) rest = 'время появится после третьего подхода';
   else rest = `осталось ${fmtLeft(p.remainingMs)}, до\u00a0${fmtEndsAt(p.endsAt)}`;
   return html`<div class="wk-pace">
     <div class="wk-pace__bar" role="progressbar" aria-label="Выполнено" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${p.percent}>

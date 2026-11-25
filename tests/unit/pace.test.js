@@ -150,9 +150,9 @@ test('remaining mid-workout at the usual pace, and time since the last set is al
   assert.equal(p.endsAt, lastAt + 22 * MIN);
   const later = workoutProgress({ session: today.session, rows, sets: today.sets, model, now: lastAt + 3 * MIN });
   assert.equal(later.remainingMs, 19 * MIN);
-  // Resting longer than a whole interval does not make the rest negative or shorter than what is left after it.
+  // Resting longer than a whole interval: what is left after the next set, plus a minute for that set.
   const idle = workoutProgress({ session: today.session, rows, sets: today.sets, model, now: lastAt + 15 * MIN });
-  assert.equal(idle.remainingMs, 18 * MIN);
+  assert.equal(idle.remainingMs, 19 * MIN);
 });
 
 test('remaining: the next exercise after a finished one starts with a switch', () => {
@@ -206,4 +206,49 @@ test('rounding and formatting', () => {
   const d = new Date(2026, 10, 25, 22, 38);
   assert.equal(fmtEndsAt(d.getTime()), '22:40');
   assert.equal(fmtEndsAt(new Date(2026, 10, 25, 9, 1).getTime()), '9:00');
+});
+
+// Found by the independent check of v1.7.0.
+test('the last set of the plan, rest longer than usual: not «done», a little time is still left', () => {
+  const rows = [row('slot-0', 'squat', 4, { working: 4 }), row('slot-1', 'row', 4, { working: 3 })];
+  const today = workout('t', START, [['squat', [5, 4, 4, 4]], ['row', [5, 3, 3]]], { status: 'active' });
+  const lastAt = today.sets[today.sets.length - 1].createdAt;
+  for (const rest of [1, 3, 5, 12]) {
+    const p = workoutProgress({ session: today.session, rows, sets: today.sets, model, now: lastAt + rest * MIN });
+    assert.equal(p.finished, false);
+    assert.ok(p.remainingMs >= MIN, `rest ${rest}: ${p.remainingMs / MIN}`);
+  }
+  // Two sets left and a long rest: both still count, not only one.
+  const two = [row('slot-0', 'squat', 4, { working: 4 }), row('slot-1', 'row', 4, { working: 2 })];
+  const t2 = workout('t', START, [['squat', [5, 4, 4, 4]], ['row', [5, 3]]], { status: 'active' });
+  const p2 = workoutProgress({ session: t2.session, rows: two, sets: t2.sets, model, now: t2.sets[t2.sets.length - 1].createdAt + 10 * MIN });
+  assert.ok(p2.remainingMs >= 3 * MIN + MIN, `${p2.remainingMs / MIN}`);
+  const all = workoutProgress({ session: t2.session, rows: [row('slot-0', 'squat', 4, { working: 4 })], sets: t2.sets, model, now: T0 });
+  assert.equal(all.finished, true);
+});
+
+test('a superset (two exercises in turn) is estimated by its own pace, not by the usual rest of one exercise', () => {
+  // Past: squat 3 min per set, then A and B in turn every 1.5 min (4 sets each).
+  const pair = (id, start) => {
+    const session = { id, status: 'done', startedAt: start, deleted: false };
+    const sets = [];
+    let t = start;
+    for (let n = 0; n < 4; n++) { t += (n ? 3 : 5) * MIN; sets.push({ id: `${id}-s${n}`, slotId: 'slot-0', seriesKey: 'squat', createdAt: t }); }
+    t += 5 * MIN;
+    for (let n = 0; n < 8; n++) {
+      if (n) t += 1.5 * MIN;
+      const ab = n % 2 ? 'B' : 'A';
+      sets.push({ id: `${id}-${ab}${n}`, slotId: `slot-${ab}`, seriesKey: ab, createdAt: t });
+    }
+    return { session, sets };
+  };
+  const h = history([1, 2, 3, 4].map((d) => pair(`p${d}`, T0 + d * 86400000)));
+  const m = paceModel(h.sessions, h.setsOf, { before: START });
+  // Today: squat done, A and B two sets each — four sets of the superset left, 1.5 min apart.
+  const today = pair('t', START);
+  today.session.status = 'active';
+  const sets = today.sets.slice(0, 8);
+  const rows = [row('slot-0', 'squat', 4, { working: 4 }), row('slot-A', 'A', 4, { working: 2 }), row('slot-B', 'B', 4, { working: 2 })];
+  const p = workoutProgress({ session: today.session, rows, sets, model: m, now: sets[7].createdAt });
+  assert.ok(Math.abs(p.remainingMs - 6 * MIN) <= 0.5 * MIN, `${p.remainingMs / MIN}`);
 });

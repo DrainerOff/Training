@@ -2,8 +2,10 @@
 //
 // Every set carries the moment it was logged (`createdAt`). The time between two sets in a row is
 // one interval «set + rest». Intervals are learned from past workouts: per exercise variant
-// (`seriesKey`) for sets of the same exercise in a row (`within`), and for the first set after a
-// change of exercise (`switch`: moving, setting up the machine). Today's own intervals then tell
+// (`seriesKey`) for the second and later sets of an exercise (`within`), and for its first set
+// (`switch`: moving, setting up the machine). `within` is counted from the previous set of the
+// workout, whichever exercise it was: in a superset (A, B, A, B…) that is the real time each set
+// adds, so a superset is estimated by its own pace. Today's own intervals then tell
 // whether the owner is faster or slower than usual, and the estimate follows that pace gradually.
 //
 // Robust to a set logged late (forgotten, then logged a few minutes later or two at once):
@@ -16,6 +18,8 @@
 
 export const MIN_GAP = 15 * 1000;
 export const MAX_GAP = 20 * 60 * 1000;
+// A rest that went over the usual interval: the next set still takes at least this long.
+export const MIN_NEXT = 60 * 1000;
 // A first set later than this after «Начать» is not a warm-up but a workout started ahead.
 export const MAX_START = 30 * 60 * 1000;
 // Without any history: a typical set with its rest and a typical change of exercise.
@@ -52,12 +56,15 @@ export function intervalsOf(session, sets) {
     const ms = list[0].createdAt - session.startedAt;
     if (ms >= MIN_GAP && ms <= MAX_START) out.push({ kind: 'start', key: list[0].seriesKey, ms });
   }
+  const started = new Set(list.length ? [list[0].slotId] : []);
   for (let i = 1; i < list.length; i++) {
     const a = list[i - 1];
     const b = list[i];
     const ms = b.createdAt - a.createdAt;
+    const kind = started.has(b.slotId) ? 'within' : 'switch';
+    started.add(b.slotId);
     if (!usable(ms)) continue;
-    out.push({ kind: a.slotId === b.slotId ? 'within' : 'switch', key: b.seriesKey, ms });
+    out.push({ kind, key: b.seriesKey, ms });
   }
   return out;
 }
@@ -115,7 +122,8 @@ export function paceModel(sessions, setsOf, { before = Infinity, exceptId = null
 }
 
 // Today's pace relative to the usual one: 1 — as usual, 1.2 — 20% slower. The median of
-// today's interval / usual interval, pulled toward 1 while today has few intervals.
+// today's interval / usual interval, pulled toward 1 while today has few intervals (less so
+// without history: then «usual» is only a default and today knows better).
 export function todayPace(model, session, sets) {
   const ratios = intervalsOf(session, sets)
     .filter((x) => x.kind !== 'start')
@@ -123,13 +131,15 @@ export function todayPace(model, session, sets) {
   const n = ratios.length;
   if (!n) return { pace: 1, samples: 0 };
   const r = Math.min(PACE_MAX, Math.max(PACE_MIN, median(ratios)));
-  return { pace: 1 + ((r - 1) * n) / (n + PACE_PRIOR), samples: n };
+  const prior = model.learned ? PACE_PRIOR : 1;
+  return { pace: 1 + ((r - 1) * n) / (n + prior), samples: n };
 }
 
 // `rows` — today's exercises in order: { slotId, key, target: { sets, drop }, working, drops, skipped }.
 // `sets` — today's sets; `now` — current time (ms).
-// Returns { done, total, percent, remainingMs, endsAt, learned, samples } or null when the workout
-// has no planned sets at all. remainingMs is null when there is nothing to estimate from yet.
+// Returns { done, total, percent, finished, remainingMs, endsAt, learned, samples } or null when the
+// workout has no planned sets at all. remainingMs is null when there is nothing to estimate from yet.
+// `finished` — every planned set is logged; until then at least MIN_NEXT is left.
 export function workoutProgress({ session, rows, sets, model, now }) {
   let total = 0;
   let done = 0;
@@ -146,8 +156,8 @@ export function workoutProgress({ session, rows, sets, model, now }) {
   const list = timed(sets);
   const last = list[list.length - 1] || null;
   const samples = intervalsOf(session, sets).filter((x) => x.kind !== 'start').length;
-  const base = { done, total, percent, learned: model.learned, samples };
-  if (left.every((n) => !n)) return { ...base, percent: 100, remainingMs: 0, endsAt: now };
+  const base = { done, total, percent, finished: false, learned: model.learned, samples };
+  if (left.every((n) => !n)) return { ...base, percent: 100, finished: true, remainingMs: 0, endsAt: now };
 
   const startedSlots = new Set(list.map((s) => s.slotId));
   // The exercise the next set most likely belongs to: the one in progress, else the next unfinished
@@ -179,9 +189,10 @@ export function workoutProgress({ session, rows, sets, model, now }) {
 
   const { pace } = todayPace(model, session, sets);
   // The next interval has been running since the latest set (or since «Начать»): that part is spent.
+  // A rest longer than usual does not eat the set itself: the end moves later instead.
   const since = Math.max(0, now - (last ? last.createdAt : session.startedAt || now));
-  const spent = Math.min(since, nextCost * pace);
-  const remainingMs = Math.max(0, usual * pace - spent);
+  const next = nextCost * pace;
+  const remainingMs = (usual - nextCost) * pace + Math.max(Math.min(next, MIN_NEXT), next - since);
   return { ...base, remainingMs, endsAt: now + remainingMs };
 }
 

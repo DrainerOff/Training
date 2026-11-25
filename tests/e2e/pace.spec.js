@@ -85,10 +85,11 @@ test('without past workouts: the percent at once, the time after a couple of set
   await ready(page);
   await seedOwner(page, { workout: false });
   await page.evaluate(() => window.__trainer.store.startSession({ cycle: 2, week: 2, day: 1 }));
-  await expect(pace(page)).toContainText('0% · время появится после пары подходов');
+  await expect(pace(page)).toContainText('0% · время появится после третьего подхода');
 
-  // Every planned set logged: 100%, nothing left.
-  await page.evaluate(async () => {
+  // Every planned set but the last, then a long rest: still not done, the last set still takes time.
+  // Then the last one: 100%, nothing left.
+  const logAll = (upTo) => page.evaluate(async (upTo) => {
     const { store } = window.__trainer;
     const { targetFor } = await import('./js/lib/program.js');
     const s = store.liveSessions().find((x) => x.status === 'active');
@@ -97,12 +98,25 @@ test('without past workouts: the percent at once, the time after a couple of set
       const n = targetFor(it, 2).sets + targetFor(it, 2).drop;
       for (let k = 1; k <= n; k++) {
         const at = s.startedAt + (i * 10 + k) * 60000;
+        if (sets.length >= upTo) break;
         sets.push({ id: `all-${i}-${k}`, sessionId: s.id, slotId: it.slotId, seriesKey: it.seriesKey, exercise: it.name, date: s.date, cycle: s.cycle, week: s.week, day: s.day,
           setNo: k, weight: 20, reps: 10, rir: 2, drop: k > targetFor(it, 2).sets, pain: false, technique: false, note: '', createdAt: at, updatedAt: at, deleted: false });
       }
     });
     await store.applyRemote({ sets }, { queue: false });
+    return sets.length;
+  }, upTo);
+  const total = await page.evaluate(async () => {
+    const { store } = window.__trainer;
+    const { targetFor } = await import('./js/lib/program.js');
+    const s = store.liveSessions().find((x) => x.status === 'active');
+    return s.items.reduce((t, it) => t + targetFor(it, 2).sets + targetFor(it, 2).drop, 0);
   });
+  await page.clock.setFixedTime(new Date(NOW + 3 * 60 * MIN)); // long after the last of them
+  await logAll(total - 1);
+  const pct = Math.round(((total - 1) / total) * 100);
+  await expect(pace(page)).toContainText(`${pct}% · осталось ≈1 мин`);
+  await logAll(total);
   await expect(pace(page)).toContainText('100% · план выполнен');
 });
 
