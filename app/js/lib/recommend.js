@@ -323,20 +323,46 @@ function sameWeek({
   // bottom of the range with the planned RIR: what was done beats the formula.
   const done = ok.some((s) => s.reps + (s.rir ?? 0) >= lo + (rLo ?? 0));
   if (fit && !done && fit.at(weight) < fit.need) {
-    const r = fit.at(weight);
-    const n = Math.round(r) < fit.need ? fmtNum(Math.max(0, r), 0) : fmtNum(Math.max(0, Math.floor(r * 10) / 10), 1);
+    // «около 1 повторения», «около 5 повторений», «около 5,8 повторения».
+    const about = (x) => {
+      if (x < 1) return 'меньше одного повторения';
+      const frac = Math.round(x) >= fit.need;
+      const v = frac ? Math.floor(x * 10) / 10 : Math.round(x);
+      return `около ${fmtNum(v, frac ? 1 : 0)} ${Number.isInteger(v) ? plural(v, 'повторения', 'повторений', 'повторений') : 'повторения'}`;
+    };
     const sets = target?.sets || atTop.length;
-    const more = fit.more(weight);
-    const add = rLo != null
-      ? `${sets}×${hi} с RIR ${fmtNum(more - hi)} (или ${fmtNum(more - rLo)} ${plural(more - rLo, 'повторение', 'повторения', 'повторений')}${rLo > 0 ? ` с RIR ${fmtNum(rLo)}` : ''})`
-      : `${sets}×${more}`;
+    const rHi = rir ? rir[1] : 0;
+    const add = (w) => {
+      const more = fit.more(w);
+      return rLo != null
+        ? `${sets}×${hi} с RIR ${fmtNum(more - hi)} (или ${fmtNum(more - rLo)} ${plural(more - rLo, 'повторение', 'повторения', 'повторений')}${rLo > 0 ? ` с RIR ${fmtNum(rLo)}` : ''})`
+        : `${sets}×${more}`;
+    };
+    // A reserve within reach: at most three reps to failure above the top of the window (30×10 at
+    // RIR 3 for 8–10, RIR 1–2). More than that (5 kg dumbbells: «RIR 19») is the step, not the effort:
+    // then a finer step of the program (1 or 0,5 kg) where it is within reach, else only the step.
+    const reachable = (w) => fit.more(w) <= hi + rHi + 3;
+    const fits = (s) => !(share > 0 && bwGain >= s);
+    const path = 'Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»';
     const lines = [...why.slice(0, 1),
-      `При ${load(weight)} (шаг ${fmtNum(step)} кг) выйдет около ${n} повторений до отказа, а для цели ${range(reps)}${rir ? ` при RIR ${range(rir)}` : ''} нужно не меньше ${fit.need}. Сначала добавьте запас: ${add}, потом повышайте.`];
-    // The weight between the two, and a step of 1 kg where +1 kg would already reach the range.
+      `При ${load(weight)} (шаг ${fmtNum(step)} кг) выйдет ${about(fit.at(weight))} до отказа, а для цели ${range(reps)}${rir ? ` при RIR ${range(rir)}` : ''} нужно не меньше ${fit.need}.`];
     const mid = fit.between(weight);
-    const finer = step > 1 && fit.at(top + 1) >= fit.need;
-    if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).${finer ? '' : ' Шаг веса упражнения меняется в программе.'}`);
-    if (finer) lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный. Если есть гантелька 1 кг, поставьте шаг 1: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг».`);
+    const finer = [1, 0.5].filter((x) => x < step && fits(x) && reachable(round(top + x)));
+    if (reachable(weight)) {
+      lines[lines.length - 1] += ` Сначала добавьте запас: ${add(weight)}, потом повышайте.`;
+      // A step of 1 kg where +1 kg would already reach the range.
+      const now1 = step > 1 && fits(1) && fit.at(top + 1) >= fit.need;
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).${now1 ? '' : ' Шаг веса упражнения меняется в программе.'}`);
+      if (now1) lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный. Если есть гантелька 1 кг, поставьте шаг 1: ${path}.`);
+    } else if (finer.length) {
+      const x = finer[0];
+      const w = round(top + x);
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).`);
+      lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный: запаса под него не набрать. Если есть гантелька ${fmtNum(x)} кг, поставьте шаг ${fmtNum(x)}: ${path}.${fit.at(w) >= fit.need ? '' : ` С ним сначала добавьте запас: ${add(w)}, потом повышайте до ${load(w)}.`}`);
+    } else {
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).`);
+      lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный: запаса под него не набрать. Шаг веса меняется в программе: ${path}.`);
+    }
     return hold(lines, bwNotes);
   }
   if (ok.length) why.push(`Сегодня по ${load(weight)}: ${ok.map((s) => setText(s, category)).join(', ')}.`);

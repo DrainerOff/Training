@@ -317,6 +317,53 @@ test('v1.7.1: without RIR (conditional) the planned RIR is assumed in the check;
   assert.deepEqual([rec(s, { week: 2, category: 'iso' }).kind, rec(s, { week: 2, category: 'iso' }).weight], ['up', 2.5]);
 });
 
+// Found by the independent check of v1.7.1 (438e511).
+const iso = (week, sets, step = 2.5) => rec(history([{ date: '2026-11-06', week, sets }], { category: 'iso' }), { week, category: 'iso', step });
+
+test('v1.7.1 check 1: light weights with a large step — no impossible reserve («RIR 19»), a finer step instead', () => {
+  // 5×10 at RIR 1 ×3, week 2, step 2,5: 7,5 kg is under one rep to failure; at 5,5 kg (step 0,5) 13 reps to failure are needed.
+  let r = iso(2, [[5, 10, 1], [5, 10, 1], [5, 10, 1]]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 5]);
+  let t = r.reasons.join(' ');
+  assert.match(t, /При 7,5 кг \(шаг 2,5 кг\) выйдет меньше одного повторения до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9\./);
+  assert.doesNotMatch(t, /RIR 19|около 0/);
+  assert.match(t, /Шаг 2,5 кг для этого веса крупный: запаса под него не набрать\. Если есть гантелька 0,5 кг, поставьте шаг 0,5: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\. С ним сначала добавьте запас: 3×10 с RIR 3 \(или 12 повторений с RIR 1\), потом повышайте до 5,5 кг\./);
+  // Dumbbells, week 3: 10×8 at RIR 0 → step 1 (3×8 with RIR 2), not «3×8 с RIR 7».
+  r = iso(3, [[10, 8, 0], [10, 8, 0], [10, 8, 0]]);
+  t = r.reasons.join(' ');
+  assert.deepEqual([r.kind, r.weight], ['hold', 10]);
+  assert.doesNotMatch(t, /RIR 7/);
+  assert.match(t, /поставьте шаг 1: .*С ним сначала добавьте запас: 3×8 с RIR 2 \(или 10 повторений\), потом повышайте до 11 кг\./);
+  // Too light even for 0,5 kg: only the step and where to change it.
+  r = iso(2, [[2, 10, 1], [2, 10, 1], [2, 10, 1]]);
+  t = r.reasons.join(' ');
+  assert.deepEqual([r.kind, r.weight], ['hold', 2]);
+  assert.match(t, /Шаг 2,5 кг для этого веса крупный: запаса под него не набрать\. Шаг веса меняется в программе: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\./);
+  assert.doesNotMatch(t, /добавьте запас/);
+  // A reserve within reach keeps the owner's wording: 30×10 at RIR 1 → «3×10 с RIR 3».
+  assert.match(iso(2, [[30, 10, 1], [30, 10, 1], [30, 10, 1]]).reasons.join(' '), /Сначала добавьте запас: 3×10 с RIR 3 \(или 12 повторений с RIR 1\), потом повышайте\./);
+});
+
+test('v1.7.1 check 2: «около 1 повторения», «около 2 повторений», «около 8,5 повторения»', () => {
+  assert.match(iso(2, [[8, 10, 1], [8, 10, 1], [8, 10, 1]]).reasons.join(' '), /выйдет около 1 повторения до отказа/);
+  assert.match(iso(2, [[7.5, 10, 2], [7.5, 10, 2], [7.5, 10, 2]]).reasons.join(' '), /выйдет около 2 повторений до отказа/);
+  assert.match(iso(2, [[40, 10, 1], [40, 10, 1], [40, 10, 1]]).reasons.join(' '), /выйдет около 8,5 повторения до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9/);
+});
+
+test('v1.7.1 check 3: pull-ups — no «шаг 1» where a body-weight gain would hold +1 kg anyway', () => {
+  // +10×6 at RIR 2 ×3, week 2: +12,5 is ≈7,0 to failure (7 needed), +11 ≈7,6. At 80 kg today the hint
+  // is right; at 81,5 (a gain under 2,5 kg — noise for this step, not for 1 kg) step 1 would hold for
+  // the body weight instead.
+  const s = history([{ date: '2026-11-06', week: 2, sets: [[10, 6, 2], [10, 6, 2], [10, 6, 2]], bw: 80 }], { key: 'pullup', category: 'pullup' });
+  const at = (bw) => rec(s, { key: 'pullup', week: 2, category: 'pullup', share: 1, bodyweightToday: { value: bw } });
+  let r = at(80.4);
+  assert.equal(r.kind, 'hold');
+  assert.match(r.reasons.join(' '), /поставьте шаг 1/);
+  r = at(81.5);
+  assert.equal(r.kind, 'hold');
+  assert.doesNotMatch(r.reasons.join(' '), /поставьте шаг 1/);
+});
+
 test("today's sets: one at the new weight below the range → back to hold; in range → still up", () => {
   const s = history([{ date: '2026-11-06', week: 2, sets: [[90, 10, 2], [90, 10, 2], [90, 10, 2], [90, 10, 2]] }]);
   let r = rec(s, { week: 2, todaySets: [{ weight: 92.5, reps: 7, rir: 0 }] });
