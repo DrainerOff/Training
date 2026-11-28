@@ -85,7 +85,7 @@ test('a split series: the history under another key is not seen; once joined it 
   assert.equal(rec(split, { key: 'row-smith', week: 2, category: 'iso' }).ref.date, '2026-10-18');
   const joined = history([
     { date: '2026-10-18', week: 2, key: 'row-smith', sets: [[40, 10, 2], [40, 10, 2], [40, 10, 1]] },
-    { date: '2026-10-22', week: 2, key: 'row-smith', sets: [[40, 10, 2], [42.5, 10, 2], [42.5, 10, 1]] },
+    { date: '2026-10-22', week: 2, key: 'row-smith', sets: [[40, 10, 2], [42.5, 10, 2], [42.5, 10, 2]] },
   ], { category: 'iso' });
   const r = rec(joined, { key: 'row-smith', week: 2, category: 'iso' });
   assert.deepEqual([r.ref.date, r.kind, r.weight], ['2026-10-22', 'up', 45]);
@@ -168,7 +168,7 @@ test('week 1 uses the target of the category: base 10–12, isolation 12–15', 
   assert.deepEqual([r.kind, r.weight], ['hold', 30]);
   assert.match(r.reasons.join(' '), /До верха диапазона 12–15 не дошли/);
   assert.match(r.reasons.join(' '), /Цель — 15 повторений при RIR 2–3 во всех подходах по 30 кг/);
-  s = history([{ date: '2026-11-06', week: 1, sets: [[30, 15, 2], [30, 15, 3], [30, 14, 3]] }], { category: 'iso' });
+  s = history([{ date: '2026-11-06', week: 1, sets: [[30, 15, 3], [30, 15, 3], [30, 15, 3]] }], { category: 'iso' });
   r = rec(s, { week: 1, category: 'iso' });
   assert.deepEqual([r.kind, r.weight], ['up', 32.5]);
   // No target → no range, nothing invented.
@@ -190,10 +190,15 @@ test('no history, no range → not enough data, no weight', () => {
 });
 
 test('pull-ups: added weight, body weight on each date; a gain worth a step is already an increase', () => {
-  const sets = [[20, 6, 1], [20, 6, 1], [20, 6, 2]];
-  let s = history([{ date: '2026-11-06', week: 2, sets, bw: 80 }], { key: 'pullup', category: 'pullup' });
+  // +20×6 at RIR 1/1/2 on week 2 (6, RIR 1–2): +22,5 is ≈6,1 to failure on the whole load, 7 needed.
+  let s = history([{ date: '2026-11-06', week: 2, sets: [[20, 6, 1], [20, 6, 1], [20, 6, 2]], bw: 80 }], { key: 'pullup', category: 'pullup' });
   const base = { key: 'pullup', week: 2, category: 'pullup', share: 1 };
   let r = rec(s, { ...base, bodyweightToday: { value: 80.2 } });
+  assert.deepEqual([r.kind, r.weight], ['hold', 20]);
+  // With a rep to spare (RIR 2/2/2): ≈7,1 at +22,5 → up.
+  const sets = [[20, 6, 2], [20, 6, 2], [20, 6, 2]];
+  s = history([{ date: '2026-11-06', week: 2, sets, bw: 80 }], { key: 'pullup', category: 'pullup' });
+  r = rec(s, { ...base, bodyweightToday: { value: 80.2 } });
   assert.deepEqual([r.kind, r.weight], ['up', 22.5]);
   r = rec(s, { ...base, bodyweightToday: { value: 83 } });
   assert.deepEqual([r.kind, r.weight], ['hold', 20]);
@@ -204,10 +209,159 @@ test('pull-ups: added weight, body weight on each date; a gain worth a step is a
   r = rec(s, { ...base, bodyweightToday: null });
   assert.equal(r.kind, 'up');
   assert.match(r.reasons.join(' '), /Масса тела на одну из дат неизвестна/);
+  assert.match(r.reasons.join(' '), /Масса тела неизвестна: хватит ли повторений на новом весе, не проверено/);
   // Bodyweight only (0 added) → the first added step.
-  s = history([{ date: '2026-11-06', week: 2, sets: [[0, 6, 2], [0, 6, 2], [0, 6, 2]], bw: 80 }], { key: 'pullup', category: 'pullup' });
+  s = history([{ date: '2026-11-06', week: 2, sets: [[0, 6, 3], [0, 6, 3], [0, 6, 3]], bw: 80 }], { key: 'pullup', category: 'pullup' });
   r = rec(s, { ...base, bodyweightToday: { value: 80 } });
   assert.deepEqual([r.kind, r.weight], ['up', 2.5]);
+});
+
+// ---------------------------------------------------------------- v1.7.1: the new weight in range
+
+// Up only where the new weight still reaches the bottom of the range with the planned RIR (Epley from
+// the weakest set at the top weight, the whole load for pull-ups).
+const pull = (sets, week, bw = 80) => rec(history([{ date: '2026-11-06', week, sets, bw }], { key: 'pullup', category: 'pullup' }),
+  { key: 'pullup', week, category: 'pullup', share: 1, bodyweightToday: { value: bw } });
+
+test('A. pull-ups week 3 (6, RIR 0–1), +25×6 at RIR 1/0/0 → hold +25, not +27,5', () => {
+  const r = pull([[25, 6, 1], [25, 6, 0], [25, 6, 0]], 3);
+  assert.deepEqual([r.kind, r.label, r.weight], ['hold', 'Лучше закрепить', 25]);
+  const t = r.reasons.join(' ');
+  assert.match(t, /При \+27,5 кг \(шаг 2,5 кг\) выйдет около 5 повторений до отказа, а для цели 6 при RIR 0–1 нужно не меньше 6\./);
+  assert.match(t, /Сначала добавьте запас: 3×6 с RIR 1 \(или 7 повторений\), потом повышайте\./);
+  assert.doesNotMatch(t, /Точнее — около/, 'no weight between +25 and +27,5 reaches 6 to failure');
+});
+
+test('B. pull-ups week 3, +20×7 at RIR 1/0/0 → up +22,5 (≈6,1 to failure, 6 needed)', () => {
+  const r = pull([[20, 7, 1], [20, 7, 0], [20, 7, 0]], 3);
+  assert.deepEqual([r.kind, r.weight, r.steps], ['up', 22.5, 1]);
+});
+
+test('C. pull-ups week 2 (6, RIR 1–2), +20×6 at RIR 1/1/2 → hold +20 (≈6,1 to failure, 7 needed)', () => {
+  const r = pull([[20, 6, 1], [20, 6, 1], [20, 6, 2]], 2);
+  assert.deepEqual([r.kind, r.weight], ['hold', 20]);
+  assert.match(r.reasons.join(' '), /При \+22,5 кг \(шаг 2,5 кг\) выйдет около 6 повторений до отказа, а для цели 6 при RIR 1–2 нужно не меньше 7\. Сначала добавьте запас: 3×6 с RIR 2 \(или 7 повторений с RIR 1\)/);
+});
+
+test('D. base week 2 (8–10, RIR 1–2), 90×10 at RIR 2 ×4 → up 92,5 as before (≈10,9 to failure, 9 needed)', () => {
+  const r = rec(history([{ date: '2026-11-06', week: 2, sets: [[90, 10, 2], [90, 10, 2], [90, 10, 2], [90, 10, 2]] }]), { week: 2 });
+  assert.deepEqual([r.kind, r.weight], ['up', 92.5]);
+  assert.doesNotMatch(r.reasons.join(' '), /добавьте запас/);
+});
+
+test('E. isolation week 3 (6–8, RIR 0–1), step 2, 16×8 at RIR 1 ×3 → hold 16 and the weight between', () => {
+  const s = history([{ date: '2026-11-06', week: 3, sets: [[16, 8, 1], [16, 8, 1], [16, 8, 1]] }], { category: 'iso' });
+  const r = rec(s, { week: 3, category: 'iso', step: 2 });
+  assert.deepEqual([r.kind, r.weight], ['hold', 16]);
+  const t = r.reasons.join(' ');
+  assert.match(t, /При 18 кг \(шаг 2 кг\) выйдет около 5 повторений до отказа, а для цели 6–8 при RIR 0–1 нужно не меньше 6\./);
+  assert.match(t, /Сначала добавьте запас: 3×8 с RIR 3 \(или 11 повторений\), потом повышайте\./);
+  // 17 kg: ≈6,7 to failure — at least 6; 17,5 kg ≈5,7.
+  assert.match(t, /Точнее — около 17 кг, если есть чем добрать вес \(маленький блин, гантель\)\./);
+  assert.match(t, /Шаг 2 кг для этого веса крупный\. Если есть гантелька 1 кг, поставьте шаг 1: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\./);
+  assert.doesNotMatch(t, /Шаг веса упражнения меняется в программе/, 'the step hint says where');
+});
+
+test('v1.7.1 threshold: week 2, 30×10 at RIR 1 ×3 — step 2,5 → hold 30 with the step hint; step 1 → up 31', () => {
+  const s = history([{ date: '2026-11-06', week: 2, sets: [[30, 10, 1], [30, 10, 1], [30, 10, 1]] }], { category: 'iso' });
+  let r = rec(s, { week: 2, category: 'iso', step: 2.5 });
+  assert.deepEqual([r.kind, r.weight], ['hold', 30]);
+  const t = r.reasons.join(' ');
+  // 32,5 kg: ≈7,8 to failure, 9 needed (8 at RIR 1); 31 kg ≈9,7.
+  assert.match(t, /При 32,5 кг \(шаг 2,5 кг\) выйдет около 8 повторений до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9\./);
+  assert.match(t, /Точнее — около 31,5 кг/);
+  assert.match(t, /Шаг 2,5 кг для этого веса крупный\. Если есть гантелька 1 кг, поставьте шаг 1: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\./);
+  r = rec(s, { week: 2, category: 'iso', step: 1 });
+  assert.deepEqual([r.kind, r.weight], ['up', 31]);
+  assert.doesNotMatch(r.reasons.join(' '), /крупный/);
+});
+
+test('v1.7.1: no step hint where +1 kg would not reach the range either (pull-ups 6, a set at the bottom)', () => {
+  const t = pull([[25, 6, 1], [25, 6, 0], [25, 6, 0]], 3).reasons.join(' ');
+  assert.doesNotMatch(t, /поставьте шаг 1/);
+});
+
+test('v1.7.1: a set at the new weight today that reached the range keeps «повысить»; one below it holds as before', () => {
+  const sets = [[25, 6, 1], [25, 6, 0], [25, 6, 0]];
+  const s = history([{ date: '2026-11-06', week: 3, sets, bw: 80 }], { key: 'pullup', category: 'pullup' });
+  const at = (todaySets) => rec(s, { key: 'pullup', week: 3, category: 'pullup', share: 1, bodyweightToday: { value: 80 }, todaySets });
+  let r = at([{ weight: 27.5, reps: 6, rir: 0 }]);
+  assert.deepEqual([r.kind, r.weight], ['up', 27.5]);
+  assert.match(r.reasons.join(' '), /Сегодня по \+27,5 кг: 27,5×6 \(RIR 0\)/);
+  r = at([{ weight: 27.5, reps: 5, rir: 0 }]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 25]);
+  assert.match(r.reasons.join(' '), /ниже диапазона 6: лучше вернуться к \+25 кг/);
+  r = at([{ weight: 25, reps: 6, rir: 0 }]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 25], 'a set at the old weight proves nothing about the new one');
+});
+
+test('v1.7.1: a body-weight difference below a step is noise; a drop of a step or more lightens the new load', () => {
+  // +25×6 at RIR 1/0/0, week 3: at 80 kg both dates — hold (≈5,2 at +27,5).
+  const sets = [[25, 6, 1], [25, 6, 0], [25, 6, 0]];
+  const s = history([{ date: '2026-11-06', week: 3, sets, bw: 80 }], { key: 'pullup', category: 'pullup' });
+  const at = (bw) => rec(s, { key: 'pullup', week: 3, category: 'pullup', share: 1, bodyweightToday: { value: bw } });
+  assert.equal(at(78).kind, 'hold', '2 kg lighter: under a step, not recounted');
+  // 3 kg lighter: +27,5 at 77 kg is 104,5 of load — less than 105 then: up.
+  assert.deepEqual([at(77).kind, at(77).weight], ['up', 27.5]);
+});
+
+test('v1.7.1: without RIR (conditional) the planned RIR is assumed in the check; no load at all is not checked', () => {
+  // Week 3, no RIR: 100×8 → 102,5 is ≈7,1 to failure at RIR 0 assumed, 6 needed.
+  let s = history([{ date: '2026-11-06', week: 3, sets: [[100, 8], [100, 8], [100, 8], [100, 8]] }]);
+  assert.deepEqual([rec(s, { week: 3 }).kind, rec(s, { week: 3 }).conditional], ['up', true]);
+  // Light isolation without RIR: 10×8 at week 3 → 12,5 is ≈1,6 to failure.
+  s = history([{ date: '2026-11-06', week: 3, sets: [[10, 8], [10, 8], [10, 8]] }], { category: 'iso' });
+  assert.deepEqual([rec(s, { week: 3, category: 'iso' }).kind, rec(s, { week: 3, category: 'iso' }).weight], ['hold', 10]);
+  // 0 kg and no body in the load (a band, a machine at its lightest): Epley says nothing — up as before.
+  s = history([{ date: '2026-11-06', week: 2, sets: [[0, 10, 2], [0, 10, 2], [0, 10, 2]] }], { category: 'iso' });
+  assert.deepEqual([rec(s, { week: 2, category: 'iso' }).kind, rec(s, { week: 2, category: 'iso' }).weight], ['up', 2.5]);
+});
+
+// Found by the independent check of v1.7.1 (438e511).
+const iso = (week, sets, step = 2.5) => rec(history([{ date: '2026-11-06', week, sets }], { category: 'iso' }), { week, category: 'iso', step });
+
+test('v1.7.1 check 1: light weights with a large step — no impossible reserve («RIR 19»), a finer step instead', () => {
+  // 5×10 at RIR 1 ×3, week 2, step 2,5: 7,5 kg is under one rep to failure; at 5,5 kg (step 0,5) 13 reps to failure are needed.
+  let r = iso(2, [[5, 10, 1], [5, 10, 1], [5, 10, 1]]);
+  assert.deepEqual([r.kind, r.weight], ['hold', 5]);
+  let t = r.reasons.join(' ');
+  assert.match(t, /При 7,5 кг \(шаг 2,5 кг\) выйдет меньше одного повторения до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9\./);
+  assert.doesNotMatch(t, /RIR 19|около 0/);
+  assert.match(t, /Шаг 2,5 кг для этого веса крупный: запаса под него не набрать\. Если есть гантелька 0,5 кг, поставьте шаг 0,5: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\. С ним сначала добавьте запас: 3×10 с RIR 3 \(или 12 повторений с RIR 1\), потом повышайте до 5,5 кг\./);
+  // Dumbbells, week 3: 10×8 at RIR 0 → step 1 (3×8 with RIR 2), not «3×8 с RIR 7».
+  r = iso(3, [[10, 8, 0], [10, 8, 0], [10, 8, 0]]);
+  t = r.reasons.join(' ');
+  assert.deepEqual([r.kind, r.weight], ['hold', 10]);
+  assert.doesNotMatch(t, /RIR 7/);
+  assert.match(t, /поставьте шаг 1: .*С ним сначала добавьте запас: 3×8 с RIR 2 \(или 10 повторений\), потом повышайте до 11 кг\./);
+  // Too light even for 0,5 kg: only the step and where to change it.
+  r = iso(2, [[2, 10, 1], [2, 10, 1], [2, 10, 1]]);
+  t = r.reasons.join(' ');
+  assert.deepEqual([r.kind, r.weight], ['hold', 2]);
+  assert.match(t, /Шаг 2,5 кг для этого веса крупный: запаса под него не набрать\. Шаг веса меняется в программе: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\./);
+  assert.doesNotMatch(t, /добавьте запас/);
+  // A reserve within reach keeps the owner's wording: 30×10 at RIR 1 → «3×10 с RIR 3».
+  assert.match(iso(2, [[30, 10, 1], [30, 10, 1], [30, 10, 1]]).reasons.join(' '), /Сначала добавьте запас: 3×10 с RIR 3 \(или 12 повторений с RIR 1\), потом повышайте\./);
+});
+
+test('v1.7.1 check 2: «около 1 повторения», «около 2 повторений», «около 8,5 повторения»', () => {
+  assert.match(iso(2, [[8, 10, 1], [8, 10, 1], [8, 10, 1]]).reasons.join(' '), /выйдет около 1 повторения до отказа/);
+  assert.match(iso(2, [[7.5, 10, 2], [7.5, 10, 2], [7.5, 10, 2]]).reasons.join(' '), /выйдет около 2 повторений до отказа/);
+  assert.match(iso(2, [[40, 10, 1], [40, 10, 1], [40, 10, 1]]).reasons.join(' '), /выйдет около 8,5 повторения до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9/);
+});
+
+test('v1.7.1 check 3: pull-ups — no «шаг 1» where a body-weight gain would hold +1 kg anyway', () => {
+  // +10×6 at RIR 2 ×3, week 2: +12,5 is ≈7,0 to failure (7 needed), +11 ≈7,6. At 80 kg today the hint
+  // is right; at 81,5 (a gain under 2,5 kg — noise for this step, not for 1 kg) step 1 would hold for
+  // the body weight instead.
+  const s = history([{ date: '2026-11-06', week: 2, sets: [[10, 6, 2], [10, 6, 2], [10, 6, 2]], bw: 80 }], { key: 'pullup', category: 'pullup' });
+  const at = (bw) => rec(s, { key: 'pullup', week: 2, category: 'pullup', share: 1, bodyweightToday: { value: bw } });
+  let r = at(80.4);
+  assert.equal(r.kind, 'hold');
+  assert.match(r.reasons.join(' '), /поставьте шаг 1/);
+  r = at(81.5);
+  assert.equal(r.kind, 'hold');
+  assert.doesNotMatch(r.reasons.join(' '), /поставьте шаг 1/);
 });
 
 test("today's sets: one at the new weight below the range → back to hold; in range → still up", () => {
@@ -716,18 +870,18 @@ function twice(specs, { key = 'press', category = 'base' } = {}) {
 test('review 1: an exercise in two days at different places — never held for the place of the other day', () => {
   // «Разгибание рук из-за головы на блоке»: day 1 — 6th, day 3 — 3rd. The same-week reference of day 1
   // is always day 3 of the cycle before; the place is compared with day 1 only.
-  const top = [[20, 10, 1], [20, 10, 1], [20, 10, 1]];
+  const top = [[60, 10, 1], [60, 10, 1], [60, 10, 1]];
   const s = history([
     { date: '2026-10-26', week: 2, day: 1, order: 5, sets: top },
     { date: '2026-10-30', week: 2, day: 3, order: 2, sets: top },
   ], { category: 'iso' });
   const at = (day, order, week = 2) => recommend({ list: s.get('press'), session: today(week, '2026-11-16', { day }), target: targetFor({ category: 'iso' }, week), category: 'iso', step: 2.5, order });
   let r = at(1, 5);
-  assert.deepEqual([r.kind, r.weight, r.moved, r.ref.date], ['up', 22.5, undefined, '2026-10-30']);
+  assert.deepEqual([r.kind, r.weight, r.moved, r.ref.date], ['up', 62.5, undefined, '2026-10-30']);
   assert.doesNotMatch(r.reasons.join(' '), /по порядку/);
   // Moved later within day 1 itself (a program change): held, and the day-1 workout is named.
   r = at(1, 8);
-  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 20, { then: 6, now: 9 }]);
+  assert.deepEqual([r.kind, r.weight, r.moved], ['hold', 60, { then: 6, now: 9 }]);
   assert.match(r.reasons.join(' '), /26 октября \(день 1\) упражнение было 6-м по порядку, сегодня оно 9-е: перед ним больше работы, поэтому вес пока не повышаем/);
   // A day with no earlier workout of its own: nothing to compare the place with.
   r = at(2, 7);

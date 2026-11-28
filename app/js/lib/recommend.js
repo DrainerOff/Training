@@ -289,7 +289,13 @@ function sameWeek({
   const conditional = rLo != null && evals.some((x) => !x.known);
   const surplus = Math.min(...evals.map((x) => x.est - hi));
   const base = top + (share > 0 && bodyweightToday?.value > 0 ? share * bodyweightToday.value : 0);
-  const steps = !conditional && rLo != null && surplus >= 3 && (base <= 0 || 2 * step <= 0.06 * base) ? 2 : 1;
+  let steps = !conditional && rLo != null && surplus >= 3 && (base <= 0 || 2 * step <= 0.06 * base) ? 2 : 1;
+  // The new weight must still reach the bottom of the range with the planned RIR: Epley from the
+  // weakest set at the top weight (reps + RIR; the planned RIR where it was not recorded), on the
+  // whole load where the body is part of it. A rep range of one number (pull-ups 6–6) or a large step
+  // for the weight (dumbbells 16 → 18) goes below it.
+  const fit = reach({ evals, top, step, share, ref, bodyweightToday, need: lo + (rLo ?? 0), rLo });
+  while (steps > 1 && fit && fit.at(top + steps * step) < fit.need) steps--;
   const weight = round(top + steps * step);
   const why = conditional
     ? [`Во всех подходах по ${load(top)} — ${hi} и больше повторений.`,
@@ -313,8 +319,88 @@ function sameWeek({
     return hold([...why.slice(0, 1), `Сегодня ${setText(low, category)} — ниже диапазона ${range(reps)}: лучше вернуться к ${load(top)}.`], bwNotes);
   }
   const ok = todaySets.filter(valid).filter((s) => (s.weight || 0) >= weight);
+  // Too few reps expected at the new weight → hold, unless a set at it today already reached the
+  // bottom of the range with the planned RIR: what was done beats the formula.
+  const done = ok.some((s) => s.reps + (s.rir ?? 0) >= lo + (rLo ?? 0));
+  if (fit && !done && fit.at(weight) < fit.need) {
+    // «около 1 повторения», «около 5 повторений», «около 5,8 повторения».
+    const about = (x) => {
+      if (x < 1) return 'меньше одного повторения';
+      const frac = Math.round(x) >= fit.need;
+      const v = frac ? Math.floor(x * 10) / 10 : Math.round(x);
+      return `около ${fmtNum(v, frac ? 1 : 0)} ${Number.isInteger(v) ? plural(v, 'повторения', 'повторений', 'повторений') : 'повторения'}`;
+    };
+    const sets = target?.sets || atTop.length;
+    const rHi = rir ? rir[1] : 0;
+    const add = (w) => {
+      const more = fit.more(w);
+      return rLo != null
+        ? `${sets}×${hi} с RIR ${fmtNum(more - hi)} (или ${fmtNum(more - rLo)} ${plural(more - rLo, 'повторение', 'повторения', 'повторений')}${rLo > 0 ? ` с RIR ${fmtNum(rLo)}` : ''})`
+        : `${sets}×${more}`;
+    };
+    // A reserve within reach: at most three reps to failure above the top of the window (30×10 at
+    // RIR 3 for 8–10, RIR 1–2). More than that (5 kg dumbbells: «RIR 19») is the step, not the effort:
+    // then a finer step of the program (1 or 0,5 kg) where it is within reach, else only the step.
+    const reachable = (w) => fit.more(w) <= hi + rHi + 3;
+    const fits = (s) => !(share > 0 && bwGain >= s);
+    const path = 'Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»';
+    const lines = [...why.slice(0, 1),
+      `При ${load(weight)} (шаг ${fmtNum(step)} кг) выйдет ${about(fit.at(weight))} до отказа, а для цели ${range(reps)}${rir ? ` при RIR ${range(rir)}` : ''} нужно не меньше ${fit.need}.`];
+    const mid = fit.between(weight);
+    const finer = [1, 0.5].filter((x) => x < step && fits(x) && reachable(round(top + x)));
+    if (reachable(weight)) {
+      lines[lines.length - 1] += ` Сначала добавьте запас: ${add(weight)}, потом повышайте.`;
+      // A step of 1 kg where +1 kg would already reach the range.
+      const now1 = step > 1 && fits(1) && fit.at(top + 1) >= fit.need;
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).${now1 ? '' : ' Шаг веса упражнения меняется в программе.'}`);
+      if (now1) lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный. Если есть гантелька 1 кг, поставьте шаг 1: ${path}.`);
+    } else if (finer.length) {
+      const x = finer[0];
+      const w = round(top + x);
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).`);
+      lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный: запаса под него не набрать. Если есть гантелька ${fmtNum(x)} кг, поставьте шаг ${fmtNum(x)}: ${path}.${fit.at(w) >= fit.need ? '' : ` С ним сначала добавьте запас: ${add(w)}, потом повышайте до ${load(w)}.`}`);
+    } else {
+      if (mid != null) lines.push(`Точнее — около ${load(mid)}, если есть чем добрать вес (маленький блин, гантель).`);
+      lines.push(`Шаг ${fmtNum(step)} кг для этого веса крупный: запаса под него не набрать. Шаг веса меняется в программе: ${path}.`);
+    }
+    return hold(lines, bwNotes);
+  }
   if (ok.length) why.push(`Сегодня по ${load(weight)}: ${ok.map((s) => setText(s, category)).join(', ')}.`);
+  if (!fit && share > 0) why.push('Масса тела неизвестна: хватит ли повторений на новом весе, не проверено.');
   return out('up', weight, [...reasons, ...why, ...bwNotes], { conditional, ref: refInfo, steps });
+}
+
+// Reps to failure expected at a heavier weight, by Epley from the weakest set at the top weight
+// (reps + RIR; the planned RIR where it was not recorded). Where the body is part of the load, the
+// whole load: a body-weight difference below one step is weigh-in noise (as in «Ориентир»); with no
+// body weight on either date, or no load at all, nothing is checked (null).
+// → { need, at(w), more(w): reps to failure needed at the top weight for w, between(w): the
+//     heaviest 0,5-kg weight between the top and w that still reaches `need`, or null } or null
+function reach({ evals, top, step, share, ref, bodyweightToday, need, rLo }) {
+  let bodyRef = 0;
+  let bodyNow = 0;
+  if (share > 0) {
+    let a = ref.bw?.value > 0 ? ref.bw.value : null;
+    let b = bodyweightToday?.value > 0 ? bodyweightToday.value : null;
+    if (a == null && b == null) return null;
+    if (a == null || b == null) a = b = a ?? b;
+    else if (Math.abs(b - a) < step) a = b;
+    bodyRef = share * a;
+    bodyNow = share * b;
+  }
+  const loadRef = top + bodyRef;
+  if (!(loadRef > 0)) return null;
+  const rtf = Math.min(...evals.map((x) => x.s.reps + (x.known ? x.s.rir : x.s.rir ?? rLo ?? 0)));
+  const cap = EPLEY.cap(loadRef, rtf);
+  return {
+    need,
+    at: (w) => fine(30 * (cap / (w + bodyNow) - 1)),
+    more: (w) => Math.ceil(fine(30 * (((1 + need / 30) * (w + bodyNow)) / loadRef - 1))),
+    between: (w) => {
+      const x = Math.floor(fine(2 * (cap / (1 + need / 30) - bodyNow))) / 2;
+      return x > top && x < w ? x : null;
+    },
+  };
 }
 
 // ---------------------------------------------------------------- «Ориентир» from another week

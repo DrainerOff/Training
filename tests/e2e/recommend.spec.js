@@ -6,7 +6,7 @@ import { test, expect, devices } from '@playwright/test';
 import { startStatic } from '../helpers/servers.js';
 import { programBefore1022, workout1018Fixed, workout1022 } from '../helpers/workout-2026-10-22.js';
 import { convertSnapshot } from '../helpers/legacy-import.js';
-import { ready, dock, logButton, seedOwner, pickRir } from './helpers.js';
+import { ready, dock, logButton, seedOwner, pickRir, OWNER } from './helpers.js';
 
 let web;
 let base;
@@ -34,41 +34,52 @@ async function startDay(page, week, day) {
   await dock(page).waitFor();
 }
 
+// v1.7.1: the pull-ups of 16.10 with a rep to spare (20×7, not 20×6): at 20×6 with the planned RIR 1
+// assumed, +22,5 kg is ≈6,1 reps to failure where 7 are needed — «закрепить». These tests are about
+// the conditional line and the dock, not the size of the step.
+async function seedPull7(page) {
+  const sets = OWNER.sets.map((s) => (s.sessionId === 'gs-s5' && s.slotId === 'D1-01' ? { ...s, reps: 7 } : s));
+  await page.evaluate(async (data) => {
+    await window.__trainer.store.applyRemote(data, { queue: true });
+  }, { program: OWNER.program, sessions: OWNER.sessions, sets, metrics: OWNER.metrics });
+  await page.waitForFunction(() => !window.__trainer.store.state.program.draft);
+}
+
 test('pull-ups without RIR: a conditional +2,5 kg; the pre-fill stays until «Использовать»', async ({ page }) => {
   await open(page);
-  await seedOwner(page);
+  await seedPull7(page);
   await startDay(page, 2, 1);
   await expect(dock(page)).toContainText('Подтягивания прямым хватом');
   // «Прошлый раз» and the pre-filled weight as before v1.3.
-  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 20×6, 20×6, 20×6');
+  await expect(prev(page)).toHaveAttribute('aria-label', 'Прошлый раз, 16 октября: 20×7, 20×7, 20×7');
   await expect(dock(page)).toContainText('как в прошлый раз');
-  await expect(logButton(page)).toContainText('20 × 6');
+  await expect(logButton(page)).toContainText('20 × 7');
   await expect(rec(page)).toHaveAttribute('aria-label', 'Рекомендуем сегодня: +22,5 кг, можно повысить, условно');
   await expect(rec(page)).toContainText('условно');
 
   await rec(page).getByRole('button', { name: /Почему/ }).click();
   const sheet = page.getByRole('dialog', { name: 'Рекомендация на сегодня' });
   await expect(sheet).toContainText('Можно повысить: +22,5 кг (условно)');
-  await expect(sheet).toContainText('Прошлый раз на неделе 2, 16 октября: 20×6, 20×6, 20×6.');
+  await expect(sheet).toContainText('Прошлый раз на неделе 2, 16 октября: 20×7, 20×7, 20×7.');
   await expect(sheet).toContainText('RIR в тот раз записан не везде');
   await expect(sheet).toContainText('Вес в поле меняется, только если нажать «Использовать»');
   await sheet.getByRole('button', { name: 'Понятно' }).click();
   await expect(sheet).toHaveCount(0);
-  await expect(logButton(page)).toContainText('20 × 6'); // still untouched
+  await expect(logButton(page)).toContainText('20 × 7'); // still untouched
 
   await rec(page).getByRole('button', { name: 'Использовать' }).click();
-  await expect(logButton(page)).toContainText('22,5 × 6');
+  await expect(logButton(page)).toContainText('22,5 × 7');
   await expect(rec(page).getByRole('button', { name: 'Использовать' })).toHaveCount(0);
 
   // Today's set at the new weight below the range: back to «закрепить» the old weight.
   await page.getByRole('button', { name: 'Уменьшить: Повторения' }).click();
   await page.getByRole('button', { name: 'Уменьшить: Повторения' }).click();
-  await expect(logButton(page)).toContainText('22,5 × 4');
+  await expect(logButton(page)).toContainText('22,5 × 5');
   await pickRir(page);
   await logButton(page).click();
   await expect(rec(page)).toHaveAttribute('aria-label', 'Рекомендуем сегодня: +20 кг, лучше закрепить');
   // The pre-fill follows today's set as before; the recommendation only offers.
-  await expect(logButton(page)).toContainText('22,5 × 4');
+  await expect(logButton(page)).toContainText('22,5 × 5');
   await expect(rec(page).getByRole('button', { name: 'Использовать' })).toBeVisible();
 });
 
@@ -180,7 +191,7 @@ test('smallest iPhone: the line fits in the dock, the log button stays in view',
   const context = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: 320, height: 568 }, locale: 'ru-RU', timezoneId: 'Europe/Moscow' });
   const page = await context.newPage();
   await open(page);
-  await seedOwner(page);
+  await seedPull7(page);
   await startDay(page, 2, 1);
   await expect(rec(page)).toBeVisible();
   const [line, grid, log, d] = await Promise.all(['.dock__rec', '.dock__grid', '.dock__log .btn', '.dock'].map((s) => page.locator(s).boundingBox()));
