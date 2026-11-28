@@ -331,7 +331,7 @@ function sameWeek({
       ? `${sets}×${hi} с RIR ${fmtNum(more - hi)} (или ${fmtNum(more - rLo)} ${plural(more - rLo, 'повторение', 'повторения', 'повторений')}${rLo > 0 ? ` с RIR ${fmtNum(rLo)}` : ''})`
       : `${sets}×${more}`;
     const lines = [...why.slice(0, 1),
-      `При ${load(weight)} (шаг ${fmtNum(step)} кг) выйдет около ${n} повторений до отказа, а цель — ${range(reps)}${rir ? ` при RIR ${range(rir)}` : ''}. Сначала добавьте запас: ${add}, потом повышайте.`];
+      `При ${load(weight)} (шаг ${fmtNum(step)} кг) выйдет около ${n} повторений до отказа, а для цели ${range(reps)}${rir ? ` при RIR ${range(rir)}` : ''} нужно не меньше ${fit.need}. Сначала добавьте запас: ${add}, потом повышайте.`];
     // The weight between the two, and a step of 1 kg where +1 kg would already reach the range.
     const mid = fit.between(weight);
     const finer = step > 1 && fit.at(top + 1) >= fit.need;

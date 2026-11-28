@@ -227,7 +227,7 @@ test('A. pull-ups week 3 (6, RIR 0–1), +25×6 at RIR 1/0/0 → hold +25, not +
   const r = pull([[25, 6, 1], [25, 6, 0], [25, 6, 0]], 3);
   assert.deepEqual([r.kind, r.label, r.weight], ['hold', 'Лучше закрепить', 25]);
   const t = r.reasons.join(' ');
-  assert.match(t, /При \+27,5 кг \(шаг 2,5 кг\) выйдет около 5 повторений до отказа, а цель — 6 при RIR 0–1\./);
+  assert.match(t, /При \+27,5 кг \(шаг 2,5 кг\) выйдет около 5 повторений до отказа, а для цели 6 при RIR 0–1 нужно не меньше 6\./);
   assert.match(t, /Сначала добавьте запас: 3×6 с RIR 1 \(или 7 повторений\), потом повышайте\./);
   assert.doesNotMatch(t, /Точнее — около/, 'no weight between +25 and +27,5 reaches 6 to failure');
 });
@@ -240,7 +240,7 @@ test('B. pull-ups week 3, +20×7 at RIR 1/0/0 → up +22,5 (≈6,1 to failure, 6
 test('C. pull-ups week 2 (6, RIR 1–2), +20×6 at RIR 1/1/2 → hold +20 (≈6,1 to failure, 7 needed)', () => {
   const r = pull([[20, 6, 1], [20, 6, 1], [20, 6, 2]], 2);
   assert.deepEqual([r.kind, r.weight], ['hold', 20]);
-  assert.match(r.reasons.join(' '), /При \+22,5 кг \(шаг 2,5 кг\) выйдет около 6 повторений до отказа, а цель — 6 при RIR 1–2\. Сначала добавьте запас: 3×6 с RIR 2 \(или 7 повторений с RIR 1\)/);
+  assert.match(r.reasons.join(' '), /При \+22,5 кг \(шаг 2,5 кг\) выйдет около 6 повторений до отказа, а для цели 6 при RIR 1–2 нужно не меньше 7\. Сначала добавьте запас: 3×6 с RIR 2 \(или 7 повторений с RIR 1\)/);
 });
 
 test('D. base week 2 (8–10, RIR 1–2), 90×10 at RIR 2 ×4 → up 92,5 as before (≈10,9 to failure, 9 needed)', () => {
@@ -254,7 +254,7 @@ test('E. isolation week 3 (6–8, RIR 0–1), step 2, 16×8 at RIR 1 ×3 → hol
   const r = rec(s, { week: 3, category: 'iso', step: 2 });
   assert.deepEqual([r.kind, r.weight], ['hold', 16]);
   const t = r.reasons.join(' ');
-  assert.match(t, /При 18 кг \(шаг 2 кг\) выйдет около 5 повторений до отказа, а цель — 6–8 при RIR 0–1\./);
+  assert.match(t, /При 18 кг \(шаг 2 кг\) выйдет около 5 повторений до отказа, а для цели 6–8 при RIR 0–1 нужно не меньше 6\./);
   assert.match(t, /Сначала добавьте запас: 3×8 с RIR 3 \(или 11 повторений\), потом повышайте\./);
   // 17 kg: ≈6,7 to failure — at least 6; 17,5 kg ≈5,7.
   assert.match(t, /Точнее — около 17 кг, если есть чем добрать вес \(маленький блин, гантель\)\./);
@@ -268,7 +268,7 @@ test('v1.7.1 threshold: week 2, 30×10 at RIR 1 ×3 — step 2,5 → hold 30 wit
   assert.deepEqual([r.kind, r.weight], ['hold', 30]);
   const t = r.reasons.join(' ');
   // 32,5 kg: ≈7,8 to failure, 9 needed (8 at RIR 1); 31 kg ≈9,7.
-  assert.match(t, /При 32,5 кг \(шаг 2,5 кг\) выйдет около 8 повторений до отказа, а цель — 8–10 при RIR 1–2\./);
+  assert.match(t, /При 32,5 кг \(шаг 2,5 кг\) выйдет около 8 повторений до отказа, а для цели 8–10 при RIR 1–2 нужно не меньше 9\./);
   assert.match(t, /Точнее — около 31,5 кг/);
   assert.match(t, /Шаг 2,5 кг для этого веса крупный\. Если есть гантелька 1 кг, поставьте шаг 1: Настройки → «Редактировать программу» → день → упражнение → «Шаг веса, кг»\./);
   r = rec(s, { week: 2, category: 'iso', step: 1 });
